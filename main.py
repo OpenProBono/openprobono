@@ -25,3 +25,11 @@ def read_root():
 def bot(request: BotRequest):
     request_dict = request.dict()
     return request_dict
+
+
+request = """
+curl --header "Content-Type: application/json" \
+  --request POST \
+  --data '{"history":[],"api_key":"xyz"}' \
+  http://35.232.62.221/bot
+"""
