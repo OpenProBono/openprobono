@@ -4,16 +4,16 @@ from pydantic import BaseModel
 
 class BotRequest(BaseModel):
     history: list
-    t1name: str | None = None
-    t1txt: str | None = None
-    t1prompt: str | None = None
-    t2name: str | None = None
-    t2txt: str | None = None
-    t2prompt: str | None = None
-    user_prompt: str | None = None
-    session: str | None = None
-    bot_id: str | None = None
-    api_key: str | None = None
+    t1name: str = None
+    t1txt: str = None
+    t1prompt: str = None
+    t2name: str = None
+    t2txt: str = None
+    t2prompt: str = None
+    user_prompt: str = None
+    session: str = None
+    bot_id: str = None
+    api_key: str = None
 
 app = FastAPI()
 
@@ -30,6 +30,6 @@ def bot(request: BotRequest):
 request = """
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"history":[],"api_key":"xyz"}' \
+  --data '{"history":[],"":"xyz"}' \
   http://35.232.62.221/bot
 """
