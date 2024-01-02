@@ -13,6 +13,7 @@ class BotRequest(BaseModel):
     user_prompt: str | None = None
     session: str | None = None
     bot_id: str | None = None
+    api_key: str | None = None
 
 app = FastAPI()
 
@@ -22,4 +23,5 @@ def read_root():
 
 @app.post("/bot")
 def bot(request: BotRequest):
-    return request
+    request_dict = request.dict()
+    return request_dict
