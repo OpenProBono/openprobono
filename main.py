@@ -3,7 +3,20 @@ from fastapi import FastAPI
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
+import langchain
+from langchain import PromptTemplate
+from langchain.agents import AgentExecutor, AgentOutputParser, AgentType, LLMSingleActionAgent, initialize_agent, Tool, ZeroShotAgent
+from langchain.chains import LLMChain
+from langchain.callbacks.base import BaseCallbackHandler
+from langchain.callbacks.streaming_stdout_final_only import FinalStreamingStdOutCallbackHandler
+from langchain.chat_models import ChatOpenAI
+from langchain.document_loaders import TextLoader, UnstructuredURLLoader
+from langchain.llms import OpenAI
+from langchain.memory import ConversationBufferMemory, ChatMessageHistory
+from langchain.prompts import BaseChatPromptTemplate, MessagesPlaceholder
+from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
 from pydantic import BaseModel
+from serpapi import GoogleSearch
 import uuid
 
 cred = credentials.Certificate("../../creds.json")
