@@ -59,7 +59,7 @@ def bot(request: BotRequest):
     api_key = request_dict['api_key']
     if(api_key == 'xyz'):
         chat = openai_bot(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session)
-        store_conversation(chat, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session)
+        store_conversation(chat, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session, api_key)
         return {"message": "Success", "chat": chat}
     else:
         return {"message": "Invalid API Key"}
