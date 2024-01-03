@@ -162,7 +162,7 @@ def gradio_test_process(prompt, youtube_urls):
     youtube_urls = [url.strip() for url in youtube_urls.split(",")]
     history = [[prompt, ""]]
     chat = process(history, "", youtube_urls, "")
-    return chat
+    return chat[-1][1]
 
 app = gr.Interface(
     fn = gradio_test_process,
@@ -170,7 +170,7 @@ app = gr.Interface(
         "text",
         "text",
     ],
-    output = ["text"],
+    outputs = ["text"],
 )
 
 gr.mount_gradio_app(api, app, path="/test")
