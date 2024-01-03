@@ -16,7 +16,7 @@ from langchain.memory import ConversationBufferMemory, ChatMessageHistory
 from langchain.prompts import BaseChatPromptTemplate, MessagesPlaceholder
 from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
 from pydantic import BaseModel
-from serpapi import GoogleSearch
+# from serpapi import GoogleSearch
 import uuid
 
 # GoogleSearch.SERP_API_KEY = "5567e356a3e19133465bc68755a124268543a7dd0b2809d75b038797b43626ab"
@@ -68,36 +68,36 @@ def openprobono_bot(history,
         memory = ConversationBufferMemory(return_messages=True, chat_memory=history_langchain_format, memory_key="memory")
         ##----------------------- tools -----------------------##
 
-        def gov_search(q):
-            data = {"search": t1txt + " " + q, 'prompt':t1prompt,'timestamp': firestore.SERVER_TIMESTAMP}
-            db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
-            return filtered_search(GoogleSearch({
-                'q': t1txt + " " + q,
-                'num': 5
-                }).get_dict())
+        # def gov_search(q):
+        #     data = {"search": t1txt + " " + q, 'prompt':t1prompt,'timestamp': firestore.SERVER_TIMESTAMP}
+        #     db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
+        #     return filtered_search(GoogleSearch({
+        #         'q': t1txt + " " + q,
+        #         'num': 5
+        #         }).get_dict())
 
-        def case_search(q):
-            data = {"search": t2txt + " " + q, 'prompt': t2prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
-            db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
-            return filtered_search(GoogleSearch({
-                'q': t2txt + " " + q,
-                'num': 5
-                }).get_dict())
+        # def case_search(q):
+        #     data = {"search": t2txt + " " + q, 'prompt': t2prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
+        #     db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
+        #     return filtered_search(GoogleSearch({
+        #         'q': t2txt + " " + q,
+        #         'num': 5
+        #         }).get_dict())
 
-        async def async_gov_search(q):
-            return gov_search(q)
+        # async def async_gov_search(q):
+        #     return gov_search(q)
 
-        async def async_case_search(q):
-            return case_search(q)
+        # async def async_case_search(q):
+        #     return case_search(q)
 
-        #Filter search results retured by serpapi to only include relavant results
-        def filtered_search(results):
-            new_dict = {}
-            if('sports_results' in results):
-                new_dict['sports_results'] = results['sports_results']
-            if('organic_results' in results):
-                new_dict['organic_results'] = results['organic_results']
-            return new_dict
+        # #Filter search results retured by serpapi to only include relavant results
+        # def filtered_search(results):
+        #     new_dict = {}
+        #     if('sports_results' in results):
+        #         new_dict['sports_results'] = results['sports_results']
+        #     if('organic_results' in results):
+        #         new_dict['organic_results'] = results['organic_results']
+        #     return new_dict
 
         #Definition and descriptions of tools aviailable to the bot
         tools = []
@@ -127,7 +127,7 @@ def openprobono_bot(history,
         prompt = "Using the tools at your disposal, answer the following question: " + prompt
         bot_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-0613', request_timeout=60*5)
         agent = initialize_agent(
-            tools=tools,
+            # tools=tools,
             llm=bot_llm,
             agent=AgentType.OPENAI_FUNCTIONS,
             verbose=False,
