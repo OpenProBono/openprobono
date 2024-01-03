@@ -251,13 +251,13 @@ def bot(request: BotRequest):
         #if bot_id is not provided, create a new bot id
         if bot_id is None or bot_id == "":
             bot_id = get_uuid_id()
-            create_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt)
+            create_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls)
         #if bot_id is provided, load the bot
         else:
             bot = load_bot(bot_id)
             #if bot is not found, create a new bot
             if(bot is None):
-                create_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt)
+                create_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls)
             #else load bot settings
             else:
                 t1name = bot['t1name']
@@ -269,9 +269,9 @@ def bot(request: BotRequest):
                 user_prompt = bot['user_prompt']
                 youtube_urls = bot['youtube_urls']
         #get new response from ai
-        chat = youtube_urls(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session)
+        chat = youtube_urls(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls, session)
         #store conversation (log the api_key)
-        store_conversation(chat, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session, api_key)
+        store_conversation(chat, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls, session, api_key)
         #return the chat and the bot_id
         return {"message": "Success", "chat": chat, "bot_id": bot_id}
     else:
