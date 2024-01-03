@@ -147,7 +147,7 @@ class BotRequest(BaseModel):
     t2name: str = None
     t2txt: str = None
     t2prompt: str = None
-    user_prompt: str = None
+    user_prompt: str = ""
     session: str = None
     bot_id: str = None
     api_key: str = None
