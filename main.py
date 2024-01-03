@@ -78,13 +78,13 @@ def bot(request: BotRequest):
         #if bot_id is not provided, create a new bot id
         if bot_id is None or bot_id == "":
             bot_id = get_uuid_id()
-            store_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt)
+            create_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt)
         #if bot_id is provided, load the bot
         else:
             bot = load_bot(bot_id)
             #if bot is not found, create a new bot
             if(bot is None):
-                store_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt)
+                create_bot(bot_id, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt)
             else:
                 t1name = bot['t1name']
                 t1txt = bot['t1txt']
