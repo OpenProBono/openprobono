@@ -80,7 +80,7 @@ def process(
     session = ""):
 
     text = ""
-    for url in urls:
+    for url in youtube_urls:
         loader = YoutubeLoader.from_youtube_url(
             url, add_video_info=False
         )
