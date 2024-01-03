@@ -73,7 +73,7 @@ def bot(request: BotRequest):
     bot_id = request_dict['bot_id']
     api_key = request_dict['api_key']
 
-    #if api key is valid
+    #if api key is valid (TODO: change this to a real api key)
     if(api_key == 'xyz'):
         #if bot_id is not provided, create a new bot id
         if bot_id is None or bot_id == "":
