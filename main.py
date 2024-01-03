@@ -60,6 +60,7 @@ def openprobono_bot(history,
         history[-1][1] = "Hi, how can I assist you today?"
         return history 
     else:
+        prompt = history[-1][0]
         history_langchain_format = ChatMessageHistory()
         for i in range(1, len(history)-1):
             (human, ai) = history[i]
