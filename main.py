@@ -164,17 +164,14 @@ def gradio_test_process(prompt, youtube_urls):
     chat = process(history, "", youtube_urls, "")
     return chat[-1][1]
 
-prompt = gr.Textbox(value="hi", label="Prompt")
-youtube_urls = gr.Textbox(value="https://www.youtube.com/watch?v=wnRTpHKTJgM, https://www.youtube.com/watch?v=QHjuFAbUkg0", label="Youtube URLs")
-output = gr.Textbox(label="Output")
-app = gr.Interface(
-    fn = gradio_test_process,
-    inputs = [
-        prompt,
-        youtube_urls,
-    ],
-    outputs = [output],
-)
+
+with gr.Blocks() as app:
+    prompt = gr.Textbox(value="hi", label="Prompt")
+    youtube_urls = gr.Textbox(value="https://www.youtube.com/watch?v=wnRTpHKTJgM, https://www.youtube.com/watch?v=QHjuFAbUkg0", label="Youtube URLs")
+    submit = gr.Button("Submit")
+    output = gr.Textbox(label="Output", interactive=False)
+    submit.click(gradio_test_process, [prompt, youtube_urls], output)
+
 
 gr.mount_gradio_app(api, app, path="/test")
 
