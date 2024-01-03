@@ -117,13 +117,13 @@ class YoutubeRequest(BaseModel):
     bot_id: str = None
     api_key: str = None
 
-app = FastAPI()
+api = FastAPI()
 
-@app.get("/")
+@api.get("/")
 def read_root():
     return {"message": "It's OpenProBono !!"}
 
-@app.post("/youtube")
+@api.post("/youtube")
 def bot(request: YoutubeRequest):
     request_dict = request.dict()
     history = request_dict['history']
