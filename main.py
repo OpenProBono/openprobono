@@ -19,6 +19,8 @@ from pydantic import BaseModel
 from serpapi import GoogleSearch
 import uuid
 
+GoogleSearch.SERP_API_KEY = "5567e356a3e19133465bc68755a124268543a7dd0b2809d75b038797b43626ab"
+
 cred = credentials.Certificate("../../creds.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
