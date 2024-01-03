@@ -128,7 +128,7 @@ def openprobono_bot(history,
         prompt = "Using the tools at your disposal, answer the following question: " + prompt
         bot_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-0613', request_timeout=60*5)
         agent = initialize_agent(
-            # tools=tools,
+            tools=tools,
             llm=bot_llm,
             agent=AgentType.OPENAI_FUNCTIONS,
             verbose=False,
