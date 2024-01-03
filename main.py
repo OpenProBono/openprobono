@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from serpapi import GoogleSearch
 import uuid
 
-GoogleSearch.SERP_API_KEY = "5567e356a3e19133465bc68755a124268543a7dd0b2809d75b038797b43626ab"
+# GoogleSearch.SERP_API_KEY = "5567e356a3e19133465bc68755a124268543a7dd0b2809d75b038797b43626ab"
 
 cred = credentials.Certificate("../../creds.json")
 firebase_admin.initialize_app(cred)
@@ -100,20 +100,20 @@ def openprobono_bot(history,
             return new_dict
 
         #Definition and descriptions of tools aviailable to the bot
-        tools = [
-            Tool(
-                name=t1name,
-                func=gov_search,
-                coroutine=async_gov_search,
-                description=t1prompt,
-            ),
-            Tool(
-                name=t1name,
-                func=case_search,
-                coroutine=async_case_search,
-                description=t2prompt,
-            )
-        ]
+        tools = []
+        #     Tool(
+        #         name=t1name,
+        #         func=gov_search,
+        #         coroutine=async_gov_search,
+        #         description=t1prompt,
+        #     ),
+        #     Tool(
+        #         name=t1name,
+        #         func=case_search,
+        #         coroutine=async_case_search,
+        #         description=t2prompt,
+        #     )
+        # ]
         ##----------------------- end of tools -----------------------##
 
         system_message = 'You are a helpful AI assistant. ALWAYS use tools to answer questions.'
