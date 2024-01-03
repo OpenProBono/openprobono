@@ -58,15 +58,15 @@ def load_bot(bot_id):
     else:
         return None
     
-prompt_template = """Respond in the same style as the context below.
-{context}
+prompt_template = """Respond in the style of the youtuber.
 Question: {question}
 Response:"""
 
-PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+PROMPT = PromptTemplate(template=prompt_template, input_variables=["question"])
 chain_type_kwargs = {"prompt": PROMPT} 
 
 #TODO: cache vector db with bot_id
+#TODO: do actual chat memory
 def process(
     history, 
     t1name = "government-search", 
@@ -107,7 +107,6 @@ def process(
         retriever=vectordb.as_retriever(),
         chain_type_kwargs=chain_type_kwargs,
     )
-
     
     query = history[-1][0]
     if(query.strip() == ""):
@@ -288,6 +287,6 @@ curl --header "Content-Type: application/json" \
 request_youtube = """
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"history":[["hi",""]],"youtube_urls":["https://www.youtube.com/watch?v=frIvwrdHUrg"], "api_key":"xyz"}' \
+  --data '{"history":[["whats up lawerence?",""]],"youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"], "api_key":"xyz"}' \
   http://35.232.62.221/youtube
 """
