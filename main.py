@@ -172,6 +172,7 @@ with gr.Blocks() as app:
     output = gr.Textbox(label="Output", interactive=False)
     submit.click(gradio_test_process, [prompt, youtube_urls], output)
 
+app.queue()
 
 gr.mount_gradio_app(api, app, path="/test")
 
