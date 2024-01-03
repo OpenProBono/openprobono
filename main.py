@@ -167,10 +167,10 @@ def gradio_test_process(prompt, youtube_urls):
 app = gr.Interface(
     fn = gradio_test_process,
     inputs = [
-        gr.inputs.Textbox(lines=2, label="Prompt"),
-        gr.inputs.Textbox(lines=2, label="Youtube URLs")
+        "text",
+        "text",
     ],
-    output = gr.outputs.Textbox(label="Response")
+    output = ["text"],
 )
 
 gr.mount_gradio_app(api, app, path="/test")
