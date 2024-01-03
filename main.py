@@ -269,7 +269,7 @@ def bot(request: BotRequest):
                 user_prompt = bot['user_prompt']
                 youtube_urls = bot['youtube_urls']
         #get new response from ai
-        chat = youtube_urls(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls, session)
+        chat = process(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls, session)
         #store conversation (log the api_key)
         store_conversation(chat, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, youtube_urls, session, api_key)
         #return the chat and the bot_id
