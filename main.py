@@ -10,6 +10,8 @@ cred = credentials.Certificate("../../creds.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+root_path = "API"
+
 def get_uuid_id():
     return str(uuid.uuid4())
 
@@ -30,13 +32,96 @@ def load_bot(bot_id):
         return None
     
 
-def openai_bot(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session):
+def openprobono_bot(history, 
+    t1name = "government-search", 
+    t1txt = "site:*.gov | site:*.edu | site:*scholar.google.com", 
+    t1prompt = "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.", 
+    t2name = "case-search", 
+    t2txt = "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com", 
+    t2prompt = "Use for finding case law. Always cite your sources.", 
+    user_prompt = "", 
+    session = ""):
     if(history[-1][0].strip() == ""):
         history[-1][1] = "Hi, how can I assist you today?"
         return history 
     else:
-        history[-1][1] = "Hi, how can I assist you today?"
-        return history 
+        history_langchain_format = ChatMessageHistory()
+        for i in range(1, len(history)-1):
+            (human, ai) = history[i]
+            history_langchain_format.add_user_message(human)
+            history_langchain_format.add_ai_message(ai)
+        memory = ConversationBufferMemory(return_messages=True, chat_memory=history_langchain_format, memory_key="memory")
+        ##----------------------- tools -----------------------##
+
+        def gov_search(q):
+            data = {"search": t1txt + " " + q, 'prompt':t1prompt,'timestamp': firestore.SERVER_TIMESTAMP}
+            db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
+            return filtered_search(GoogleSearch({
+                'q': t1txt + " " + q,
+                'num': 5
+                }).get_dict())
+
+        def case_search(q):
+            data = {"search": t2txt + " " + q, 'prompt': t2prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
+            db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
+            return filtered_search(GoogleSearch({
+                'q': t2txt + " " + q,
+                'num': 5
+                }).get_dict())
+
+        async def async_gov_search(q):
+            return gov_search(q)
+
+        async def async_case_search(q):
+            return case_search(q)
+
+        #Filter search results retured by serpapi to only include relavant results
+        def filtered_search(results):
+            new_dict = {}
+            if('sports_results' in results):
+                new_dict['sports_results'] = results['sports_results']
+            if('organic_results' in results):
+                new_dict['organic_results'] = results['organic_results']
+            return new_dict
+
+        #Definition and descriptions of tools aviailable to the bot
+        tools = [
+            Tool(
+                name=t1name,
+                func=gov_search,
+                coroutine=async_gov_search,
+                description=t1prompt,
+            ),
+            Tool(
+                name=t1name,
+                func=case_search,
+                coroutine=async_case_search,
+                description=t2prompt,
+            )
+        ]
+        ##----------------------- end of tools -----------------------##
+
+        system_message = 'You are a helpful AI assistant. ALWAYS use tools to answer questions.'
+        system_message += user_prompt
+        system_message += '. If you used a tool, ALWAYS return a "SOURCES" part in your answer.'
+        agent_kwargs = {
+            "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
+        }
+       
+        #definition of llm used for bot
+        prompt = "Using the tools at your disposal, answer the following question: " + prompt
+        bot_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-0613', request_timeout=60*5)
+        agent = initialize_agent(
+            tools=tools,
+            llm=bot_llm,
+            agent=AgentType.OPENAI_FUNCTIONS,
+            verbose=False,
+            agent_kwargs=agent_kwargs,
+            memory=memory,
+            #return_intermediate_steps=True
+        )
+        agent.agent.prompt.messages[0].content = system_message
+        return agent.arun(prompt)
 
 
 class BotRequest(BaseModel):
@@ -94,7 +179,7 @@ def bot(request: BotRequest):
                 t2prompt = bot['t2prompt']
                 user_prompt = bot['user_prompt']
         #get new response from ai
-        chat = openai_bot(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session)
+        chat = openprobono_bot(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session)
         #store conversation (log the api_key)
         store_conversation(chat, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session, api_key)
         #return the chat and the bot_id
