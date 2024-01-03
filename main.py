@@ -18,10 +18,10 @@ def store_conversation(conversation, t1name, t1txt, t1prompt, t2name, t2txt, t2p
 def openai_bot(history, t1name, t1txt, t1prompt, t2name, t2txt, t2prompt, user_prompt, session):
     if(history[-1][0].strip() == ""):
         history[-1][1] = "Hi, how can I assist you today?"
-        yield history 
+        return history 
     else:
         history[-1][1] = "Hi, how can I assist you today?"
-        yield history 
+        return history 
 
 
 class BotRequest(BaseModel):
