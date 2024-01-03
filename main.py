@@ -219,6 +219,7 @@ class BotRequest(BaseModel):
     t2txt: str = None
     t2prompt: str = None
     user_prompt: str = ""
+    youtube_urls: list = []
     session: str = None
     bot_id: str = None
     api_key: str = None
@@ -287,6 +288,6 @@ curl --header "Content-Type: application/json" \
 request_youtube = """
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"history":[["hi",""]],"youtube_urls":["https://www.youtube.com/watch?v=frIvwrdHUrg"]api_key":"xyz"}' \
-  http://35.232.62.221/bot
+  --data '{"history":[["hi",""]],"youtube_urls":["https://www.youtube.com/watch?v=frIvwrdHUrg"], "api_key":"xyz"}' \
+  http://35.232.62.221/youtube
 """
