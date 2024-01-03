@@ -58,11 +58,12 @@ def load_bot(bot_id):
     else:
         return None
     
-prompt_template = """Respond in the style of the youtuber.
+prompt_template = """Respond in the same style as the youtuber in the context below.
+{context}
 Question: {question}
 Response:"""
 
-PROMPT = PromptTemplate(template=prompt_template, input_variables=["question"])
+PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
 chain_type_kwargs = {"prompt": PROMPT} 
 
 #TODO: cache vector db with bot_id
