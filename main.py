@@ -137,7 +137,8 @@ def openprobono_bot(history,
             #return_intermediate_steps=True
         )
         agent.agent.prompt.messages[0].content = system_message
-        return agent.arun(prompt)
+        history[-1][1] = agent.run(prompt)
+        return history
 
 
 class BotRequest(BaseModel):
