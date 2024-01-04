@@ -158,7 +158,7 @@ def bot(request: YoutubeRequest):
     else:
         return {"message": "Invalid API Key"}
 
-def gradio_test_process(prompt, youtube_urls, bot_id):
+def gradio_test_process(prompt, youtube_urls, bot_id, user_prompt=""):
     #if bot_id is not provided, create a new bot id
     if bot_id is None or bot_id == "":
         bot_id = get_uuid_id()
@@ -182,7 +182,7 @@ def gradio_test_process(prompt, youtube_urls, bot_id):
 with gr.Blocks() as app:
     prompt = gr.Textbox(label="Prompt")
     youtube_urls = gr.Textbox(label="Youtube URLs")
-    bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls))")
+    bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls)")
     submit = gr.Button("Submit")
     reply = gr.Textbox(label="Output", interactive=False)
     submit.click(gradio_test_process, inputs=[prompt, youtube_urls, bot_id], outputs=[reply, bot_id])
