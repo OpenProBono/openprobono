@@ -169,8 +169,8 @@ with gr.Blocks() as app:
     prompt = gr.Textbox(label="Prompt")
     youtube_urls = gr.Textbox(label="Youtube URLs")
     submit = gr.Button("Submit")
-    output = gr.Textbox(label="Output", interactive=False)
-    submit.click(gradio_test_process, [prompt, youtube_urls], output)
+    reply = gr.Textbox(label="Output", interactive=False)
+    submit.click(gradio_test_process, inputs=[prompt, youtube_urls], outputs=[reply])
 
 app.queue()
 
