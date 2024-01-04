@@ -172,9 +172,7 @@ with gr.Blocks() as app:
     reply = gr.Textbox(label="Output", interactive=False)
     submit.click(gradio_test_process, inputs=[prompt, youtube_urls], outputs=[reply])
 
-app.queue()
-
-gr.mount_gradio_app(api, app, path="/test")
+app.launch(share=True)
 
 request_OPB = """
 curl --header "Content-Type: application/json" \
