@@ -158,18 +158,34 @@ def bot(request: YoutubeRequest):
     else:
         return {"message": "Invalid API Key"}
 
-def gradio_test_process(prompt, youtube_urls):
+def gradio_test_process(prompt, youtube_urls, bot_id):
+    #if bot_id is not provided, create a new bot id
+    if bot_id is None or bot_id == "":
+        bot_id = get_uuid_id()
+        create_bot(bot_id, user_prompt, youtube_urls)
+    #if bot_id is provided, load the bot
+    else:
+        bot = load_bot(bot_id)
+        #if bot is not found, create a new bot
+        if(bot is None):
+            create_bot(bot_id, user_prompt, youtube_urls)
+        #else load bot settings
+        else:
+            user_prompt = bot['user_prompt']
+            youtube_urls = bot['youtube_urls']
+
     youtube_urls = [url.strip() for url in youtube_urls.split(",")]
     history = [[prompt, ""]]
     chat = process(history, "", youtube_urls, "")
-    return chat[-1][1]
+    return chat[-1][1], bot_id
 
 with gr.Blocks() as app:
     prompt = gr.Textbox(label="Prompt")
     youtube_urls = gr.Textbox(label="Youtube URLs")
+    bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls))")
     submit = gr.Button("Submit")
     reply = gr.Textbox(label="Output", interactive=False)
-    submit.click(gradio_test_process, inputs=[prompt, youtube_urls], outputs=[reply])
+    submit.click(gradio_test_process, inputs=[prompt, youtube_urls, bot_id], outputs=[reply, bot_id])
 
 gr.mount_gradio_app(api, app, path="/test")
 
