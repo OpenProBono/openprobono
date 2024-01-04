@@ -112,7 +112,7 @@ def process(
 class YoutubeRequest(BaseModel):
     history: list
     user_prompt: str = ""
-    youtube_urls: list
+    youtube_urls: list = []
     session: str = None
     bot_id: str = None
     api_key: str = None
@@ -164,7 +164,6 @@ def gradio_test_process(prompt, youtube_urls):
     chat = process(history, "", youtube_urls, "")
     return chat[-1][1]
 
-
 with gr.Blocks() as app:
     prompt = gr.Textbox(label="Prompt")
     youtube_urls = gr.Textbox(label="Youtube URLs")
@@ -185,5 +184,12 @@ request_youtube = """
 curl --header "Content-Type: application/json" \
   --request POST \
   --data '{"history":[["whats up lawerence?",""]],"youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"], "api_key":"xyz"}' \
+  http://35.232.62.221/youtube
+"""
+
+request_youtube = """
+curl --header "Content-Type: application/json" \
+  --request POST \
+  --data '{"history":[["whats up lawerence?",""]],"bot_id":"90834944-c3e4-4424-9007-6d9bd857716e", "api_key":"xyz"}' \
   http://35.232.62.221/youtube
 """
