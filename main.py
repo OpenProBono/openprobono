@@ -158,10 +158,10 @@ def bot(request: YoutubeRequest):
     else:
         return {"message": "Invalid API Key"}
 
-def gradio_test_process(prompt, youtube_urls, bot_id, user_prompt=""):
+def gradio_test_process(prompt, youtube_urls, bot_id=None, session=None, user_prompt="", api_key="gradio"):
     youtube_urls = [url.strip() for url in youtube_urls.split(",")]
     history = [[prompt, ""]]
-    
+
     #if bot_id is not provided, create a new bot id
     if bot_id is None or bot_id == "":
         bot_id = get_uuid_id()
