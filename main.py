@@ -177,6 +177,7 @@ def gradio_test_process(prompt, youtube_urls, bot_id, user_prompt=""):
     youtube_urls = [url.strip() for url in youtube_urls.split(",")]
     history = [[prompt, ""]]
     chat = process(history, "", youtube_urls, "")
+    store_conversation(chat, user_prompt, youtube_urls, session, api_key)
     return chat[-1][1], bot_id
 
 with gr.Blocks() as app:
