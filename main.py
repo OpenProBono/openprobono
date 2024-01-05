@@ -163,7 +163,7 @@ def bot(request: YoutubeRequest):
 def gradio_process(prompt, youtube_urls, bot_id):
     print("gradio_process")
     request = YoutubeRequest(
-        history=[prompt, ""], 
+        history=[[prompt, ""]], 
         youtube_urls=[url.strip() for url in youtube_urls.split(",")],
         bot_id=bot_id,
         api_key="gradio",
