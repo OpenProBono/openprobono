@@ -160,8 +160,17 @@ def bot(request: YoutubeRequest):
     api_key = request_dict['api_key']
     return process(history, user_prompt, youtube_urls, session, bot_id, api_key)
 
-def gradio_process(request: YoutubeRequest):
+def gradio_process(prompt, youtube_urls, bot_id):
+    print("gradio_process")
+    request = YoutubeRequest(
+        history=[prompt, ""], 
+        youtube_urls=[url.strip() for url in youtube_urls.split(",")],
+        bot_id=bot_id,
+        api_key="gradio",
+    )
+    print("request")
     response = bot(request)
+    print("response")
     return response['chat'][-1][1], response['bot_id']
 
 with gr.Blocks() as app:
@@ -170,12 +179,7 @@ with gr.Blocks() as app:
     bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls)") #better explanation
     submit = gr.Button("Submit")
     reply = gr.Textbox(label="Output", interactive=False)
-    submit.click(gradio_process, inputs=[YoutubeRequest(
-        history=[prompt.value, ""], 
-        youtube_urls=[url.strip() for url in youtube_urls.value.split(",")],
-        bot_id=bot_id.value,
-        api_key="gradio",
-        )], outputs=[reply, bot_id])
+    submit.click(gradio_process, inputs=[prompt, youtube_urls, bot_id], outputs=[reply, bot_id])
 
 gr.mount_gradio_app(api, app, path="/test")
 
