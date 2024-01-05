@@ -171,9 +171,9 @@ with gr.Blocks() as app:
     submit = gr.Button("Submit")
     reply = gr.Textbox(label="Output", interactive=False)
     submit.click(gradio_process, inputs=[YoutubeRequest(
-        history=[prompt, ""], 
-        youtube_urls=[url.strip() for url in youtube_urls.split(",")],
-        bot_id=bot_id,
+        history=[prompt.value, ""], 
+        youtube_urls=[url.strip() for url in youtube_urls.value.split(",")],
+        bot_id=bot_id.value,
         api_key="gradio",
         )], outputs=[reply, bot_id])
 
