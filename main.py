@@ -43,6 +43,8 @@ def get_uuid_id():
 
 def store_conversation(conversation, user_prompt, youtube_urls, session, api_key):
     (human, ai) = conversation[-1]
+    if(session is None or session == ""):
+        session = get_uuid_id()
     data = {"human": human, "ai": ai, 'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'timestamp':  firestore.SERVER_TIMESTAMP, 'api_key': api_key}
     db.collection("API_youtube_" + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
 
@@ -200,6 +202,9 @@ curl --header "Content-Type: application/json" \
 request_youtube = """
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"history":[["whats up lawerence?",""]],"bot_id":"90834944-c3e4-4424-9007-6d9bd857716e", "api_key":"xyz"}' \
+  --data '{"history":[["whats up?",""]],"bot_id":"8e35157b-9717-4f7d-bc34-e3365ea98673", "api_key":"xyz"}' \
   http://35.232.62.221/youtube
 """
+
+
+#8e35157b-9717-4f7d-bc34-e3365ea98673
