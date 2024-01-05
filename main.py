@@ -167,10 +167,10 @@ def gradio_process(request: YoutubeRequest):
 with gr.Blocks() as app:
     prompt = gr.Textbox(label="Prompt")
     youtube_urls = gr.Textbox(label="Youtube URLs")
-    bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls)")
+    bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls)") #better explanation
     submit = gr.Button("Submit")
     reply = gr.Textbox(label="Output", interactive=False)
-    submit.click(gradio_test_process, inputs=[YoutubeRequest(
+    submit.click(gradio_process, inputs=[YoutubeRequest(
         history=[prompt, ""], 
         youtube_urls=[url.strip() for url in youtube_urls.split(",")],
         bot_id=bot_id,
