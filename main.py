@@ -67,7 +67,7 @@ chain_type_kwargs = {"prompt": PROMPT}
 
 #TODO: cache vector db with bot_id
 #TODO: do actual chat memory
-def process(
+def call_agent(
     history, 
     user_prompt = "",
     youtube_urls = [],
@@ -109,6 +109,32 @@ def process(
         history[-1][1] = qa_chain.run(query)
     return history
 
+def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
+    #if api key is valid (TODO: change this to a real api key)
+    if(api_key == 'xyz' or api_key == 'gradio'):
+        #if bot_id is not provided, create a new bot id
+        if bot_id is None or bot_id == "":
+            bot_id = get_uuid_id()
+            create_bot(bot_id, user_prompt, youtube_urls)
+        #if bot_id is provided, load the bot
+        else:
+            bot = load_bot(bot_id)
+            #if bot is not found, create a new bot
+            if(bot is None):
+                create_bot(bot_id, user_prompt, youtube_urls)
+            #else load bot settings
+            else:
+                user_prompt = bot['user_prompt']
+                youtube_urls = bot['youtube_urls']
+        #get new response from ai
+        chat = call_agent(history, user_prompt, youtube_urls, session)
+        #store conversation (log the api_key)
+        store_conversation(chat, user_prompt, youtube_urls, session, api_key)
+        #return the chat and the bot_id
+        return {"message": "Success", "chat": chat, "bot_id": bot_id}
+    else:
+        return {"message": "Invalid API Key"}
+
 class YoutubeRequest(BaseModel):
     history: list
     user_prompt: str = ""
@@ -132,54 +158,11 @@ def bot(request: YoutubeRequest):
     session = request_dict['session']
     bot_id = request_dict['bot_id']
     api_key = request_dict['api_key']
+    return process(history, user_prompt, youtube_urls, session, bot_id, api_key)
 
-    #if api key is valid (TODO: change this to a real api key)
-    if(api_key == 'xyz'):
-        #if bot_id is not provided, create a new bot id
-        if bot_id is None or bot_id == "":
-            bot_id = get_uuid_id()
-            create_bot(bot_id, user_prompt, youtube_urls)
-        #if bot_id is provided, load the bot
-        else:
-            bot = load_bot(bot_id)
-            #if bot is not found, create a new bot
-            if(bot is None):
-                create_bot(bot_id, user_prompt, youtube_urls)
-            #else load bot settings
-            else:
-                user_prompt = bot['user_prompt']
-                youtube_urls = bot['youtube_urls']
-        #get new response from ai
-        chat = process(history, user_prompt, youtube_urls, session)
-        #store conversation (log the api_key)
-        store_conversation(chat, user_prompt, youtube_urls, session, api_key)
-        #return the chat and the bot_id
-        return {"message": "Success", "chat": chat, "bot_id": bot_id}
-    else:
-        return {"message": "Invalid API Key"}
-
-def gradio_test_process(prompt, youtube_urls, bot_id=None, session=None, user_prompt="", api_key="gradio"):
-    youtube_urls = [url.strip() for url in youtube_urls.split(",")]
-    history = [[prompt, ""]]
-
-    #if bot_id is not provided, create a new bot id
-    if bot_id is None or bot_id == "":
-        bot_id = get_uuid_id()
-        create_bot(bot_id, user_prompt, youtube_urls)
-    #if bot_id is provided, load the bot
-    else:
-        bot = load_bot(bot_id)
-        #if bot is not found, create a new bot
-        if(bot is None):
-            create_bot(bot_id, user_prompt, youtube_urls)
-        #else load bot settings
-        else:
-            user_prompt = bot['user_prompt']
-            youtube_urls = bot['youtube_urls']
-
-    chat = process(history, "", youtube_urls, "")
-    store_conversation(chat, user_prompt, youtube_urls, session, api_key)
-    return chat[-1][1], bot_id
+def gradio_process(request: YoutubeRequest):
+    response = bot(request)
+    return response['chat'][-1][1], response['bot_id']
 
 with gr.Blocks() as app:
     prompt = gr.Textbox(label="Prompt")
@@ -187,7 +170,12 @@ with gr.Blocks() as app:
     bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls)")
     submit = gr.Button("Submit")
     reply = gr.Textbox(label="Output", interactive=False)
-    submit.click(gradio_test_process, inputs=[prompt, youtube_urls, bot_id], outputs=[reply, bot_id])
+    submit.click(gradio_test_process, inputs=[YoutubeRequest(
+        history=[prompt, ""], 
+        youtube_urls=[url.strip() for url in youtube_urls.split(",")],
+        bot_id=bot_id,
+        api_key="gradio",
+        )], outputs=[reply, bot_id])
 
 gr.mount_gradio_app(api, app, path="/test")
 
