@@ -166,7 +166,7 @@ def bot(request: Annotated[
                     },
                 },
                 "call a previously created bot": {
-                    "summary": "An example with calling a created bot",
+                    "summary": "call a previously created bot",
                     "description": "Use a bot_id to call a bot that has already been created.",
                     "value": {
                         "history": [["hello there", ""]],
