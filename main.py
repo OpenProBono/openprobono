@@ -158,20 +158,30 @@ def bot(request: Annotated[
         Body(
             openapi_examples={
                 "create new youtube bot": {
-                    "summary": "A normal example",
-                    "description": "A **normal** item works correctly.",
+                    "summary": "create new youtube bot",
                     "value": {
                         "history": [["hi", ""]],
                         "youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"],
                         "api_key":"xyz",
                     },
                 },
-                "call already created bot": {
+                "call a previously created bot": {
                     "summary": "An example with calling a created bot",
                     "description": "Use a bot_id to call a bot that has already been created.",
                     "value": {
                         "history": [["hello there", ""]],
                         "bot_id": "8e35157b-9717-4f7d-bc34-e3365ea98673",
+                        "api_key":"xyz",
+                    },
+                },
+                "full descriptions of every parameter": {
+                    "summary": "full descriptions of every parameter",
+                    "description": "This is an example of all the parameters that can be used. \n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n user_prompt: an additional prompt to use for the bot (currently ignored). \n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n bot_id: a bot id used to call previously created bots \n api_key: api key necessary for auth",
+                    "value": {
+                        "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
+                        "user_prompt": "additional prompt to use for bot, currently ignored",
+                        "youtube_urls":["url of youtube video", "url of youtube video", "urls are ignored if bot_id is passed"],
+                        "bot_id": "id of bot previously created",
                         "api_key":"xyz",
                     },
                 },
