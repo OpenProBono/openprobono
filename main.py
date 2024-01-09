@@ -59,14 +59,6 @@ def load_bot(bot_id):
         return bot.to_dict()
     else:
         return None
-    
-prompt_template = """Respond in the same style as the youtuber in the context below.
-{context}
-Question: {question}
-Response:"""
-
-PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-chain_type_kwargs = {"prompt": PROMPT} 
 
 #TODO: cache vector db with bot_id
 #TODO: do actual chat memory
@@ -75,7 +67,18 @@ def call_agent(
     user_prompt = "",
     youtube_urls = [],
     session = ""):
+    
+    if(user_prompt is None or user_prompt == ""):
+        user_prompt = "Respond in the same style as the youtuber in the context below."
 
+    prompt_template = user_prompt + """
+    {context}
+    Question: {question}
+    Response:"""
+
+    PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+    chain_type_kwargs = {"prompt": PROMPT} 
+    
     text = ""
     for url in youtube_urls:
         loader = YoutubeLoader.from_youtube_url(
@@ -152,6 +155,11 @@ api = FastAPI()
 def read_root():
     return {"message": "It's OpenProBono !!"}
 
+tips = """Keys to good response:
+- Make sure videos includes only the youtuber talking, because we are grabbing the youtube generated captions, there is no way to differenciate between voices or backgroudn game audio which got captioned
+- There maybe mispellinngs / mistakes in the captions which cannot be avoided, espeically with foreign names/words
+- Include many / longer videos to get better results
+"""
 @api.post("/youtube")
 def bot(request: Annotated[
         YoutubeRequest,
@@ -171,16 +179,16 @@ def bot(request: Annotated[
                     "description": "Use a bot_id to call a bot that has already been created. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
                     "value": {
                         "history": [["hello there", ""]],
-                        "bot_id": "8e35157b-9717-4f7d-bc34-e3365ea98673",
+                        "bot_id": "e71f312c-f943-4d03-bb4f-c7c14f617625",
                         "api_key":"xyz",
                     },
                 },
                 "full descriptions of every parameter": {
                     "summary": "full descriptions of every parameter",
-                    "description": "This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n\n user_prompt: an additional prompt to use for the bot (currently ignored). \n\n session: session id, used for analytics/logging conversations, not necessary \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth",
+                    "description": "This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n\n user_prompt: prompt to use for the bot, will use default if empty. \n\n session: session id, used for analytics/logging conversations, not necessary \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth",
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
-                        "user_prompt": "additional prompt to use for bot, currently ignored",
+                        "user_prompt": "prompt to use for the bot, will use default if empty",
                         "session": "session id, used for analytics/logging conversations, not necessary",
                         "youtube_urls":["url of youtube video", "url of youtube video", "urls are ignored if bot_id is passed"],
                         "bot_id": "id of bot previously created",
