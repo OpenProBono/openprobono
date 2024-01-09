@@ -80,9 +80,7 @@ def call_agent(
         loader = YoutubeLoader.from_youtube_url(
             url, add_video_info=False
         )
-
         docs = loader.load()
-
         # Combine doc
         combined_docs = [doc.page_content for doc in docs]
         text += " ".join(combined_docs)
@@ -105,10 +103,12 @@ def call_agent(
     )
     
     query = history[-1][0]
+    #check for empty query
     if(query.strip() == ""):
         history[-1][1] = ""
     else:
         history[-1][1] = qa_chain.run(query)
+
     return history
 
 def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
@@ -152,7 +152,30 @@ def read_root():
     return {"message": "It's OpenProBono !!"}
 
 @api.post("/youtube")
-def bot(request: YoutubeRequest):
+def bot(request: Annotated[
+        YoutubeRequest,
+        Body(
+            openapi_examples={
+                "create new youtube bot": {
+                    "summary": "A normal example",
+                    "description": "A **normal** item works correctly.",
+                    "value": {
+                        "history": [["hi", ""]],
+                        "youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"],
+                        "api_key":"xyz",
+                    },
+                },
+                "call already created bot": {
+                    "summary": "An example with calling a created bot",
+                    "description": "Use a bot_id to call a bot that has already been created.",
+                    "value": {
+                        "history": [["hello there", ""]],
+                        "bot_id": "8e35157b-9717-4f7d-bc34-e3365ea98673",
+                        "api_key":"xyz",
+                    },
+                },
+            },
+        )]):
     request_dict = request.dict()
     history = request_dict['history']
     user_prompt = request_dict['user_prompt']
