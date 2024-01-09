@@ -4,7 +4,8 @@ import uuid
 
 import firebase_admin
 import langchain
-from fastapi import FastAPI
+from typing import Annotated
+from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
 import gradio as gr
 from langchain import PromptTemplate
