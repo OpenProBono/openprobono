@@ -72,7 +72,8 @@ def call_agent(
         user_prompt = "Respond in the same style as the youtuber in the context below."
 
     prompt_template = user_prompt + """
-    {context}
+    \n\nContext: {context}
+    \n\n\n\n
     Question: {question}
     Response:"""
 
@@ -160,6 +161,7 @@ tips = """Keys to good response:
 - There maybe mispellinngs / mistakes in the captions which cannot be avoided, espeically with foreign names/words
 - Include many / longer videos to get better results
 """
+
 @api.post("/youtube")
 def bot(request: Annotated[
         YoutubeRequest,
