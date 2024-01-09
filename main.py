@@ -168,7 +168,7 @@ def bot(request: Annotated[
                 },
                 "call a previously created bot": {
                     "summary": "call a previously created bot",
-                    "description": "Use a bot_id to call a bot that has already been created. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
+                    "description": "Use a bot_id to call a bot that has already been created. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
                     "value": {
                         "history": [["hello there", ""]],
                         "bot_id": "8e35157b-9717-4f7d-bc34-e3365ea98673",
