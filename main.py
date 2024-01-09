@@ -176,7 +176,7 @@ def bot(request: Annotated[
                 },
                 "full descriptions of every parameter": {
                     "summary": "full descriptions of every parameter",
-                    "description": "This is an example of all the parameters that can be used. \n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n user_prompt: an additional prompt to use for the bot (currently ignored). \n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n bot_id: a bot id used to call previously created bots \n api_key: api key necessary for auth",
+                    "description": "This is an example of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n\n user_prompt: an additional prompt to use for the bot (currently ignored). \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth",
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
                         "user_prompt": "additional prompt to use for bot, currently ignored",
