@@ -121,26 +121,29 @@ def call_agent(
 def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
     #if api key is valid (TODO: change this to a real api key)
     if(api_key == 'xyz' or api_key == 'gradio'):
-        #if bot_id is not provided, create a new bot id
-        if bot_id is None or bot_id == "":
-            bot_id = get_uuid_id()
-            create_bot(bot_id, user_prompt, youtube_urls)
-        #if bot_id is provided, load the bot
-        else:
-            bot = load_bot(bot_id)
-            #if bot is not found, create a new bot
-            if(bot is None):
+        try:
+            #if bot_id is not provided, create a new bot id
+            if bot_id is None or bot_id == "":
+                bot_id = get_uuid_id()
                 create_bot(bot_id, user_prompt, youtube_urls)
-            #else load bot settings
+            #if bot_id is provided, load the bot
             else:
-                user_prompt = bot['user_prompt']
-                youtube_urls = bot['youtube_urls']
-        #get new response from ai
-        chat = call_agent(history, user_prompt, youtube_urls, session)
-        #store conversation (log the api_key)
-        store_conversation(chat, user_prompt, youtube_urls, session, api_key)
-        #return the chat and the bot_id
-        return {"message": "Success", "chat": chat, "bot_id": bot_id}
+                bot = load_bot(bot_id)
+                #if bot is not found, create a new bot
+                if(bot is None):
+                    create_bot(bot_id, user_prompt, youtube_urls)
+                #else load bot settings
+                else:
+                    user_prompt = bot['user_prompt']
+                    youtube_urls = bot['youtube_urls']
+            #get new response from ai
+            chat = call_agent(history, user_prompt, youtube_urls, session)
+            #store conversation (log the api_key)
+            store_conversation(chat, user_prompt, youtube_urls, session, api_key)
+            #return the chat and the bot_id
+            return {"message": "Success", "chat": chat, "bot_id": bot_id}
+        except:
+            return {"message": "Failure: Internal Error"}
     else:
         return {"message": "Invalid API Key"}
 
