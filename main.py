@@ -125,6 +125,7 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
     #if api key is valid (TODO: change this to a real api key check)
     if(api_key == 'xyz' or api_key == 'gradio'):
         try:
+            warn = ""
             #if bot_id is not provided, create a new bot id
             if bot_id is None or bot_id == "":
                 bot_id = get_uuid_id()
@@ -137,6 +138,11 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
                     return {"message": "Failure: No bot found with bot id: " + bot_id}
                 #else load bot settings
                 else:
+                    #if user_prompt or youtube_urls are provided, warn user that they are being ignored
+                    if(user_prompt is not None and user_prompt != ""):
+                        warn +=  " Warning: user_prompt is ignored because bot_id is provided\n"
+                    if(youtube_urls is not None and youtube_urls != []):
+                        warn +=  " Warning: user_prompt is ignored because bot_id is provided\n"
                     user_prompt = bot['user_prompt']
                     youtube_urls = bot['youtube_urls']
             #get new response from ai
@@ -144,7 +150,7 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
             #store conversation (log the api_key)
             store_conversation(chat, user_prompt, youtube_urls, session, api_key)
             #return the chat and the bot_id
-            return {"message": "Success", "chat": chat, "bot_id": bot_id}
+            return {"message": "Success" + warn, "chat": chat, "bot_id": bot_id}
         except:
             return {"message": "Failure: Internal Error"}
     else:
