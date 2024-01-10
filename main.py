@@ -1,5 +1,4 @@
-#fastapi implementation of openprobono bot
-# from serpapi import GoogleSearch
+#fastapi implementation of youtube bot
 import uuid
 
 import firebase_admin
@@ -171,6 +170,7 @@ def read_root():
     return {"message": "It's OpenProBono !!"}
 
 tips = """Keys to good response:
+- Can use this tool to grab videos from playlist https://www.thetubelab.com/get-all-urls-of-youtube-playlist-channel/
 - Make sure videos includes only the youtuber talking, because we are grabbing the youtube generated captions, there is no way to differenciate between voices or backgroudn game audio which got captioned
 - There maybe mispellinngs / mistakes in the captions which cannot be avoided, espeically with foreign names/words
 - Include many / longer videos to get better results
@@ -189,7 +189,7 @@ def youtube(request: Annotated[
                     "description": "Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
                     "value": {
                         "history": [["hi", ""]],
-                        "youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"],
+                        "youtube_urls":["https://youtu.be/6XEOVaL5a1Q", "https://youtu.be/5Qu-TCVCO3Q"],
                         "api_key":"xyz",
                     },
                 },
@@ -199,16 +199,34 @@ def youtube(request: Annotated[
                     "value": {
                         "history": [["hi", ""]],
                         "user_prompt": "Respond like the youtuber in the context below.",
-                        "youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"],
+                        "youtube_urls":["https://youtu.be/6XEOVaL5a1Q", "https://youtu.be/5Qu-TCVCO3Q"],
                         "api_key":"xyz",
                     },
                 },
-                "call a previously created bot": {
-                    "summary": "call a previously created bot",
-                    "description": "Use a bot_id to call a bot that has already been created. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
+                "call the zealand bot": {
+                    "summary": "call the zealand bot",
+                    "description": "Use a bot_id to call a bot that has already been created for the youtuber zealand. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
                     "value": {
                         "history": [["hello there", ""]],
-                        "bot_id": "e71f312c-f943-4d03-bb4f-c7c14f617625",
+                        "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
+                        "api_key":"xyz",
+                    },
+                },
+                "call the sirlarr bot": {
+                    "summary": "call the sirlarr bot",
+                    "description": "Use a bot_id to call a bot that has already been created for the youtuber sirlarr. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
+                    "value": {
+                        "history": [["hello there", ""]],
+                        "bot_id": "6cd7e23f-8be1-4eb4-b18c-55795eb1aca1",
+                        "api_key":"xyz",
+                    },
+                },
+                "call the offhand disney bot": {
+                    "summary": "call the offhand disney bot",
+                    "description": "Use a bot_id to call a bot that has already been created for the youtuber offhand disney. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
+                    "value": {
+                        "history": [["hello there", ""]],
+                        "bot_id": "8368890b-a45e-4dd3-a0ba-03250ea0cf30",
                         "api_key":"xyz",
                     },
                 },
@@ -235,46 +253,26 @@ def youtube(request: Annotated[
     api_key = request_dict['api_key']
     return process(history, user_prompt, youtube_urls, session, bot_id, api_key)
 
-def gradio_process(prompt, youtube_urls, bot_id):
-    request = YoutubeRequest(
-        history=[[prompt, ""]], 
-        youtube_urls=[url.strip() for url in youtube_urls.split(",")],
-        bot_id=bot_id,
-        api_key="gradio",
-    )
-    response = youtube(request)
-    return response['chat'][-1][1], response['bot_id']
+# request_OPB = """
+# curl --header "Content-Type: application/json" \
+#   --request POST \
+#   --data '{"history":[["hi",""]],"api_key":"xyz"}' \
+#   http://35.232.62.221/bot
+# """
 
-with gr.Blocks() as app:
-    prompt = gr.Textbox(label="Prompt")
-    youtube_urls = gr.Textbox(label="Youtube URLs")
-    bot_id = gr.Textbox(label="Bot ID (optional, if included will ignore youtube urls)") #better explanation
-    submit = gr.Button("Submit")
-    reply = gr.Textbox(label="Output", interactive=False)
-    submit.click(gradio_process, inputs=[prompt, youtube_urls, bot_id], outputs=[reply, bot_id])
+# request_youtube = """
+# curl --header "Content-Type: application/json" \
+#   --request POST \
+#   --data '{"history":[["whats up lawerence?",""]],"youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"], "api_key":"xyz"}' \
+#   http://35.232.62.221/youtube
+# """
 
-gr.mount_gradio_app(api, app, path="/test")
-
-request_OPB = """
-curl --header "Content-Type: application/json" \
-  --request POST \
-  --data '{"history":[["hi",""]],"api_key":"xyz"}' \
-  http://35.232.62.221/bot
-"""
-
-request_youtube = """
-curl --header "Content-Type: application/json" \
-  --request POST \
-  --data '{"history":[["whats up lawerence?",""]],"youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"], "api_key":"xyz"}' \
-  http://35.232.62.221/youtube
-"""
-
-request_youtube = """
-curl --header "Content-Type: application/json" \
-  --request POST \
-  --data '{"history":[["whats up?",""]],"bot_id":"8e35157b-9717-4f7d-bc34-e3365ea98673", "api_key":"xyz"}' \
-  http://35.232.62.221/youtube
-"""
+# request_youtube = """
+# curl --header "Content-Type: application/json" \
+#   --request POST \
+#   --data '{"history":[["whats up?",""]],"bot_id":"8e35157b-9717-4f7d-bc34-e3365ea98673", "api_key":"xyz"}' \
+#   http://35.232.62.221/youtube
+# """
 
 
-#8e35157b-9717-4f7d-bc34-e3365ea98673
+# #8e35157b-9717-4f7d-bc34-e3365ea98673
