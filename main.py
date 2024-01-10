@@ -165,9 +165,9 @@ class YoutubeRequest(BaseModel):
 
 api = FastAPI()
 
-@api.get("/")
-def read_root():
-    return {"message": "It's OpenProBono !!"}
+# @api.get("/")
+# def read_root():
+#     return {"message": "It's OpenProBono !!"}
 
 tips = """Keys to good response:
 - Can use this tool to grab videos from playlist https://www.thetubelab.com/get-all-urls-of-youtube-playlist-channel/
@@ -231,8 +231,12 @@ def youtube(request: Annotated[
                     },
                 },
                 "full descriptions of every parameter": {
-                    "summary": "full descriptions of every parameter",
-                    "description": "This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n\n user_prompt: prompt to use for the bot, will use default if empty. \n\n session: session id, used for analytics/logging conversations, not necessary \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth",
+                    "summary": "Description and Tips",
+                    "description": """
+                        This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) 
+                        \n\n user_prompt: prompt to use for the bot, will use default if empty. \n\n session: session id, used for analytics/logging conversations, not necessary 
+                        \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth
+                        \n\n""" + tips,
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
                         "user_prompt": "prompt to use for the bot, will use the default of \"Respond in the same style as the youtuber in the context below.\" if empty",
