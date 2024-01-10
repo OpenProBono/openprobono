@@ -82,13 +82,15 @@ def call_agent(
     
     text = ""
     for url in youtube_urls:
-        loader = YoutubeLoader.from_youtube_url(
-            url, add_video_info=False
-        )
-        docs = loader.load()
-        # Combine doc
-        combined_docs = [doc.page_content for doc in docs]
-        text += " ".join(combined_docs)
+        try:
+            # Load the audio
+            loader = YoutubeAudioLoader.from_youtube_url(url)
+            docs = loader.load()
+            # Combine doc
+            combined_docs = [doc.page_content for doc in docs]
+            text += " ".join(combined_docs)
+        except: 
+            print("Error occured while loading transcript from video with url: " + url)
 
     # Split them
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
