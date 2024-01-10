@@ -62,6 +62,7 @@ def load_bot(bot_id):
 
 #TODO: cache vector db with bot_id
 #TODO: do actual chat memory
+#TODO: try cutting off intro and outro part of videos
 def call_agent(
     history, 
     user_prompt = "",
