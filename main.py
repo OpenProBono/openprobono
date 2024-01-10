@@ -84,7 +84,9 @@ def call_agent(
     for url in youtube_urls:
         try:
             # Load the audio
-            loader = YoutubeAudioLoader.from_youtube_url(url)
+            loader = YoutubeLoader.from_youtube_url(
+                url, add_video_info=False
+            )
             docs = loader.load()
             # Combine doc
             combined_docs = [doc.page_content for doc in docs]
