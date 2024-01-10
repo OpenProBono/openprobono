@@ -32,8 +32,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from pydantic import BaseModel
 
-# GoogleSearch.SERP_API_KEY = "5567e356a3e19133465bc68755a124268543a7dd0b2809d75b038797b43626ab"
-
 cred = credentials.Certificate("../../creds.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
@@ -165,11 +163,16 @@ class YoutubeRequest(BaseModel):
 
 api = FastAPI()
 
-# @api.get("/")
-# def read_root():
-#     return {"message": "It's OpenProBono !!"}
+@api.get("/")
+def read_root():
+    return {"message": "API is alive"}
 
-tips = """Keys to good response:
+helper = """
+This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) 
+\n\n user_prompt: prompt to use for the bot, will use default if empty. \n\n session: session id, used for analytics/logging conversations, not necessary 
+\n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth
+\n\n
+Keys to good response:
 - Can use this tool to grab videos from playlist https://www.thetubelab.com/get-all-urls-of-youtube-playlist-channel/
 - Make sure videos includes only the youtuber talking, because we are grabbing the youtube generated captions, there is no way to differenciate between voices or backgroudn game audio which got captioned
 - There maybe mispellinngs / mistakes in the captions which cannot be avoided, espeically with foreign names/words
@@ -180,7 +183,7 @@ tips = """Keys to good response:
 """
 
 @api.post("/youtube")
-def youtube(request: Annotated[
+def youtube_bot_request(request: Annotated[
         YoutubeRequest,
         Body(
             openapi_examples={
@@ -232,11 +235,7 @@ def youtube(request: Annotated[
                 },
                 "full descriptions of every parameter": {
                     "summary": "Description and Tips",
-                    "description": """
-                        This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) 
-                        \n\n user_prompt: prompt to use for the bot, will use default if empty. \n\n session: session id, used for analytics/logging conversations, not necessary 
-                        \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth
-                        \n\n""" + tips,
+                    "description": helper,
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
                         "user_prompt": "prompt to use for the bot, will use the default of \"Respond in the same style as the youtuber in the context below.\" if empty",
