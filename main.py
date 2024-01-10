@@ -122,7 +122,7 @@ def call_agent(
     return history
 
 def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
-    #if api key is valid (TODO: change this to a real api key)
+    #if api key is valid (TODO: change this to a real api key check)
     if(api_key == 'xyz' or api_key == 'gradio'):
         try:
             #if bot_id is not provided, create a new bot id
@@ -134,7 +134,7 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
                 bot = load_bot(bot_id)
                 #if bot is not found, create a new bot
                 if(bot is None):
-                    create_bot(bot_id, user_prompt, youtube_urls)
+                    return {"message": "Failure: No bot found with bot id: " + bot_id}
                 #else load bot settings
                 else:
                     user_prompt = bot['user_prompt']
@@ -168,10 +168,13 @@ tips = """Keys to good response:
 - Make sure videos includes only the youtuber talking, because we are grabbing the youtube generated captions, there is no way to differenciate between voices or backgroudn game audio which got captioned
 - There maybe mispellinngs / mistakes in the captions which cannot be avoided, espeically with foreign names/words
 - Include many / longer videos to get better results
+- BotID saves the parameters for the bot, so you can use the same bot multiple times
+    - the two parameters saved are user_prompt and youtube_urls
+    - if you pass in a bot_id, it will ignore the both of these parameters
 """
 
 @api.post("/youtube")
-def bot(request: Annotated[
+def youtube(request: Annotated[
         YoutubeRequest,
         Body(
             openapi_examples={
@@ -180,6 +183,16 @@ def bot(request: Annotated[
                     "description": "Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
                     "value": {
                         "history": [["hi", ""]],
+                        "youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"],
+                        "api_key":"xyz",
+                    },
+                },
+                "create new youtube bot with custom prompt": {
+                    "summary": "create new youtube bot with a custom prompt",
+                    "description": "Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
+                    "value": {
+                        "history": [["hi", ""]],
+                        "user_prompt": "Respond like the youtuber in the context below.",
                         "youtube_urls":["https://www.youtube.com/watch?v=wnRTpHKTJgM", "https://www.youtube.com/watch?v=QHjuFAbUkg0"],
                         "api_key":"xyz",
                     },
@@ -198,10 +211,10 @@ def bot(request: Annotated[
                     "description": "This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message) \n\n user_prompt: prompt to use for the bot, will use default if empty. \n\n session: session id, used for analytics/logging conversations, not necessary \n\n youtube_urls: a list of youtube urls used to create a new bot (only used if no bot_id is passed). \n\n bot_id: a bot id used to call previously created bots \n\n api_key: api key necessary for auth",
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
-                        "user_prompt": "prompt to use for the bot, will use default if empty",
+                        "user_prompt": "prompt to use for the bot, will use the default of \"Respond in the same style as the youtuber in the context below.\" if empty",
                         "session": "session id, used for analytics/logging conversations, not necessary",
-                        "youtube_urls":["url of youtube video", "url of youtube video", "urls are ignored if bot_id is passed"],
-                        "bot_id": "id of bot previously created",
+                        "youtube_urls":["url of youtube video", "url of youtube video", "url of youtube video"],
+                        "bot_id": "id of bot previously created, if bot_id is passed then youtube_urls and user_prompt are ignored",
                         "api_key": "api key necessary for auth",
                     },
                 },
@@ -217,16 +230,13 @@ def bot(request: Annotated[
     return process(history, user_prompt, youtube_urls, session, bot_id, api_key)
 
 def gradio_process(prompt, youtube_urls, bot_id):
-    print("gradio_process")
     request = YoutubeRequest(
         history=[[prompt, ""]], 
         youtube_urls=[url.strip() for url in youtube_urls.split(",")],
         bot_id=bot_id,
         api_key="gradio",
     )
-    print("request")
-    response = bot(request)
-    print("response")
+    response = youtube(request)
     return response['chat'][-1][1], response['bot_id']
 
 with gr.Blocks() as app:
