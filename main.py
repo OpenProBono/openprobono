@@ -80,7 +80,7 @@ def call_agent(
     chain_type_kwargs = {"prompt": PROMPT} 
     
     embeddings = OpenAIEmbeddings()
-    bot_path = "./youtube_bot_" + bot_id + ".index"
+    bot_path = "./youtube_bots/" + bot_id
     try: 
         vectordb = FAISS.load_local(bot_path, embeddings)
     except:
