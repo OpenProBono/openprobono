@@ -139,7 +139,7 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
                     if(user_prompt is not None and user_prompt != ""):
                         warn +=  " Warning: user_prompt is ignored because bot_id is provided\n"
                     if(youtube_urls is not None and youtube_urls != []):
-                        warn +=  " Warning: user_prompt is ignored because bot_id is provided\n"
+                        warn +=  " Warning: youtube_urls is ignored because bot_id is provided\n"
                     user_prompt = bot['user_prompt']
                     youtube_urls = bot['youtube_urls']
             #get new response from ai
