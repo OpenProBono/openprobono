@@ -62,6 +62,7 @@ def load_bot(bot_id):
 #TODO: try cutting off intro and outro part of videos
 def call_agent(
     history, 
+    bot_id,
     user_prompt = "",
     youtube_urls = [],
     session = ""):
@@ -78,28 +79,32 @@ def call_agent(
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
     chain_type_kwargs = {"prompt": PROMPT} 
     
-    text = ""
-    for url in youtube_urls:
-        try:
-            # Load the audio
-            loader = YoutubeLoader.from_youtube_url(
-                url, add_video_info=False
-            )
-            docs = loader.load()
-            # Combine doc
-            combined_docs = [doc.page_content for doc in docs]
-            text += " ".join(combined_docs)
-        except: 
-            print("Error occured while loading transcript from video with url: " + url)
-
-    # Split them
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
-    splits = text_splitter.split_text(text)
-
-    # Build an index
     embeddings = OpenAIEmbeddings()
-    vectordb = FAISS.from_texts(splits, embeddings)
+    bot_path = "./youtube_bot_" + bot_id + ".index"
+    try: 
+        vectordb = FAISS.load_local(bot_path, embeddings)
+    except:
+        text = ""
+        for url in youtube_urls:
+            try:
+                # Load the audio
+                loader = YoutubeLoader.from_youtube_url(
+                    url, add_video_info=False
+                )
+                docs = loader.load()
+                # Combine doc
+                combined_docs = [doc.page_content for doc in docs]
+                text += " ".join(combined_docs)
+            except: 
+                print("Error occured while loading transcript from video with url: " + url)
 
+        # Split them
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
+        splits = text_splitter.split_text(text)
+
+        # Build an index
+        vectordb = FAISS.from_texts(splits, embeddings)
+        vectordb.save_local(bot_path)
     
     # Build a QA chain
     qa_chain = RetrievalQA.from_chain_type(
@@ -143,7 +148,7 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
                     user_prompt = bot['user_prompt']
                     youtube_urls = bot['youtube_urls']
             #get new response from ai
-            chat = call_agent(history, user_prompt, youtube_urls, session)
+            chat = call_agent(history, bot_id, user_prompt, youtube_urls, session)
             #store conversation (log the api_key)
             store_conversation(chat, user_prompt, youtube_urls, session, api_key)
             #return the chat and the bot_id
