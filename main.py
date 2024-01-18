@@ -216,9 +216,6 @@ def openai_bot(history, session):
         async def async_case_search(q):
             return case_search(q)
         
-        def request_google(q):
-            return 'curl --get https://serpapi.com/search -d q="' + q + '" -d hl="en" -d gl="us" -d google_domain="google.com" ' + '-d api_key="' + SERP_API_KEY + '"'
-
         #Helper function for concurrent processing of search results, calls the summarizer llm
         def search_helper_summarizer(result):
             result.pop("displayed_link", None)
