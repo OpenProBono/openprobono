@@ -1,13 +1,10 @@
 # OPB bot main function
-def opb_bot(history, tools, user_prompt, session):
-    t1name = 'government-search'
-    t1txt = 'site:*.gov | site:*.edu | site:*scholar.google.com'
-    t1prompt = 'Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.'
-    t2name = 'case-search'
-    t2txt = 'site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com'
-    t2prompt = 'Use for finding case law. Always cite your sources.'
-    user_prompt = ''
-
+def opb_bot(
+    history,
+    bot_id,
+    tools,
+    user_prompt = "", 
+    session = ""):
     if(history[-1][0].strip() == ""):
         history[-1][1] = "Hi, how can I assist you today?"
         yield history 

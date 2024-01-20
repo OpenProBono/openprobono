@@ -52,11 +52,11 @@ GoogleSearch.SERP_API_KEY = 'e6e9a37144cdd3e3e40634f60ef69c1ea6e330dfa0d0cde5899
 def get_uuid_id():
     return str(uuid.uuid4())
 
-def store_conversation(conversation, user_prompt, youtube_urls, session, api_key):
+def store_conversation(conversation, user_prompt, youtube_urls, session, bot_id, api_key):
     (human, ai) = conversation[-1]
     if(session is None or session == ""):
         session = get_uuid_id()
-    data = {"human": human, "ai": ai, 'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'timestamp':  firestore.SERVER_TIMESTAMP, 'api_key': api_key}
+    data = {"human": human, "ai": ai, 'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'timestamp':  firestore.SERVER_TIMESTAMP, 'api_key': api_key, "bot_id":bot_id}
     db.collection("API_youtube_" + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
 
 def create_bot(bot_id, user_prompt, youtube_urls):
@@ -70,6 +70,7 @@ def load_bot(bot_id):
     else:
         return None
 
+#checks api key, determines which to call (youtube or opb, eventually will be all together)
 def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
     #if api key is valid (TODO: change this to a real api key check)
     if(api_key == 'xyz' or api_key == 'gradio'):
@@ -92,10 +93,16 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
                         warn +=  " Warning: user_prompt is ignored because bot_id is provided\n"
                     if(youtube_urls is not None and youtube_urls != []):
                         warn +=  " Warning: youtube_urls is ignored because bot_id is provided\n"
+                    if(tools is not None and tools != []):
+                        warn +=  " Warning: tools is ignored because bot_id is provided\n"
                     user_prompt = bot['user_prompt']
                     youtube_urls = bot['youtube_urls']
+                    tools = bot['tools']
             #get new response from ai
-            chat = youtube_bot(history, bot_id, user_prompt, youtube_urls, session)
+            if(tools is not None and tools != []):
+                chat = opb_bot(history, bot_id, tools, session)
+            else:
+                chat = youtube_bot(history, bot_id, user_prompt, youtube_urls, session)
             #store conversation (log the api_key)
             store_conversation(chat, user_prompt, youtube_urls, session, api_key)
             #return the chat and the bot_id
@@ -232,6 +239,7 @@ def fresh_bot(request: Annotated[
     request_dict = request.dict()
     history = request_dict['history']
     user_prompt = request_dict['user_prompt']
+    tools = request_dict['tools']
     youtube_urls = request_dict['youtube_urls']
     session = request_dict['session']
     bot_id = request_dict['bot_id']
