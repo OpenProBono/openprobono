@@ -48,22 +48,28 @@ def opb_bot(
                 new_dict['organic_results'] = [search_helper_summarizer(result) for result in results['organic_results']]
 
             return new_dict
-        
-        toolset = [
-        Tool(
-        name = t["name"], 
-        func = def search_tool(qr):
+
+        toolset = []
+        tool_names = []
+        for t in tools:
+            def search_tool(qr):
                 data = {"search": t['txt'] + " " + qr, 'prompt': t['prompt'], 'timestamp': firestore.SERVER_TIMESTAMP}
                 db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
                 return process_search(GoogleSearch({
                     'q': t['txt'] + " " + qr,
                     'num': 5
-                    }).get_dict()),
-        coroutine = async def async_search_tool(qr):
-            return search_tool(qr),
-        description = t1['description']
-        ) for tool in tools]
-        tool_names = [tool.name for tool in toolset]
+                    }).get_dict())
+
+            async def async_search_tool(qr):
+                return search_tool(qr)
+
+            toolset.append(Tool(
+                name = t["name"],
+                func = search_tool,
+                coroutine = async_search_tool,
+                description = t["description"]
+            )) 
+            tool_names.append(t["name"])
 
         ##----------------------- end of tools -----------------------##
 
@@ -205,8 +211,8 @@ def opb_bot(
 def youtube_bot(
     history,
     bot_id,
-    user_prompt = "",
     youtube_urls = [],
+    user_prompt = "",
     session = ""):
 
     if(user_prompt is None or user_prompt == ""):

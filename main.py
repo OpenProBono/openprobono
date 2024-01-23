@@ -52,19 +52,31 @@ GoogleSearch.SERP_API_KEY = 'e6e9a37144cdd3e3e40634f60ef69c1ea6e330dfa0d0cde5899
 def get_uuid_id():
     return str(uuid.uuid4())
 
-def store_conversation(conversation, user_prompt, youtube_urls, session, bot_id, api_key):
+def store_youtube_conversation(conversation, bot_id, youtube_urls, user_prompt, session, api_key):
     (human, ai) = conversation[-1]
+    t = firestore.SERVER_TIMESTAMP
     if(session is None or session == ""):
         session = get_uuid_id()
     data = {"human": human, "ai": ai, 'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'timestamp':  firestore.SERVER_TIMESTAMP, 'api_key': api_key, "bot_id":bot_id}
-    db.collection("API_youtube_" + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
+    db.collectio(root_path + "_Youtube_" + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
 
-def create_bot(bot_id, user_prompt, youtube_urls):
-    data = {'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'timestamp':  firestore.SERVER_TIMESTAMP}
-    db.collection("youtube_bots").document(bot_id).set(data)
+#storing conversation in firebase
+def store_conversation(conversation, bot_id, tools, user_prompt, session, api_key):
+    (human, ai) = conversation[-1]
+    t = firestore.SERVER_TIMESTAMP
+    if(session is None or session == ""):
+        session = get_uuid_id()
+    data = {"human": human, "ai": ai, "tools": t1name, 't1txt': t1txt, "t1prompt":t1prompt, "t2name": t2name, "t2txt":t2txt, "t2prompt":t2prompt, 'user_prompt': user_prompt, 'timestamp': t}
+    db.collection(root_path + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
+    db.collection(root_path + "conversations").document(session).set({"last_message_timestamp": t}, merge=True)
+
+
+def create_bot(bot_id, user_prompt, youtube_urls, tools):
+    data = {'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'tools': tools, 'timestamp':  firestore.SERVER_TIMESTAMP}
+    db.collection("all_bots").document(bot_id).set(data)
 
 def load_bot(bot_id):
-    bot = db.collection("youtube_bots").document(bot_id).get()
+    bot = db.collection("all_bots").document(bot_id).get()
     if(bot.exists):
         return bot.to_dict()
     else:
@@ -98,13 +110,16 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
                     user_prompt = bot['user_prompt']
                     youtube_urls = bot['youtube_urls']
                     tools = bot['tools']
-            #get new response from ai
-            if(tools is not None and tools != []):
-                chat = opb_bot(history, bot_id, tools, session)
+                    
+            #ONLY use youtube bot if youtube_urls is not empty
+            if(youtube_urls is not None and youtube_urls != []):
+                chat = youtube_bot(history, bot_id, youtube_urls, user_prompt, session)
+                store_youtube_conversation(chat, bot_id, youtube_urls, user_prompt, session, api_key)
             else:
-                chat = youtube_bot(history, bot_id, user_prompt, youtube_urls, session)
+                chat = opb_bot(history, bot_id, tools, user_prompt, session)
+                store_conversation(chat, bot_id, tools, user_prompt, session, api_key)
             #store conversation (log the api_key)
-            store_conversation(chat, user_prompt, youtube_urls, session, api_key)
+            
             #return the chat and the bot_id
             return {"message": "Success" + warn, "chat": chat, "bot_id": bot_id}
         except:
@@ -151,7 +166,7 @@ def youtube_bot_request(request: Annotated[
             openapi_examples={
                 "create new youtube bot": {
                     "summary": "create new youtube bot",
-                    "description": "Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
+                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
                     "value": {
                         "history": [["hi", ""]],
                         "youtube_urls":["https://youtu.be/6XEOVaL5a1Q", "https://youtu.be/5Qu-TCVCO3Q"],
@@ -160,7 +175,7 @@ def youtube_bot_request(request: Annotated[
                 },
                 "create new youtube bot with custom prompt": {
                     "summary": "create new youtube bot with a custom prompt",
-                    "description": "Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
+                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
                     "value": {
                         "history": [["hi", ""]],
                         "user_prompt": "Respond like the youtuber in the context below.",
@@ -170,7 +185,7 @@ def youtube_bot_request(request: Annotated[
                 },
                 "call the zealand bot": {
                     "summary": "call the zealand bot",
-                    "description": "Use a bot_id to call a bot that has already been created for the youtuber zealand. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
+                    "description": "Use a bot_id to call a bot that has already been created for the youtuber zealand. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
                     "value": {
                         "history": [["hello there", ""]],
                         "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
@@ -179,7 +194,7 @@ def youtube_bot_request(request: Annotated[
                 },
                 "call the sirlarr bot": {
                     "summary": "call the sirlarr bot",
-                    "description": "Use a bot_id to call a bot that has already been created for the youtuber sirlarr. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
+                    "description": "Use a bot_id to call a bot that has already been created for the youtuber sirlarr. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
                     "value": {
                         "history": [["hello there", ""]],
                         "bot_id": "6cd7e23f-8be1-4eb4-b18c-55795eb1aca1",
@@ -188,7 +203,7 @@ def youtube_bot_request(request: Annotated[
                 },
                 "call the offhand disney bot": {
                     "summary": "call the offhand disney bot",
-                    "description": "Use a bot_id to call a bot that has already been created for the youtuber offhand disney. \n\n  Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the bot id}",
+                    "description": "Use a bot_id to call a bot that has already been created for the youtuber offhand disney. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
                     "value": {
                         "history": [["hello there", ""]],
                         "bot_id": "8368890b-a45e-4dd3-a0ba-03250ea0cf30",
@@ -202,8 +217,8 @@ def youtube_bot_request(request: Annotated[
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
                         "user_prompt": "prompt to use for the bot, will use the default of \"Respond in the same style as the youtuber in the context below.\" if empty",
                         "session": "session id, used for analytics/logging conversations, not necessary",
-                        "tools": "tools to be used my the agent, not used in current version"
-                        "youtube_urls":["url of youtube video", "url of youtube video", "url of youtube video"],
+                        "tools": "tools to be used my the agent, not used in current version",
+                        "youtube_urls": ["url of youtube video", "url of youtube video", "url of youtube video"],
                         "bot_id": "id of bot previously created, if bot_id is passed then youtube_urls and user_prompt are ignored",
                         "api_key": "api key necessary for auth",
                     },
@@ -225,9 +240,9 @@ def fresh_bot(request: Annotated[
         BotRequest,
         Body(
             openapi_examples={
-                "create new youtube bot": {
-                    "summary": "create new youtube bot",
-                    "description": "Returns: {message: 'Success', chat: [[user message, ai reply]], bot_id: the new bot_id which was created}",
+                "create new bot": {
+                    "summary": "create new bot",
+                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
                     "value": {
                         "history": [["hi", ""]],
                         "api_key":"xyz",
