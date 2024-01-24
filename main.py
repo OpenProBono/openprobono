@@ -112,8 +112,8 @@ def process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
 
             #return the chat and the bot_id
             return {"message": "Success" + warn, "output": output, "bot_id": bot_id}
-        except:
-            return {"message": "Failure: Internal Error"}
+        except Exception as error:
+            return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Invalid API Key"}
 
