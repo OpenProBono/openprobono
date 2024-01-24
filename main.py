@@ -127,11 +127,10 @@ class BotRequest(BaseModel):
     session: str = None
     bot_id: str = None
     api_key: str = None
-    
-api_path = "/v2"
+
 api = FastAPI()
 
-@api.get(api_path+"/", tags=["General"])
+@api.get("/", tags=["General"])
 def read_root():
     return {"message": "API is alive"}
 
@@ -150,7 +149,7 @@ Keys to good response:
     - if you pass in a bot_id, it will ignore the both of these parameters
 """
 
-@api.post(api_path+"/youtube", tags=["Youtube API"])
+@api.post("/youtube", tags=["Youtube API"])
 def youtube_bot_request(request: Annotated[
         BotRequest,
         Body(
@@ -226,7 +225,7 @@ def youtube_bot_request(request: Annotated[
     api_key = request_dict['api_key']
     return process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
 
-@api.post(api_path+"/bot", tags=["General"])
+@api.post("/bot", tags=["General"])
 def bot(request: Annotated[
         BotRequest,
         Body(
