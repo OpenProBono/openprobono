@@ -104,7 +104,7 @@ def opb_bot(
                 name = t["name"],
                 func = search_tool,
                 coroutine = async_search_tool,
-                description = t["description"]
+                description = t["prompt"]
             )) 
             tool_names.append(t["name"])
 
@@ -201,7 +201,7 @@ def opb_bot(
 
         prompt_template = CustomPromptTemplate(
             template=template,
-            tools=tools,
+            tools=toolset,
             # This omits the `agent_scratchpad`, `tools`, and `tool_names` variables because those are generated dynamically
             # This includes the `intermediate_steps` variable because that is needed
             input_variables=["input", "intermediate_steps", "memory"]
@@ -222,7 +222,7 @@ def opb_bot(
                 stop=["\nObservation:"],
                 allowed_tools=tool_names
             )
-            agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=tools, memory=memory, verbose=True)
+            agent_executor = AgentExecutor.from_agent_and_tools(agent=agent, tools=toolset, memory=memory, verbose=True)
             ret = await agent_executor.arun(prompt)
             q.put(job_done)
             return ret

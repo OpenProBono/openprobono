@@ -236,10 +236,35 @@ def bot(request: Annotated[
                     "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
                     "value": {
                         "history": [["hi", ""]],
+                        "tools": [{
+                            "name": "google_search",
+                            "txt": "",
+                            "prompt": "Tool used to search the web, useful for current events or facts"
+                        }, {
+                            "name": "wikipedia",
+                            "txt": "site:*wikipedia.com",
+                            "prompt": "Tool used to search the wikipedia, useful for facts and biographies"
+                        }
+                        ],
                         "api_key":"xyz",
                     },
                 },
-
+                "full descriptions of every parameter": {
+                    "summary": "Description and Tips",
+                    "description": "full descriptions",
+                    "value": {
+                        "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
+                        "user_prompt": "prompt to use for the bot, this is appended to the beginning of the regular prompt",
+                        "session": "session id, used for analytics/logging conversations, not necessary",
+                        "tools": [{
+                            "name": "name for tool, doesn't matter really i think, currently all tools are google_search_tools",
+                            "txt": "where to put google search syntax to filter or whitelist results",
+                            "prompt": "description for agent to know when to use the tool"
+                        }],
+                        "bot_id": "id of bot previously created, if bot_id is passed then youtube_urls and user_prompt are ignored",
+                        "api_key": "api key necessary for auth",
+                    },
+                },
             },
         )]):
     request_dict = request.dict()
