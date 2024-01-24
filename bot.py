@@ -30,7 +30,7 @@ from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from pydantic import BaseModel
-
+from typing import Any, Dict, List, Optional, Union
 from anyio.from_thread import start_blocking_portal
 from queue import Queue
 import re
