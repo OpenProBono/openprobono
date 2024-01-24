@@ -52,8 +52,7 @@ GoogleSearch.SERP_API_KEY = 'e6e9a37144cdd3e3e40634f60ef69c1ea6e330dfa0d0cde5899
 def get_uuid_id():
     return str(uuid.uuid4())
 
-def store_conversation(conversation, bot_id, youtube_urls, tools, user_prompt, session, api_key):
-    (human, ai) = conversation[-1]
+def store_conversation(human, ai, bot_id, youtube_urls, tools, user_prompt, session, api_key):
     t = firestore.SERVER_TIMESTAMP
     if(session is None or session == ""):
         session = get_uuid_id()
@@ -108,7 +107,7 @@ def process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
                 output = opb_bot(history, bot_id, tools, user_prompt, session)
                 
             #store conversation (log the api_key)
-            store_conversation(chat, bot_id, youtube_urls, tools, user_prompt, session, api_key)
+            store_conversation(history[-1][0], output, bot_id, youtube_urls, tools, user_prompt, session, api_key)
 
             #return the chat and the bot_id
             return {"message": "Success" + warn, "output": output, "bot_id": bot_id}
