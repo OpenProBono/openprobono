@@ -82,7 +82,7 @@ def opb_bot(
             def search_tool(qr):
                 data = {"search": t['txt'] + " " + qr, 'prompt': t['prompt'], 'timestamp': firestore.SERVER_TIMESTAMP}
                 db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
-                return process_search(GoogleSearch({
+                return filtered_search(GoogleSearch({
                     'q': t['txt'] + " " + qr,
                     'num': 5
                     }).get_dict())
@@ -113,7 +113,7 @@ def opb_bot(
             #definition of llm used for bot
             prompt = "Using the tools at your disposal, answer the following question: " + prompt
             agent = initialize_agent(
-                tools=tools,
+                tools=toolset,
                 llm=bot_llm,
                 agent=AgentType.OPENAI_FUNCTIONS,
                 verbose=False,
