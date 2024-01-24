@@ -81,7 +81,6 @@ def opb_bot(
         for t in tools:
             def search_tool(qr):
                 data = {"search": t['txt'] + " " + qr, 'prompt': t['prompt'], 'timestamp': firestore.SERVER_TIMESTAMP}
-                db.collection(root_path + "search").document(session).collection('searches').document("search" + get_uuid_id()).set(data)
                 return filtered_search(GoogleSearch({
                     'q': t['txt'] + " " + qr,
                     'num': 5
