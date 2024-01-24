@@ -254,7 +254,7 @@ def bot(request: Annotated[
                     "description": "full descriptions",
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
-                        "user_prompt": "prompt to use for the bot, this is appended to the beginning of the regular prompt",
+                        "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",
                         "session": "session id, used for analytics/logging conversations, not necessary",
                         "tools": [{
                             "name": "name for tool, doesn't matter really i think, currently all tools are google_search_tools",

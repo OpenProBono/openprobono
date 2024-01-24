@@ -36,6 +36,8 @@ from queue import Queue
 import re
 from serpapi.google_search import GoogleSearch
 
+langchain.debug = True
+
 # OPB bot main function
 def opb_bot(
     history,
