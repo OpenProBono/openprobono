@@ -73,7 +73,7 @@ def load_bot(bot_id):
         return None
 
 #checks api key, determines which to call (youtube or opb, eventually will be all together)
-def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
+def process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key):
     #if api key is valid (TODO: change this to a real api key check)
     if(api_key == 'xyz' or api_key == 'gradio' or api_key == 'deniz_key'):
         try:
@@ -81,7 +81,7 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
             #if bot_id is not provided, create a new bot id
             if bot_id is None or bot_id == "":
                 bot_id = get_uuid_id()
-                create_bot(bot_id, user_prompt, youtube_urls)
+                create_bot(bot_id, user_prompt, youtube_urls, tools)
             #if bot_id is provided, load the bot
             else:
                 bot = load_bot(bot_id)
@@ -223,7 +223,7 @@ def youtube_bot_request(request: Annotated[
     session = request_dict['session']
     bot_id = request_dict['bot_id']
     api_key = request_dict['api_key']
-    return process(history, user_prompt, youtube_urls, session, bot_id, api_key)
+    return process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
 
 @api.post("/bot", tags=["General"])
 def bot(request: Annotated[
@@ -249,4 +249,4 @@ def bot(request: Annotated[
     session = request_dict['session']
     bot_id = request_dict['bot_id']
     api_key = request_dict['api_key']
-    return process(history, user_prompt, youtube_urls, session, bot_id, api_key)
+    return process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
