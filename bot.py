@@ -23,7 +23,7 @@ from langchain.document_loaders.generic import GenericLoader
 from langchain.document_loaders.parsers import OpenAIWhisperParser
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.llms import OpenAI
-from langchain.memory import ChatMessageHistory, ConversationBufferMemory
+from langchain.memory import ConversationSummaryBufferMemory, ChatMessageHistory
 from langchain.prompts import (BaseChatPromptTemplate, MessagesPlaceholder,
                                PromptTemplate)
 from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
@@ -43,6 +43,13 @@ def opb_bot(
     tools,
     user_prompt = "", 
     session = ""):
+
+    class MyCallbackHandler(BaseCallbackHandler):
+        def __init__(self, q):
+            self.q = q
+        def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+            self.q.put(token)
+
     if(history[-1][0].strip() == ""):
         return "Hi, how can I assist you today?"
     else:
