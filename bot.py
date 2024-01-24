@@ -132,9 +132,9 @@ def opb_bot(
             while True:
                 next_token = q.get(True)
                 if next_token is job_done:
-                    break
+                    return content
                 content += next_token
-                return content
+                
         
 
 
