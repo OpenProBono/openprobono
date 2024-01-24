@@ -44,7 +44,7 @@ def opb_bot(
     user_prompt = "", 
     session = ""):
     if(history[-1][0].strip() == ""):
-        yield "Hi, how can I assist you today?"
+        return "Hi, how can I assist you today?"
     else:
         q = Queue()
         job_done = object()
@@ -236,7 +236,7 @@ def opb_bot(
                 if next_token is job_done:
                     break
                 content += next_token
-                yield content
+                return content
 
 
 #TODO: cache vector db with bot_id
