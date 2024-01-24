@@ -1,4 +1,4 @@
-#fastapi implementation of youtube bot
+#fastapi implementation
 import uuid
 
 import firebase_admin
