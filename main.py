@@ -58,7 +58,7 @@ def store_conversation(conversation, bot_id, youtube_urls, tools, user_prompt, s
     if(session is None or session == ""):
         session = get_uuid_id()
     data = {"human": human, "ai": ai, 'user_prompt': user_prompt, 'tools': tools, 'youtube_urls': youtube_urls, 'timestamp': t, 'api_key': api_key, "bot_id":bot_id}
-    db.collectio(root_path + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
+    db.collection(root_path + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
     db.collection(root_path + "conversations").document(session).set({"last_message_timestamp": t}, merge=True)
 
 def create_bot(bot_id, user_prompt, youtube_urls, tools):
@@ -103,15 +103,15 @@ def process(history, user_prompt, youtube_urls, session, bot_id, api_key):
 
             #ONLY use youtube bot if youtube_urls is not empty
             if(youtube_urls is not None and youtube_urls != []):
-                chat = youtube_bot(history, bot_id, youtube_urls, user_prompt, session)
+                output = youtube_bot(history, bot_id, youtube_urls, user_prompt, session)
             else:
-                chat = opb_bot(history, bot_id, tools, user_prompt, session)
+                output = opb_bot(history, bot_id, tools, user_prompt, session)
                 
             #store conversation (log the api_key)
             store_conversation(chat, bot_id, youtube_urls, tools, user_prompt, session, api_key)
 
             #return the chat and the bot_id
-            return {"message": "Success" + warn, "chat": chat, "bot_id": bot_id}
+            return {"message": "Success" + warn, "output": output, "bot_id": bot_id}
         except:
             return {"message": "Failure: Internal Error"}
     else:

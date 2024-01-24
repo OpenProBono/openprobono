@@ -6,8 +6,7 @@ def opb_bot(
     user_prompt = "", 
     session = ""):
     if(history[-1][0].strip() == ""):
-        history[-1][1] = "Hi, how can I assist you today?"
-        yield history 
+        yield "Hi, how can I assist you today?"
     else:
         q = Queue()
         job_done = object()
@@ -199,10 +198,7 @@ def opb_bot(
                 if next_token is job_done:
                     break
                 content += next_token
-                history[-1] = (history[-1][0], content)
-
-                yield history
-
+                yield content
 
 
 #TODO: cache vector db with bot_id
@@ -265,8 +261,6 @@ def youtube_bot(
     query = history[-1][0]
     #check for empty query
     if(query.strip() == ""):
-        history[-1][1] = ""
+        return ""
     else:
-        history[-1][1] = qa_chain.run(query)
-
-    return history
+        return qa_chain.run(query)
