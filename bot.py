@@ -5,16 +5,15 @@ import langchain
 from typing import Annotated, List, Union, Tuple
 from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
-import gradio as gr
-from langchain import PromptTemplate
+from langchain import hub
+from langchain.prompts import PromptTemplate
 from langchain.agents import (AgentExecutor, AgentOutputParser, AgentType,
                               LLMSingleActionAgent, Tool, ZeroShotAgent,
                               initialize_agent)
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.callbacks.streaming_stdout_final_only import \
     FinalStreamingStdOutCallbackHandler
-from langchain.chains import LLMChain, RetrievalQA
-from langchain.chat_models import ChatOpenAI
+from langchain.chains import LLMChain, RetrievalQA, RetrievalQAWithSourcesChain, FlareChain, create_retrieval_chain
 from langchain.document_loaders import (TextLoader, UnstructuredURLLoader,
                                         YoutubeLoader)
 from langchain.document_loaders.blob_loaders.youtube_audio import \
@@ -22,19 +21,23 @@ from langchain.document_loaders.blob_loaders.youtube_audio import \
 from langchain.document_loaders.generic import GenericLoader
 from langchain.document_loaders.parsers import OpenAIWhisperParser
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI
 from langchain.memory import ConversationSummaryBufferMemory, ChatMessageHistory
 from langchain.prompts import (BaseChatPromptTemplate, MessagesPlaceholder,
                                PromptTemplate)
 from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain.vectorstores.faiss import FAISS
+from langchain.prompts import ChatPromptTemplate
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_openai.chat_models import ChatOpenAI
+from langchain_openai.llms import OpenAI
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional, Union
 from anyio.from_thread import start_blocking_portal
 from queue import Queue
 import re
 from serpapi.google_search import GoogleSearch
+import milvusdb
 
 langchain.debug = True
 
@@ -200,3 +203,79 @@ def youtube_bot(
         return ""
     else:
         return qa_chain.run(query)
+    
+def db_query(database_name: str, query: str, k: int = 4, user: str = None):
+    if milvusdb.check_params(database_name, query, k):
+        return milvusdb.check_params(database_name, query, k)
+    
+    db = milvusdb.load_db(database_name)
+    if user:
+        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
+    else:
+        retriever = db.as_retriever(search_kwargs={"k": k})
+
+    results = retriever.get_relevant_documents(query)
+    results_json = [{"text": result.page_content,
+                     "source": result.metadata["source"],
+                     "page": result.metadata["page"]} for result in results]
+    return {"message": "Success", "result": results_json}
+
+def db_retrieve(database_name: str, query: str, k: int = 4, user: str = None):
+    if milvusdb.check_params(database_name, query, k):
+        return milvusdb.check_params(database_name, query, k)
+    
+    db = milvusdb.load_db(database_name)
+    retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
+    llm = OpenAI(temperature=0)
+    if user:
+        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
+    else:
+        retriever = db.as_retriever(search_kwargs={"k": k})
+    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
+    retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
+    result = retrieval_chain.invoke({"input": query})
+    cited_sources = []
+    for doc in result["context"]:
+        cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
+    return {"message": "Success", "result": {"answer": result["answer"], "sources": cited_sources}}
+
+def db_bot(database_name: str, question: str, k: int = 4, user: str = None):
+    if milvusdb.check_params(database_name, question, k):
+        return milvusdb.check_params(database_name, question, k)
+    
+    db = milvusdb.load_db(database_name)
+    if user:
+        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
+    else:
+        retriever = db.as_retriever(search_kwargs={"k": k})
+    chain = RetrievalQAWithSourcesChain.from_chain_type(OpenAI(temperature=0),
+                                                        chain_type="stuff",
+                                                        retriever=retriever,
+                                                        return_source_documents=True)
+    result = chain.invoke({"question": question})
+    answer = result["answer"]
+    cited_sources = result["sources"].split(", ")
+    source_docs = result["source_documents"]
+    cited_sources_docs = []
+    for cited_source in cited_sources:
+        for doc in source_docs:
+            if doc.metadata["source"] == cited_source:
+                cited_sources_docs.append({"source": cited_source, "page": doc.metadata["page"]})
+    return {"message": "Success", "result": {"answer": answer.strip(), "sources": cited_sources_docs}}
+
+def db_flare(database_name: str, question: str, k: int = 4, user: str = None):
+    if milvusdb.check_params(database_name, question, k):
+        return milvusdb.check_params(database_name, question, k)
+    
+    db = milvusdb.load_db(database_name)
+    if user:
+        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
+    else:
+        retriever = db.as_retriever(search_kwargs={"k": k})
+    flare = FlareChain.from_llm(
+        ChatOpenAI(temperature=0),
+        retriever=retriever,
+        max_generation_len=164,
+        min_prob=0.3,
+    )
+    return {"message": "Success", "result": flare.invoke({"user_input": question})["response"].strip()}

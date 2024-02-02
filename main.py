@@ -37,9 +37,7 @@ from queue import Queue
 import re
 from serpapi.google_search import GoogleSearch
 
-from bot import opb_bot
-from bot import youtube_bot
-
+from bot import opb_bot, youtube_bot, db_bot, db_query, db_retrieve, db_flare
 
 cred = credentials.Certificate("../../creds.json")
 firebase_admin.initialize_app(cred)
@@ -129,11 +127,32 @@ class BotRequest(BaseModel):
     bot_id: str = None
     api_key: str = None
 
+class MilvusRequest(BaseModel):
+    database_name: str
+    query: str
+    k: int = 4
+
 api = FastAPI()
 
 @api.get("/", tags=["General"])
 def read_root():
     return {"message": "API is alive"}
+
+@api.post("/vdb-qa", tags=["Vector Database"])
+def vectordb_qa(req: MilvusRequest):
+    return db_bot(req.database_name, req.query, req.k, None)
+
+@api.post("/vdb-query", tags=["Vector Database"])
+def vectordb_query(req: MilvusRequest):
+    return db_query(req.database_name, req.query, req.k, None)
+
+@api.post("/vdb-retrieve", tags=["Vector Database"])
+def vectordb_retrieve(req: MilvusRequest):
+    return db_retrieve(req.database_name, req.query, req.k, None)
+
+@api.post("/vdb-flare", tags=["Vector Database"])
+def vectordb_flare(req: MilvusRequest):
+    return db_flare(req.database_name, req.query, req.k, None)
 
 helper = """
 This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message)

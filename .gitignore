@@ -1,4 +1,3 @@
-.venv/
-data/
-logs/
-youtube_bots/
+*
+!*.py
+!requirements.txt
