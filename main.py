@@ -51,6 +51,7 @@ from serpapi.google_search import GoogleSearch
 #  sudo nginx -t
 #  sudo systemctl restart nginx
 
+from bot import BotRequest
 from bot import opb_bot
 from bot import youtube_bot
 
@@ -62,15 +63,6 @@ root_path = 'api_'
 # manually set api key for now
 GoogleSearch.SERP_API_KEY = 'e6e9a37144cdd3e3e40634f60ef69c1ea6e330dfa0d0cde58991aa2552fff980'
 
-class BotRequest(BaseModel):
-    history: list
-    user_prompt: str = ""
-    message_prompt: str = ""
-    tools: list = []
-    youtube_urls: list = []
-    session: str = None
-    bot_id: str = None
-    api_key: str = None
 
 def get_uuid_id():
     return str(uuid.uuid4())
@@ -121,10 +113,10 @@ def process(r: BotRequest):
                         warn +=  " Warning: youtube_urls is ignored because bot_id is provided\n"
                     if(r.tools is not None and r.tools != []):
                         warn +=  " Warning: tools is ignored because bot_id is provided\n"
-                    r.user_prompt = bot['user_prompt']
-                    r.message_prompt = bot['message_prompt']
-                    r.youtube_urls = bot['youtube_urls']
-                    r.tools = bot['tools']
+                    r.user_prompt = bot['user_prompt'] if "user_prompt" in bot.keys() else ""
+                    r.message_prompt = bot['message_prompt'] if "message_prompt" in bot.keys() else ""
+                    r.youtube_urls = bot['youtube_urls'] or []
+                    r.tools = bot['tools'] or []
 
             #ONLY use youtube bot if youtube_urls is not empty
             if(r.youtube_urls is not None and r.youtube_urls != []):

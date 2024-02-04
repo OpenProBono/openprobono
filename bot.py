@@ -36,9 +36,18 @@ from queue import Queue
 import re
 from serpapi.google_search import GoogleSearch
 
-from main import BotRequest
-
 langchain.debug = True
+
+class BotRequest(BaseModel):
+    history: list
+    user_prompt: str = ""
+    message_prompt: str = ""
+    tools: list = []
+    youtube_urls: list = []
+    session: str = None
+    bot_id: str = None
+    api_key: str = None
+
 
 # OPB bot main function
 def opb_bot(r: BotRequest):
