@@ -1,3 +1,6 @@
+from typing import Any
+import requests
+import time
 import uuid
 
 import firebase_admin
@@ -34,7 +37,6 @@ from typing import Any, Dict, List, Optional, Union
 from anyio.from_thread import start_blocking_portal
 from queue import Queue
 import re
-from serpapi.google_search import GoogleSearch
 
 langchain.debug = True
 
@@ -47,6 +49,33 @@ class BotRequest(BaseModel):
     session: str = None
     bot_id: str = None
     api_key: str = None
+
+headers = {
+    'accept': 'application/json',
+    'Content-Type': 'application/json',
+}
+
+def search_tool_creator(name, txt, prompt):
+    def search_tool(qr, txt, prompt):
+        data = {"search": txt + " " + qr, 'prompt': prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
+        params = {
+            'key': 'AIzaSyDjhu4Wl0tIKphT92wAgw78zV2AFCd8c_M',
+            'cx': '31cf2b4b6383f4f33',
+            'q': txt + " " + qr,
+        }
+        return str(requests.get('https://www.googleapis.com/customsearch/v1', params=params, headers=headers).json())[0:6400]
+    
+    async def async_search_tool(qr, txt, prompt):
+        return search_tool(qr, txt, prompt)
+
+    tool_func = lambda qr: search_tool(qr, txt, prompt)
+    co_func = lambda qr: async_search_tool(qr, txt, prompt)
+    return Tool(
+                name = name,
+                func = tool_func,
+                coroutine = co_func,
+                description = prompt
+            )
 
 
 # OPB bot main function
@@ -84,24 +113,12 @@ def opb_bot(r: BotRequest):
         toolset = []
         tool_names = []
         for t in r.tools:
-            def search_tool(qr):
-                data = {"search": t['txt'] + " " + qr, 'prompt': t['prompt'], 'timestamp': firestore.SERVER_TIMESTAMP}
-                return filtered_search(GoogleSearch({
-                    'q': t['txt'] + " " + qr,
-                    'num': 5
-                    }).get_dict())
-
-            async def async_search_tool(qr):
-                return search_tool(qr)
-
-            toolset.append(Tool(
-                name = t["name"],
-                func = search_tool,
-                coroutine = async_search_tool,
-                description = t["prompt"]
-            )) 
+            toolset.append(search_tool_creator(t["name"],t["txt"],t["prompt"]))
             tool_names.append(t["name"])
 
+        print(toolset)
+        print("&&& toolset")
+        print(r.tools)
         ##----------------------- end of tools -----------------------##
 
 
