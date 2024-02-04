@@ -36,23 +36,19 @@ from queue import Queue
 import re
 from serpapi.google_search import GoogleSearch
 
+from main import BotRequest
+
 langchain.debug = True
 
 # OPB bot main function
-def opb_bot(
-    history,
-    bot_id,
-    tools,
-    user_prompt = "", 
-    session = ""):
-
+def opb_bot(r: BotRequest):
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, q):
             self.q = q
         def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
             self.q.put(token)
 
-    if(history[-1][0].strip() == ""):
+    if(r.history[-1][0].strip() == ""):
         return "Hi, how can I assist you today?"
     else:
         q = Queue()
@@ -62,8 +58,8 @@ def opb_bot(
         memory_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-1106')
 
         memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="memory", return_messages=True)
-        for i in range(1, len(history)-1):
-            memory.save_context({'input': history[i][0]}, {'output': history[i][1]})
+        for i in range(1, len(r.history)-1):
+            memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
 
         ##----------------------- tools -----------------------##
 
@@ -78,7 +74,7 @@ def opb_bot(
 
         toolset = []
         tool_names = []
-        for t in tools:
+        for t in r.tools:
             def search_tool(qr):
                 data = {"search": t['txt'] + " " + qr, 'prompt': t['prompt'], 'timestamp': firestore.SERVER_TIMESTAMP}
                 return filtered_search(GoogleSearch({
@@ -102,7 +98,7 @@ def opb_bot(
 
         #------- agent definition -------#
         system_message = 'You are a helpful AI assistant. ALWAYS use tools to answer questions.'
-        system_message += user_prompt
+        system_message += r.user_prompt
         system_message += '. If you used a tool, ALWAYS return a "SOURCES" part in your answer.'
         agent_kwargs = {
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
@@ -110,7 +106,7 @@ def opb_bot(
 
         async def task(prompt):
             #definition of llm used for bot
-            prompt = "Using the tools at your disposal, answer the following question: " + prompt
+            prompt = r.message_prompt + prompt
             agent = initialize_agent(
                 tools=toolset,
                 llm=bot_llm,
@@ -126,7 +122,7 @@ def opb_bot(
             return ret
 
         with start_blocking_portal() as portal:
-            portal.start_task_soon(task, history[-1][0])
+            portal.start_task_soon(task, r.history[-1][0])
             content = ""
             while True:
                 next_token = q.get(True)
@@ -140,17 +136,12 @@ def opb_bot(
 #TODO: cache vector db with bot_id
 #TODO: do actual chat memory
 #TODO: try cutting off intro and outro part of videos
-def youtube_bot(
-    history,
-    bot_id,
-    youtube_urls = [],
-    user_prompt = "",
-    session = ""):
+def youtube_bot(r: BotRequest):
 
-    if(user_prompt is None or user_prompt == ""):
-        user_prompt = "Respond in the same style as the youtuber in the context below."
+    if(r.user_prompt is None or r.user_prompt == ""):
+        r.user_prompt = "Respond in the same style as the youtuber in the context below."
 
-    prompt_template = user_prompt + """
+    prompt_template = r.user_prompt + """
     \n\nContext: {context}
     \n\n\n\n
     Question: {question}
@@ -160,12 +151,12 @@ def youtube_bot(
     chain_type_kwargs = {"prompt": PROMPT}
 
     embeddings = OpenAIEmbeddings()
-    bot_path = "./youtube_bots/" + bot_id
+    bot_path = "./youtube_bots/" + r.bot_id
     try:
         vectordb = FAISS.load_local(bot_path, embeddings)
     except:
         text = ""
-        for url in youtube_urls:
+        for url in r.youtube_urls:
             try:
                 # Load the audio
                 loader = YoutubeLoader.from_youtube_url(
@@ -194,9 +185,9 @@ def youtube_bot(
         chain_type_kwargs=chain_type_kwargs,
     )
 
-    query = history[-1][0]
+    query = r.history[-1][0]
     #check for empty query
     if(query.strip() == ""):
         return ""
     else:
-        return qa_chain.run(query)
+        return qa_chain.run(r.message_prompt + query)
