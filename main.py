@@ -151,33 +151,6 @@ def youtube_bot_request(request: Annotated[
                         "api_key":"xyz",
                     },
                 },
-                # "call the zealand bot": {
-                #     "summary": "call the zealand bot",
-                #     "description": "Use a bot_id to call a bot that has already been created for the youtuber zealand. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
-                #     "value": {
-                #         "history": [["hello there", ""]],
-                #         "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
-                #         "api_key":"xyz",
-                #     },
-                # },
-                # "call the sirlarr bot": {
-                #     "summary": "call the sirlarr bot",
-                #     "description": "Use a bot_id to call a bot that has already been created for the youtuber sirlarr. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
-                #     "value": {
-                #         "history": [["hello there", ""]],
-                #         "bot_id": "6cd7e23f-8be1-4eb4-b18c-55795eb1aca1",
-                #         "api_key":"xyz",
-                #     },
-                # },
-                # "call the offhand disney bot": {
-                #     "summary": "call the offhand disney bot",
-                #     "description": "Use a bot_id to call a bot that has already been created for the youtuber offhand disney. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
-                #     "value": {
-                #         "history": [["hello there", ""]],
-                #         "bot_id": "8368890b-a45e-4dd3-a0ba-03250ea0cf30",
-                #         "api_key":"xyz",
-                #     },
-                # },
                 "full descriptions of every parameter": {
                     "summary": "Description and Tips",
                     "description": helper,
@@ -196,15 +169,32 @@ def youtube_bot_request(request: Annotated[
     return process(request)
 
 @api.post("/bot", tags=["General"])
-def bot(request: Annotated[
+def chat(request: Annotated[
+        BotRequest,
+        Body(
+            openapi_examples={
+                "call a bot": {
+                    "summary": "call a bot using a bot_id",
+                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was used}",
+                    "value": {
+                        "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
+                        "api_key":"xyz",
+                    },
+                },
+            },
+        )]):
+    
+    return process(request)
+
+@api.post("/create_bot", tags=["General"])
+def new_bot(request: Annotated[
         BotRequest,
         Body(
             openapi_examples={
                 "create new bot": {
                     "summary": "create new bot",
-                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
+                    "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",
                     "value": {
-                        "history": [["hi", ""]],
                         "tools": [{
                             "name": "google_search",
                             "txt": "",
@@ -224,17 +214,18 @@ def bot(request: Annotated[
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
                         "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",
+                        "message_prompt": "prompt to use for the bot, this is appended each message",
                         "session": "session id, used for analytics/logging conversations, not necessary",
                         "tools": [{
                             "name": "name for tool, doesn't matter really i think, currently all tools are google_search_tools",
                             "txt": "where to put google search syntax to filter or whitelist results",
                             "prompt": "description for agent to know when to use the tool"
                         }],
-                        "bot_id": "id of bot previously created, if bot_id is passed then youtube_urls and user_prompt are ignored",
                         "api_key": "api key necessary for auth",
                     },
                 },
             },
         )]):
-    
-    return process(request)
+    request.bot_id = get_uuid_id()
+    create_bot(request)
+    return {"message": "Success", "bot_id": request.bot_id}
