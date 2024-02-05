@@ -1,42 +1,20 @@
+from queue import Queue
 from typing import Any
-import requests
-import time
-import uuid
 
-import firebase_admin
 import langchain
-from typing import Annotated, List, Union, Tuple
-from fastapi import Body, FastAPI
-from firebase_admin import credentials, firestore
-import gradio as gr
+from anyio.from_thread import start_blocking_portal
 from langchain import PromptTemplate
-from langchain.agents import (AgentExecutor, AgentOutputParser, AgentType,
-                              LLMSingleActionAgent, Tool, ZeroShotAgent,
-                              initialize_agent)
+from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
-from langchain.callbacks.streaming_stdout_final_only import \
-    FinalStreamingStdOutCallbackHandler
-from langchain.chains import LLMChain, RetrievalQA
+from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
-from langchain.document_loaders import (TextLoader, UnstructuredURLLoader,
-                                        YoutubeLoader)
-from langchain.document_loaders.blob_loaders.youtube_audio import \
-    YoutubeAudioLoader
-from langchain.document_loaders.generic import GenericLoader
-from langchain.document_loaders.parsers import OpenAIWhisperParser
+from langchain.document_loaders import YoutubeLoader
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI
-from langchain.memory import ConversationSummaryBufferMemory, ChatMessageHistory
-from langchain.prompts import (BaseChatPromptTemplate, MessagesPlaceholder,
-                               PromptTemplate)
-from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
+from langchain.memory import ConversationSummaryBufferMemory
+from langchain.prompts import MessagesPlaceholder, PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional, Union
-from anyio.from_thread import start_blocking_portal
-from queue import Queue
-import re
 
 from tools import search_toolset_creator, serpapi_toolset_creator
 

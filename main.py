@@ -1,41 +1,13 @@
 #fastapi implementation
+import os
 import uuid
+from typing import Annotated
 
 import firebase_admin
-import langchain
-from typing import Annotated, List, Union, Tuple
 from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
-import gradio as gr
-from langchain import PromptTemplate
-from langchain.agents import (AgentExecutor, AgentOutputParser, AgentType,
-                              LLMSingleActionAgent, Tool, ZeroShotAgent,
-                              initialize_agent)
-from langchain.callbacks.base import BaseCallbackHandler
-from langchain.callbacks.streaming_stdout_final_only import \
-    FinalStreamingStdOutCallbackHandler
-from langchain.chains import LLMChain, RetrievalQA
-from langchain.chat_models import ChatOpenAI
-from langchain.document_loaders import (TextLoader, UnstructuredURLLoader,
-                                        YoutubeLoader)
-from langchain.document_loaders.blob_loaders.youtube_audio import \
-    YoutubeAudioLoader
-from langchain.document_loaders.generic import GenericLoader
-from langchain.document_loaders.parsers import OpenAIWhisperParser
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI
-from langchain.memory import ChatMessageHistory, ConversationBufferMemory
-from langchain.prompts import (BaseChatPromptTemplate, MessagesPlaceholder,
-                               PromptTemplate)
-from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from pydantic import BaseModel
 
-from anyio.from_thread import start_blocking_portal
-from queue import Queue
-import re
-import os
+from bot import BotRequest, opb_bot, youtube_bot
 
 #Reread Supervisor's configuration file and restart the service by running these commands:
 #  sudo supervisorctl reread
@@ -51,9 +23,6 @@ import os
 #  sudo nginx -t
 #  sudo systemctl restart nginx
 
-from bot import BotRequest
-from bot import opb_bot
-from bot import youtube_bot
 
 cred = credentials.Certificate("../../creds.json")
 firebase_admin.initialize_app(cred)
