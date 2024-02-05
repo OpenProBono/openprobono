@@ -35,7 +35,7 @@ from pydantic import BaseModel
 from anyio.from_thread import start_blocking_portal
 from queue import Queue
 import re
-from serpapi.google_search import GoogleSearch
+import os
 
 #Reread Supervisor's configuration file and restart the service by running these commands:
 #  sudo supervisorctl reread
@@ -60,9 +60,10 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 # opb bot db root path has api prefix
 root_path = 'api_'
-# manually set api key for now
-GoogleSearch.SERP_API_KEY = 'e6e9a37144cdd3e3e40634f60ef69c1ea6e330dfa0d0cde58991aa2552fff980'
 
+# manually set api key for now
+OPENAI_API_KEY = db.collection("third_party_api_keys").document("openai").get().to_dict()['key']
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 def get_uuid_id():
     return str(uuid.uuid4())

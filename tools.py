@@ -1,12 +1,38 @@
+from langchain.agents import (AgentExecutor, AgentOutputParser, AgentType,
+                              LLMSingleActionAgent, Tool, ZeroShotAgent,
+                              initialize_agent)
 import requests
+import os
+import firebase_admin
+from firebase_admin import credentials, firestore
+from serpapi.google_search import GoogleSearch
 
+def check_api_keys():
+    if("SERPAPI_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_CX" in os.environ.keys()):
+        return True
+    cred = credentials.Certificate("../../creds.json")
+    firebase_admin.initialize_app(cred, name="tools_app_1")
+    db = firestore.client()
+
+    os.environ["SERPAPI_KEY"] = db.collection("third_party_api_keys").document("serpapi").get().to_dict()['key']
+    GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
+
+    os.environ["GOOGLE_SEARCH_API_KEY"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['key']
+
+    os.environ["GOOGLE_SEARCH_API_CX"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['cx']
+    return True
 
 def search_tool_creator(name, txt, prompt):
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+    }
+
     def search_tool(qr, txt, prompt):
         data = {"search": txt + " " + qr, 'prompt': prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
         params = {
-            'key': 'AIzaSyDjhu4Wl0tIKphT92wAgw78zV2AFCd8c_M',
-            'cx': '31cf2b4b6383f4f33',
+            'key': os.environ["GOOGLE_SEARCH_API_KEY"],
+            'cx': os.environ["GOOGLE_SEARCH_API_CX"],
             'q': txt + " " + qr,
         }
         return str(requests.get('https://www.googleapis.com/customsearch/v1', params=params, headers=headers).json())[0:6400]
@@ -16,6 +42,7 @@ def search_tool_creator(name, txt, prompt):
 
     tool_func = lambda qr: search_tool(qr, txt, prompt)
     co_func = lambda qr: async_search_tool(qr, txt, prompt)
+
     return Tool(
                 name = name,
                 func = tool_func,
@@ -24,6 +51,7 @@ def search_tool_creator(name, txt, prompt):
             )
 
 def search_toolset_creator(r):
+    check_api_keys()
     toolset = []
     for t in r.tools:
         toolset.append(search_tool_creator(t['name'], t['txt'], t['prompt']))
@@ -41,9 +69,9 @@ def serpapi_tool_creator(name, txt, prompt):
 
     def search_tool(qr, txt, prompt):
         return filtered_search(GoogleSearch({
-                    'q': t2txt + " " + q,
-                    'num': 5
-                    }).get_dict())
+            'q': txt + " " + qr,
+            'num': 5
+            }).get_dict())
     
     async def async_search_tool(qr, txt, prompt):
         return search_tool(qr, txt, prompt)
@@ -58,6 +86,7 @@ def serpapi_tool_creator(name, txt, prompt):
             )
 
 def serpapi_toolset_creator(r):
+    check_api_keys()
     toolset = []
     for t in r.tools:
         toolset.append(serpapi_tool_creator(t['name'], t['txt'], t['prompt']))

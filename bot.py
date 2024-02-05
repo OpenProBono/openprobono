@@ -38,7 +38,7 @@ from anyio.from_thread import start_blocking_portal
 from queue import Queue
 import re
 
-from tools import search_tool_creator, serpapi_tool_creator
+from tools import search_toolset_creator, serpapi_toolset_creator
 
 langchain.debug = True
 
@@ -51,11 +51,6 @@ class BotRequest(BaseModel):
     session: str = None
     bot_id: str = None
     api_key: str = None
-
-headers = {
-    'accept': 'application/json',
-    'Content-Type': 'application/json',
-}
 
 # OPB bot main function
 def opb_bot(r: BotRequest):
@@ -86,11 +81,13 @@ def opb_bot(r: BotRequest):
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
 
+        toolset = serpapi_toolset_creator(r)
+
         async def task(prompt):
             #definition of llm used for bot
             prompt = r.message_prompt + prompt
             agent = initialize_agent(
-                tools=search_toolset_creator(r),
+                tools=toolset,
                 llm=bot_llm,
                 agent=AgentType.OPENAI_FUNCTIONS,
                 verbose=False,
@@ -119,7 +116,6 @@ def opb_bot(r: BotRequest):
 #TODO: do actual chat memory
 #TODO: try cutting off intro and outro part of videos
 def youtube_bot(r: BotRequest):
-
     if(r.user_prompt is None or r.user_prompt == ""):
         r.user_prompt = "Respond in the same style as the youtuber in the context below."
 
