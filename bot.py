@@ -38,6 +38,8 @@ from anyio.from_thread import start_blocking_portal
 from queue import Queue
 import re
 
+from tools import search_tool_creator, serpapi_tool_creator
+
 langchain.debug = True
 
 class BotRequest(BaseModel):
@@ -54,29 +56,6 @@ headers = {
     'accept': 'application/json',
     'Content-Type': 'application/json',
 }
-
-def search_tool_creator(name, txt, prompt):
-    def search_tool(qr, txt, prompt):
-        data = {"search": txt + " " + qr, 'prompt': prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
-        params = {
-            'key': 'AIzaSyDjhu4Wl0tIKphT92wAgw78zV2AFCd8c_M',
-            'cx': '31cf2b4b6383f4f33',
-            'q': txt + " " + qr,
-        }
-        return str(requests.get('https://www.googleapis.com/customsearch/v1', params=params, headers=headers).json())[0:6400]
-    
-    async def async_search_tool(qr, txt, prompt):
-        return search_tool(qr, txt, prompt)
-
-    tool_func = lambda qr: search_tool(qr, txt, prompt)
-    co_func = lambda qr: async_search_tool(qr, txt, prompt)
-    return Tool(
-                name = name,
-                func = tool_func,
-                coroutine = co_func,
-                description = prompt
-            )
-
 
 # OPB bot main function
 def opb_bot(r: BotRequest):
@@ -99,29 +78,6 @@ def opb_bot(r: BotRequest):
         for i in range(1, len(r.history)-1):
             memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
 
-        ##----------------------- tools -----------------------##
-
-        #Filter search results retured by serpapi to only include relavant results
-        def filtered_search(results):
-            new_dict = {}
-            if('sports_results' in results):
-                new_dict['sports_results'] = results['sports_results']
-            if('organic_results' in results):
-                new_dict['organic_results'] = results['organic_results']
-            return new_dict
-
-        toolset = []
-        tool_names = []
-        for t in r.tools:
-            toolset.append(search_tool_creator(t["name"],t["txt"],t["prompt"]))
-            tool_names.append(t["name"])
-
-        print(toolset)
-        print("&&& toolset")
-        print(r.tools)
-        ##----------------------- end of tools -----------------------##
-
-
         #------- agent definition -------#
         system_message = 'You are a helpful AI assistant. ALWAYS use tools to answer questions.'
         system_message += r.user_prompt
@@ -134,7 +90,7 @@ def opb_bot(r: BotRequest):
             #definition of llm used for bot
             prompt = r.message_prompt + prompt
             agent = initialize_agent(
-                tools=toolset,
+                tools=search_toolset_creator(r),
                 llm=bot_llm,
                 agent=AgentType.OPENAI_FUNCTIONS,
                 verbose=False,
