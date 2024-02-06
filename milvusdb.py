@@ -6,15 +6,10 @@ from langchain.docstore.document import Document
 from langchain_community.vectorstores.milvus import Milvus
 from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
 from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
-from json import load
+from json import loads
 from typing import List
 
-#from langchain.globals import set_verbose
-#set_verbose(True)
-
-# Milvus
-with open("../../milvus_config.json") as f:
-    connection_args = load(f)
+connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 
