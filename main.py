@@ -1,44 +1,27 @@
 #fastapi implementation
+import os
 import uuid
+from typing import Annotated
 
 import firebase_admin
-import langchain
-from typing import Annotated, List, Union, Tuple
 from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
-import gradio as gr
-from langchain import PromptTemplate
-from langchain.agents import (AgentExecutor, AgentOutputParser, AgentType,
-                              LLMSingleActionAgent, Tool, ZeroShotAgent,
-                              initialize_agent)
-from langchain.callbacks.base import BaseCallbackHandler
-from langchain.callbacks.streaming_stdout_final_only import \
-    FinalStreamingStdOutCallbackHandler
-from langchain.chains import LLMChain, RetrievalQA
-from langchain.chat_models import ChatOpenAI
-from langchain.document_loaders import (TextLoader, UnstructuredURLLoader,
-                                        YoutubeLoader)
-from langchain.document_loaders.blob_loaders.youtube_audio import \
-    YoutubeAudioLoader
-from langchain.document_loaders.generic import GenericLoader
-from langchain.document_loaders.parsers import OpenAIWhisperParser
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI
-from langchain.memory import ChatMessageHistory, ConversationBufferMemory
-from langchain.prompts import (BaseChatPromptTemplate, MessagesPlaceholder,
-                               PromptTemplate)
-from langchain.schema import AgentAction, AgentFinish, AIMessage, HumanMessage
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from pydantic import BaseModel
 
-from anyio.from_thread import start_blocking_portal
-from queue import Queue
-import re
-from serpapi.google_search import GoogleSearch
+from bot import BotRequest, opb_bot, youtube_bot
 
-from bot import opb_bot
-from bot import youtube_bot
+#Reread Supervisor's configuration file and restart the service by running these commands:
+#  sudo supervisorctl reread
+#  sudo supervisorctl update
+
+#  sudo supervisorctl status
+#  sudo supervisorctl restart fastapi-app
+
+#where to change nginx config
+#  /etc/nginx/sites-available/fastapi-app
+
+#Test that the configuration file is OK and restart NGINX:
+#  sudo nginx -t
+#  sudo systemctl restart nginx
 
 
 cred = credentials.Certificate("../../creds.json")
@@ -46,25 +29,27 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 # opb bot db root path has api prefix
 root_path = 'api_'
+
 # manually set api key for now
-GoogleSearch.SERP_API_KEY = 'e6e9a37144cdd3e3e40634f60ef69c1ea6e330dfa0d0cde58991aa2552fff980'
+OPENAI_API_KEY = db.collection("third_party_api_keys").document("openai").get().to_dict()['key']
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 def get_uuid_id():
     return str(uuid.uuid4())
 
-def store_conversation(conversation, output, bot_id, youtube_urls, tools, user_prompt, session, api_key):
-    human = conversation[-1][0]
+def store_conversation(r: BotRequest, output):
+    human = r.history[-1][0]
     ai = output
     t = firestore.SERVER_TIMESTAMP
-    if(session is None or session == ""):
-        session = get_uuid_id()
-    data = {"human": human, "ai": ai, 'user_prompt': user_prompt, 'tools': tools, 'youtube_urls': youtube_urls, 'timestamp': t, 'api_key': api_key, "bot_id":bot_id}
-    db.collection(root_path + "conversations").document(session).collection('conversations').document("msg" + str(len(conversation))).set(data)
-    db.collection(root_path + "conversations").document(session).set({"last_message_timestamp": t}, merge=True)
+    if(r.session is None or r.session == ""):
+        r.session = get_uuid_id()
+    data = {"human": human, "ai": ai, 'user_prompt': r.user_prompt, 'message_prompt': r.message_prompt, 'tools': r.tools, 'youtube_urls': r.youtube_urls, 'timestamp': t, 'api_key': r.api_key, "bot_id":r.bot_id}
+    db.collection(root_path + "conversations").document(r.session).collection('conversations').document("msg" + str(len(r.history))).set(data)
+    db.collection(root_path + "conversations").document(r.session).set({"last_message_timestamp": t}, merge=True)
 
-def create_bot(bot_id, user_prompt, youtube_urls, tools):
-    data = {'user_prompt': user_prompt, 'youtube_urls': youtube_urls, 'tools': tools, 'timestamp':  firestore.SERVER_TIMESTAMP}
-    db.collection("all_bots").document(bot_id).set(data)
+def create_bot(r: BotRequest):
+    data = {'user_prompt': r.user_prompt, 'message_prompt': r.message_prompt, 'youtube_urls': r.youtube_urls, 'tools': r.tools, 'timestamp':  firestore.SERVER_TIMESTAMP}
+    db.collection("all_bots").document(r.bot_id).set(data)
 
 def load_bot(bot_id):
     bot = db.collection("all_bots").document(bot_id).get()
@@ -74,60 +59,52 @@ def load_bot(bot_id):
         return None
 
 #checks api key, determines which to call (youtube or opb, eventually will be all together)
-def process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key):
+def process(r: BotRequest):
     #if api key is valid (TODO: change this to a real api key check)
-    if(api_key == 'xyz' or api_key == 'gradio' or api_key == 'deniz_key'):
+    if(r.api_key == 'xyz' or r.api_key == 'gradio' or r.api_key == 'deniz_key'):
         try:
             warn = ""
             #if bot_id is not provided, create a new bot id
-            if bot_id is None or bot_id == "":
-                bot_id = get_uuid_id()
-                create_bot(bot_id, user_prompt, youtube_urls, tools)
+            if r.bot_id is None or r.bot_id == "":
+                r.bot_id = get_uuid_id()
+                create_bot(r)
             #if bot_id is provided, load the bot
             else:
-                bot = load_bot(bot_id)
+                bot = load_bot(r.bot_id)
                 #if bot is not found, create a new bot
                 if(bot is None):
-                    return {"message": "Failure: No bot found with bot id: " + bot_id}
+                    return {"message": "Failure: No bot found with bot id: " + r.bot_id}
                 #else load bot settings
                 else:
                     #if user_prompt or youtube_urls are provided, warn user that they are being ignored
-                    if(user_prompt is not None and user_prompt != ""):
+                    if(r.user_prompt is not None and r.user_prompt != ""):
                         warn +=  " Warning: user_prompt is ignored because bot_id is provided\n"
-                    if(youtube_urls is not None and youtube_urls != []):
+                    if(r.youtube_urls is not None and r.youtube_urls != []):
                         warn +=  " Warning: youtube_urls is ignored because bot_id is provided\n"
-                    if(tools is not None and tools != []):
+                    if(r.tools is not None and r.tools != []):
                         warn +=  " Warning: tools is ignored because bot_id is provided\n"
-                    user_prompt = bot['user_prompt']
-                    youtube_urls = bot['youtube_urls']
-                    tools = bot['tools']
+                    r.user_prompt = bot['user_prompt'] if "user_prompt" in bot.keys() else ""
+                    r.message_prompt = bot['message_prompt'] if "message_prompt" in bot.keys() else ""
+                    r.youtube_urls = bot['youtube_urls'] or []
+                    r.tools = bot['tools'] or []
 
             #ONLY use youtube bot if youtube_urls is not empty
-            if(youtube_urls is not None and youtube_urls != []):
-                output = youtube_bot(history, bot_id, youtube_urls, user_prompt, session)
+            if(r.youtube_urls is not None and r.youtube_urls != []):
+                output = youtube_bot(r)
             else:
-                output = opb_bot(history, bot_id, tools, user_prompt, session)
+                output = opb_bot(r)
                 
             #store conversation (log the api_key)
-            store_conversation(history, output, bot_id, youtube_urls, tools, user_prompt, session, api_key)
+            store_conversation(r, output)
 
             #return the chat and the bot_id
-            return {"message": "Success" + warn, "output": output, "bot_id": bot_id}
+            return {"message": "Success" + warn, "output": output, "bot_id": r.bot_id}
         except Exception as error:
             return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Invalid API Key"}
 
 # FastAPI 
-
-class BotRequest(BaseModel):
-    history: list
-    user_prompt: str = ""
-    tools: list = []
-    youtube_urls: list = []
-    session: str = None
-    bot_id: str = None
-    api_key: str = None
 
 api = FastAPI()
 
@@ -174,33 +151,6 @@ def youtube_bot_request(request: Annotated[
                         "api_key":"xyz",
                     },
                 },
-                # "call the zealand bot": {
-                #     "summary": "call the zealand bot",
-                #     "description": "Use a bot_id to call a bot that has already been created for the youtuber zealand. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
-                #     "value": {
-                #         "history": [["hello there", ""]],
-                #         "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
-                #         "api_key":"xyz",
-                #     },
-                # },
-                # "call the sirlarr bot": {
-                #     "summary": "call the sirlarr bot",
-                #     "description": "Use a bot_id to call a bot that has already been created for the youtuber sirlarr. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
-                #     "value": {
-                #         "history": [["hello there", ""]],
-                #         "bot_id": "6cd7e23f-8be1-4eb4-b18c-55795eb1aca1",
-                #         "api_key":"xyz",
-                #     },
-                # },
-                # "call the offhand disney bot": {
-                #     "summary": "call the offhand disney bot",
-                #     "description": "Use a bot_id to call a bot that has already been created for the youtuber offhand disney. \n\n  Returns: {message: 'Success', output: ai_reply, bot_id: the bot id}",
-                #     "value": {
-                #         "history": [["hello there", ""]],
-                #         "bot_id": "8368890b-a45e-4dd3-a0ba-03250ea0cf30",
-                #         "api_key":"xyz",
-                #     },
-                # },
                 "full descriptions of every parameter": {
                     "summary": "Description and Tips",
                     "description": helper,
@@ -216,26 +166,35 @@ def youtube_bot_request(request: Annotated[
                 },
             },
         )]):
-    request_dict = request.dict()
-    history = request_dict['history']
-    user_prompt = request_dict['user_prompt']
-    tools = request_dict['tools']
-    youtube_urls = request_dict['youtube_urls']
-    session = request_dict['session']
-    bot_id = request_dict['bot_id']
-    api_key = request_dict['api_key']
-    return process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
+    return process(request)
 
 @api.post("/bot", tags=["General"])
-def bot(request: Annotated[
+def chat(request: Annotated[
+        BotRequest,
+        Body(
+            openapi_examples={
+                "call a bot": {
+                    "summary": "call a bot using a bot_id",
+                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was used}",
+                    "value": {
+                        "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
+                        "api_key":"xyz",
+                    },
+                },
+            },
+        )]):
+    
+    return process(request)
+
+@api.post("/create_bot", tags=["General"])
+def new_bot(request: Annotated[
         BotRequest,
         Body(
             openapi_examples={
                 "create new bot": {
                     "summary": "create new bot",
-                    "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
+                    "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",
                     "value": {
-                        "history": [["hi", ""]],
                         "tools": [{
                             "name": "google_search",
                             "txt": "",
@@ -255,24 +214,18 @@ def bot(request: Annotated[
                     "value": {
                         "history": [["user message 1", "ai replay 1"], ["user message 2", "ai replay 2"], ["user message 3", "ai replay 3"]],
                         "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",
+                        "message_prompt": "prompt to use for the bot, this is appended each message",
                         "session": "session id, used for analytics/logging conversations, not necessary",
                         "tools": [{
                             "name": "name for tool, doesn't matter really i think, currently all tools are google_search_tools",
                             "txt": "where to put google search syntax to filter or whitelist results",
                             "prompt": "description for agent to know when to use the tool"
                         }],
-                        "bot_id": "id of bot previously created, if bot_id is passed then youtube_urls and user_prompt are ignored",
                         "api_key": "api key necessary for auth",
                     },
                 },
             },
         )]):
-    request_dict = request.dict()
-    history = request_dict['history']
-    user_prompt = request_dict['user_prompt']
-    tools = request_dict['tools']
-    youtube_urls = request_dict['youtube_urls']
-    session = request_dict['session']
-    bot_id = request_dict['bot_id']
-    api_key = request_dict['api_key']
-    return process(history, user_prompt, youtube_urls, tools, session, bot_id, api_key)
+    request.bot_id = get_uuid_id()
+    create_bot(request)
+    return {"message": "Success", "bot_id": request.bot_id}
