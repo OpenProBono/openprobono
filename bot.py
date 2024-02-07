@@ -1,43 +1,50 @@
+from queue import Queue
+from typing import Any
+
 import langchain
-from firebase_admin import firestore
+from anyio.from_thread import start_blocking_portal
 from langchain import hub
-from langchain.prompts import PromptTemplate
-from langchain.agents import AgentType, Tool, initialize_agent
+from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, FlareChain, create_retrieval_chain
-from langchain.document_loaders.youtube import YoutubeLoader
-from langchain.memory import ConversationSummaryBufferMemory
-from langchain.prompts import MessagesPlaceholder, PromptTemplate
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores.faiss import FAISS
-from langchain.prompts import ChatPromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_openai import OpenAIEmbeddings
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_openai.llms import OpenAI
-from typing import Any
-from anyio.from_thread import start_blocking_portal
-from queue import Queue
-from serpapi.google_search import GoogleSearch
+from langchain_openai import OpenAIEmbeddings
+from langchain.document_loaders.youtube import YoutubeLoader
+from langchain.memory import ConversationSummaryBufferMemory
+from langchain.prompts import MessagesPlaceholder, PromptTemplate, ChatPromptTemplate
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores.faiss import FAISS
+from pydantic import BaseModel
+
+from tools import search_toolset_creator, serpapi_toolset_creator
 import milvusdb
 
-langchain.debug = True
+class BotRequest(BaseModel):
+    history: list
+    user_prompt: str = ""
+    message_prompt: str = ""
+    tools: list = []
+    youtube_urls: list = []
+    session: str = None
+    bot_id: str = None
+    api_key: str = None
+
+class MilvusRequest(BaseModel):
+    database_name: str
+    query: str
+    k: int = 4
 
 # OPB bot main function
-def opb_bot(
-    history,
-    bot_id,
-    tools,
-    user_prompt = "", 
-    session = ""):
-
+def opb_bot(r: BotRequest):
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, q):
             self.q = q
         def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
             self.q.put(token)
 
-    if(history[-1][0].strip() == ""):
+    if(r.history[-1][0].strip() == ""):
         return "Hi, how can I assist you today?"
     else:
         q = Queue()
@@ -47,55 +54,22 @@ def opb_bot(
         memory_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-1106')
 
         memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="memory", return_messages=True)
-        for i in range(1, len(history)-1):
-            memory.save_context({'input': history[i][0]}, {'output': history[i][1]})
-
-        ##----------------------- tools -----------------------##
-
-        #Filter search results retured by serpapi to only include relavant results
-        def filtered_search(results):
-            new_dict = {}
-            if('sports_results' in results):
-                new_dict['sports_results'] = results['sports_results']
-            if('organic_results' in results):
-                new_dict['organic_results'] = results['organic_results']
-            return new_dict
-
-        toolset = []
-        tool_names = []
-        for t in tools:
-            def search_tool(qr):
-                data = {"search": t['txt'] + " " + qr, 'prompt': t['prompt'], 'timestamp': firestore.SERVER_TIMESTAMP}
-                return filtered_search(GoogleSearch({
-                    'q': t['txt'] + " " + qr,
-                    'num': 5
-                    }).get_dict())
-
-            async def async_search_tool(qr):
-                return search_tool(qr)
-
-            toolset.append(Tool(
-                name = t["name"],
-                func = search_tool,
-                coroutine = async_search_tool,
-                description = t["prompt"]
-            )) 
-            tool_names.append(t["name"])
-
-        ##----------------------- end of tools -----------------------##
-
+        for i in range(1, len(r.history)-1):
+            memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
 
         #------- agent definition -------#
         system_message = 'You are a helpful AI assistant. ALWAYS use tools to answer questions.'
-        system_message += user_prompt
+        system_message += r.user_prompt
         system_message += '. If you used a tool, ALWAYS return a "SOURCES" part in your answer.'
         agent_kwargs = {
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
 
+        toolset = serpapi_toolset_creator(r)
+
         async def task(prompt):
             #definition of llm used for bot
-            prompt = "Using the tools at your disposal, answer the following question: " + prompt
+            prompt = r.message_prompt + prompt
             agent = initialize_agent(
                 tools=toolset,
                 llm=bot_llm,
@@ -111,7 +85,7 @@ def opb_bot(
             return ret
 
         with start_blocking_portal() as portal:
-            portal.start_task_soon(task, history[-1][0])
+            portal.start_task_soon(task, r.history[-1][0])
             content = ""
             while True:
                 next_token = q.get(True)
@@ -125,17 +99,11 @@ def opb_bot(
 #TODO: cache vector db with bot_id
 #TODO: do actual chat memory
 #TODO: try cutting off intro and outro part of videos
-def youtube_bot(
-    history,
-    bot_id,
-    youtube_urls = [],
-    user_prompt = "",
-    session = ""):
+def youtube_bot(r: BotRequest):
+    if(r.user_prompt is None or r.user_prompt == ""):
+        r.user_prompt = "Respond in the same style as the youtuber in the context below."
 
-    if(user_prompt is None or user_prompt == ""):
-        user_prompt = "Respond in the same style as the youtuber in the context below."
-
-    prompt_template = user_prompt + """
+    prompt_template = r.user_prompt + """
     \n\nContext: {context}
     \n\n\n\n
     Question: {question}
@@ -145,12 +113,12 @@ def youtube_bot(
     chain_type_kwargs = {"prompt": PROMPT}
 
     embeddings = OpenAIEmbeddings()
-    bot_path = "./youtube_bots/" + bot_id
+    bot_path = "./youtube_bots/" + r.bot_id
     try:
         vectordb = FAISS.load_local(bot_path, embeddings)
     except:
         text = ""
-        for url in youtube_urls:
+        for url in r.youtube_urls:
             try:
                 # Load the audio
                 loader = YoutubeLoader.from_youtube_url(
@@ -179,12 +147,12 @@ def youtube_bot(
         chain_type_kwargs=chain_type_kwargs,
     )
 
-    query = history[-1][0]
+    query = r.history[-1][0]
     #check for empty query
     if(query.strip() == ""):
         return ""
     else:
-        return qa_chain.run(query)
+        return qa_chain.run(r.message_prompt + query)
     
 def db_query(database_name: str, query: str, k: int = 4, user: str = None):
     """
