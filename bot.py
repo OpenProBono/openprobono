@@ -4,6 +4,7 @@ from typing import Any
 import langchain
 from anyio.from_thread import start_blocking_portal
 from langchain import hub
+from langchain.embeddings.base import Embeddings
 from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, FlareChain, create_retrieval_chain
@@ -11,6 +12,7 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_openai.llms import OpenAI
 from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.document_loaders.youtube import YoutubeLoader
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.prompts import MessagesPlaceholder, PromptTemplate, ChatPromptTemplate
@@ -20,6 +22,8 @@ from pydantic import BaseModel
 
 from tools import search_toolset_creator, serpapi_toolset_creator
 import milvusdb
+
+langchain.debug = True
 
 class BotRequest(BaseModel):
     history: list
@@ -154,7 +158,7 @@ def youtube_bot(r: BotRequest):
     else:
         return qa_chain.run(r.message_prompt + query)
     
-def db_query(database_name: str, query: str, k: int = 4, user: str = None):
+def db_query(database_name: str, query: str, k: int = 4, user: str = None, embedding_function: Embeddings = OpenAIEmbeddings()):
     """
     Runs query on database_name and returns the top k chunks
 
@@ -169,7 +173,7 @@ def db_query(database_name: str, query: str, k: int = 4, user: str = None):
     if milvusdb.check_params(database_name, query, k):
         return milvusdb.check_params(database_name, query, k)
     
-    db = milvusdb.load_db(database_name)
+    db = milvusdb.load_db(database_name, embedding_function)
     if user:
         retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
     else:
@@ -181,7 +185,7 @@ def db_query(database_name: str, query: str, k: int = 4, user: str = None):
                      "page": result.metadata["page"]} for result in results]
     return {"message": "Success", "result": results_json}
 
-def db_retrieve(database_name: str, query: str, k: int = 4, user: str = None):
+def db_retrieve(database_name: str, query: str, k: int = 4, user: str = None, embedding_function: Embeddings = OpenAIEmbeddings()):
     """
     Runs query on database_name and returns an answer along with the top k source chunks
 
@@ -198,7 +202,7 @@ def db_retrieve(database_name: str, query: str, k: int = 4, user: str = None):
     if milvusdb.check_params(database_name, query, k):
         return milvusdb.check_params(database_name, query, k)
     
-    db = milvusdb.load_db(database_name)
+    db = milvusdb.load_db(database_name, embedding_function)
     retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
     llm = OpenAI(temperature=0)
     if user:
@@ -213,7 +217,7 @@ def db_retrieve(database_name: str, query: str, k: int = 4, user: str = None):
         cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
     return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
 
-def db_bot(database_name: str, question: str, k: int = 4, user: str = None):
+def db_bot(database_name: str, question: str, k: int = 4, user: str = None, embedding_function: Embeddings = OpenAIEmbeddings()):
     """
     Runs the question query on database_name and returns an answer along with cited sources from the top k chunks
 
@@ -228,7 +232,7 @@ def db_bot(database_name: str, question: str, k: int = 4, user: str = None):
     if milvusdb.check_params(database_name, question, k):
         return milvusdb.check_params(database_name, question, k)
     
-    db = milvusdb.load_db(database_name)
+    db = milvusdb.load_db(database_name, embedding_function)
     if user:
         retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
     else:
@@ -248,7 +252,7 @@ def db_bot(database_name: str, question: str, k: int = 4, user: str = None):
                 cited_sources_docs.append({"source": cited_source, "page": doc.metadata["page"]})
     return {"message": "Success", "result": {"answer": answer.strip(), "sources": cited_sources_docs}}
 
-def db_flare(database_name: str, question: str, k: int = 4, user: str = None):
+def db_flare(database_name: str, question: str, k: int = 4, user: str = None, embedding_function: Embeddings = OpenAIEmbeddings()):
     """
     Runs the question query on database_name and returns an answer using a retriever that returns the top k chunks
 
@@ -265,7 +269,7 @@ def db_flare(database_name: str, question: str, k: int = 4, user: str = None):
     if milvusdb.check_params(database_name, question, k):
         return milvusdb.check_params(database_name, question, k)
     
-    db = milvusdb.load_db(database_name)
+    db = milvusdb.load_db(database_name, embedding_function)
     if user:
         retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
     else:
@@ -277,3 +281,5 @@ def db_flare(database_name: str, question: str, k: int = 4, user: str = None):
         min_prob=0.4,
     )
     return {"message": "Success", "result": flare.invoke({"user_input": question})["response"].strip()}
+
+print(db_retrieve("USCodeLB", "What is the punishment for mutilating the flag?", embedding_function=HuggingFaceEmbeddings(model_name="nlpaueb/legal-bert-base-uncased")))
