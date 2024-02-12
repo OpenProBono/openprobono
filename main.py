@@ -1,13 +1,15 @@
 #fastapi implementation
 import os
 import uuid
+from json import loads
+from os import environ
 from typing import Annotated
 
 import firebase_admin
 from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
 
-from bot import BotRequest, opb_bot, youtube_bot
+from bot import BotRequest, call_chain, opb_bot, youtube_bot
 
 #Reread Supervisor's configuration file and restart the service by running these commands:
 #  sudo supervisorctl reread
@@ -24,15 +26,12 @@ from bot import BotRequest, opb_bot, youtube_bot
 #  sudo systemctl restart nginx
 
 
-cred = credentials.Certificate("../../creds.json")
+firebase_config = loads(environ["Firebase"])
+cred = credentials.Certificate(firebase_config)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 # opb bot db root path has api prefix
 root_path = 'api_'
-
-# manually set api key for now
-OPENAI_API_KEY = db.collection("third_party_api_keys").document("openai").get().to_dict()['key']
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 def get_uuid_id():
     return str(uuid.uuid4())
@@ -92,11 +91,14 @@ def process(r: BotRequest):
             if(r.youtube_urls is not None and r.youtube_urls != []):
                 output = youtube_bot(r)
             else:
-                output = opb_bot(r)
-                
+                if(r.beta):
+                    output = call_chain(r)
+                else:
+                    output = opb_bot(r)
+            "after call chain"
             #store conversation (log the api_key)
             store_conversation(r, output)
-
+            print("after store")
             #return the chat and the bot_id
             return {"message": "Success" + warn, "output": output, "bot_id": r.bot_id}
         except Exception as error:
@@ -132,7 +134,7 @@ def youtube_bot_request(request: Annotated[
         BotRequest,
         Body(
             openapi_examples={
-                "create new youtube bot": {
+                "create new bot": {
                     "summary": "create new youtube bot",
                     "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was created}",
                     "value": {
@@ -177,7 +179,7 @@ def chat(request: Annotated[
                     "summary": "call a bot using a bot_id",
                     "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was used}",
                     "value": {
-                        "bot_id": "6e39115b-c771-49af-bb12-4cef3d072b45",
+                        "bot_id": "609c2f9e-1bc2-4905-b18f-5431950e597a",
                         "api_key":"xyz",
                     },
                 },
@@ -229,3 +231,6 @@ def new_bot(request: Annotated[
     request.bot_id = get_uuid_id()
     create_bot(request)
     return {"message": "Success", "bot_id": request.bot_id}
+
+
+# print(process(BotRequest(history=[["hi", ""]], api_key="xyz", bot_id="609c2f9e-1bc2-4905-b18f-5431950e597a")))

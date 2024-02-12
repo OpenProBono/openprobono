@@ -1,4 +1,6 @@
 import os
+from json import loads
+from os import environ
 
 import firebase_admin
 import requests
@@ -6,21 +8,23 @@ from firebase_admin import credentials, firestore
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
+GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
+# def check_api_keys():
+#     if("SERPAPI_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_CX" in os.environ.keys()):
+#         GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
+#         return True
+#     firebase_config = loads(environ["Firebase"])
+#     cred = credentials.Certificate(firebase_config)
+#     firebase_admin.initialize_app(cred)
+#     db = firestore.client()
 
-def check_api_keys():
-    if("SERPAPI_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_CX" in os.environ.keys()):
-        return True
-    cred = credentials.Certificate("../../creds.json")
-    firebase_admin.initialize_app(cred, name="tools_app_1")
-    db = firestore.client()
+#     os.environ["SERPAPI_KEY"] = db.collection("third_party_api_keys").document("serpapi").get().to_dict()['key']
+#     GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
-    os.environ["SERPAPI_KEY"] = db.collection("third_party_api_keys").document("serpapi").get().to_dict()['key']
-    GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
+#     os.environ["GOOGLE_SEARCH_API_KEY"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['key']
 
-    os.environ["GOOGLE_SEARCH_API_KEY"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['key']
-
-    os.environ["GOOGLE_SEARCH_API_CX"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['cx']
-    return True
+#     os.environ["GOOGLE_SEARCH_API_CX"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['cx']
+#     return True
 
 def search_tool_creator(name, txt, prompt):
     headers = {
@@ -51,7 +55,7 @@ def search_tool_creator(name, txt, prompt):
             )
 
 def search_toolset_creator(r):
-    check_api_keys()
+    # check_api_keys()
     toolset = []
     for t in r.tools:
         toolset.append(search_tool_creator(t['name'], t['txt'], t['prompt']))
@@ -86,7 +90,7 @@ def serpapi_tool_creator(name, txt, prompt):
             )
 
 def serpapi_toolset_creator(r):
-    check_api_keys()
+    # check_api_keys()
     toolset = []
     for t in r.tools:
         toolset.append(serpapi_tool_creator(t['name'], t['txt'], t['prompt']))
