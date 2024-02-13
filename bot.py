@@ -7,10 +7,13 @@ from urllib import response
 import langchain
 from anyio.from_thread import start_blocking_portal
 from langchain import PromptTemplate
-from langchain.agents import AgentType, initialize_agent
+from langchain.agents import AgentExecutor, AgentType, initialize_agent
+from langchain.agents.format_scratchpad.openai_tools import \
+    format_to_openai_tool_messages
+from langchain.agents.output_parsers.openai_tools import \
+    OpenAIToolsAgentOutputParser
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatOpenAI
 from langchain.document_loaders import YoutubeLoader
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationSummaryBufferMemory
@@ -19,6 +22,7 @@ from langchain.prompts import (ChatPromptTemplate, MessagesPlaceholder,
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from tools import search_toolset_creator, serpapi_toolset_creator
@@ -96,6 +100,53 @@ def opb_bot(r: BotRequest):
                 if next_token is job_done:
                     return content
                 content += next_token
+
+def beta_bot(r: BotRequest):
+    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+
+    memory_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-1106')
+
+    memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="memory", return_messages=True)
+    for i in range(1, len(r.history)-1):
+        memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
+
+    if(r.search_tool_method == "google_search"):
+        toolset = search_toolset_creator(r)
+    else:
+        toolset = serpapi_toolset_creator(r)
+    print("toolset")
+    print(toolset)
+    llm_with_tools = llm.bind_tools(toolset)
+
+    MEMORY_KEY = "chat_history"
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are very powerful assistant, but bad at calculating lengths of words.",
+            ),
+            #MessagesPlaceholder(variable_name=MEMORY_KEY),
+            ("user", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ]
+    )
+    print("agent")
+    agent = (
+        {
+            "input": lambda x: x["input"],
+            "agent_scratchpad": lambda x: format_to_openai_tool_messages(
+                x["intermediate_steps"]
+            ),
+            #"chat_history": lambda x: x["chat_history"],
+        }
+        | prompt
+        | llm_with_tools
+        | OpenAIToolsAgentOutputParser()
+    )
+
+    agent_executor = AgentExecutor(agent=agent, tools=toolset, verbose=True)
+    print("invoke")
+    print(agent_executor.invoke({"input": r.history[-1][0],})) #"chat_history": memory}))
 
 # need to make this whole chain work with message history and documents/vdb
 def relevance_check(r: BotRequest):
@@ -263,5 +314,3 @@ def youtube_bot(r: BotRequest):
 # print(relevance_check(BotRequest(history=[["What are the health effects of alcohol?", ""]])))
 # print(user_info_check(BotRequest(history=[["What is the country with the highest alcohol age limit?", ""]])))
 # print(user_info_check(BotRequest(history=[["Is it legal to make a right turn on red in NYC?", ""]])))
-
-# print(opb_bot(BotRequest(history=[["What are the health effects of alcohol?", ""]], bot_id="609c2f9e-1bc2-4905-b18f-5431950e597a")))

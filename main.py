@@ -9,7 +9,7 @@ import firebase_admin
 from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
 
-from bot import BotRequest, call_chain, opb_bot, youtube_bot
+from bot import BotRequest, beta_bot, call_chain, opb_bot, youtube_bot
 
 #Reread Supervisor's configuration file and restart the service by running these commands:
 #  sudo supervisorctl reread
@@ -92,7 +92,7 @@ def process(r: BotRequest):
                 output = youtube_bot(r)
             else:
                 if(r.beta):
-                    output = call_chain(r)
+                    output = beta_bot(r)
                 else:
                     output = opb_bot(r)
             "after call chain"
@@ -179,8 +179,10 @@ def chat(request: Annotated[
                     "summary": "call a bot using a bot_id",
                     "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the new bot_id which was used}",
                     "value": {
+                        "history": [["hi", ""]],
                         "bot_id": "609c2f9e-1bc2-4905-b18f-5431950e597a",
                         "api_key":"xyz",
+                        "beta:": 0
                     },
                 },
             },
@@ -234,3 +236,5 @@ def new_bot(request: Annotated[
 
 
 # print(process(BotRequest(history=[["hi", ""]], api_key="xyz", bot_id="609c2f9e-1bc2-4905-b18f-5431950e597a")))
+
+print(process(BotRequest(history=[["What are the health effects of alcohol?", ""]], beta=1, bot_id="609c2f9e-1bc2-4905-b18f-5431950e597a", api_key="xyz")))

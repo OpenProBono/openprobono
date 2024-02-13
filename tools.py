@@ -1,11 +1,14 @@
 import os
 from json import loads
 from os import environ
+from typing import Type
 
 import firebase_admin
 import requests
 from firebase_admin import credentials, firestore
 from langchain.agents import Tool
+from langchain.tools import BaseTool, StructuredTool, tool
+from pydantic import BaseModel, Field
 from serpapi.google_search import GoogleSearch
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
@@ -25,6 +28,9 @@ GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
 #     os.environ["GOOGLE_SEARCH_API_CX"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['cx']
 #     return True
+
+class SearchToolSchema(BaseModel):
+    query: str = Field(default="", description="The search query")
 
 def search_tool_creator(name, txt, prompt):
     headers = {
@@ -46,8 +52,9 @@ def search_tool_creator(name, txt, prompt):
 
     tool_func = lambda qr: search_tool(qr, txt, prompt)
     co_func = lambda qr: async_search_tool(qr, txt, prompt)
-
-    return Tool(
+    args_schema: Type[SearchToolSchema] = SearchToolSchema()
+    return StructuredTool(
+                args_schema = args_schema,
                 name = name,
                 func = tool_func,
                 coroutine = co_func,
@@ -82,7 +89,8 @@ def serpapi_tool_creator(name, txt, prompt):
 
     tool_func = lambda qr: search_tool(qr, txt, prompt)
     co_func = lambda qr: async_search_tool(qr, txt, prompt)
-    return Tool(
+    return StructuredTool(
+                args_schema=SearchToolSchema(),
                 name = name,
                 func = tool_func,
                 coroutine = co_func,
