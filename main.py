@@ -113,7 +113,7 @@ def chat(request: Annotated[
                     "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was used}",
                     "value": {
                         "history": [["hi!", ""]],
-                        "bot_id": "39e6d5c3-4e3c-4281-93d7-4f7c8db8833bc",
+                        "bot_id": "39e6d5c3-4e3c-4281-93d7-4f7c8db8833b",
                         "api_key":"xyz",
                     },
                 },
