@@ -13,6 +13,7 @@ import encoder
 from unstructured.partition.pdf import partition_pdf
 from unstructured.chunking.basic import chunk_elements
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
+from fastapi import UploadFile
 
 with open("milvus_config.json") as f:
     connection_args = load(f)
@@ -34,6 +35,11 @@ PDF_LOADERS = {PYPDF, UNSTRUCTURED}
 ENCODERS = {NC: encoder.OPENAI,
             US: encoder.OPENAI,
             USER: encoder.OPENAI}
+SEARCH_PARAMS = {
+    "anns_field": "vector",
+    "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
+    "output_fields": ["text", "source", "page"]
+}
 
 def load_db(collection_name: str):
     return Milvus(
@@ -55,29 +61,25 @@ def check_params(database_name: str, query: str, k: int, user: str = None):
     if user is None and database_name == USER:
         return {"message": "Failure: missing user"}
 
-def query(database_name: str, query: str, expr: str = None, k: int = 4, user: str = None):
+def query(database_name: str, query: str, k: int = 4, expr: str = None, user: str = None):
     if check_params(database_name, query, k, user):
         return check_params(database_name, query, k, user)
     
     coll = Collection(database_name)
     coll.load()
-    search_params = {
-        "data": encoder.embed_query(query, ENCODERS[database_name]),
-        "anns_field": "vector",
-        "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
-        "limit": k,
-        "output_fields": ["text", "source", "page"]
-    }
+    SEARCH_PARAMS["data"] = encoder.embed_query(query, ENCODERS[database_name])
+    SEARCH_PARAMS["limit"] = k
+
     if expr:
-        search_params["expr"] = expr
+        SEARCH_PARAMS["expr"] = expr
     if user:
         user_filter = f"user=='{user}'"
         # append to existing filter expr or create new filter
         if expr:
-            search_params["expr"] += f" and {user_filter}"
+            SEARCH_PARAMS["expr"] += f" and {user_filter}"
         else:
-            search_params["expr"] = user_filter
-    res = coll.search(**search_params)
+            SEARCH_PARAMS["expr"] = user_filter
+    res = coll.search(**SEARCH_PARAMS)
     if res:
         # on success, returns a list containing a single inner list containing result objects
         if len(res) == 1:
@@ -128,7 +130,7 @@ def create_collection_pdf(collection_name: str, directory: str, encoder_name: st
         embedding_dim = 1536
     # define schema, create collection, create index on vectors
     pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=int(1.5 * max_chunk_size))
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
     source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
     page_field = FieldSchema(name="page", dtype=DataType.INT16, description="The page number")
@@ -163,7 +165,7 @@ def upload_pdfs(collection_name: str, directory: str, pdf_loader: str, encoder_n
         tokenizer = encoder.get_tokenizer(encoder_name)
         for i, fname in enumerate(files, start=1):
             print(f'{i}: {fname}')
-            upload_pdf_unstructured(coll, directory, fname, max_chunk_size, chunk_overlap, model, tokenizer, user)
+            upload_pdf_unstructured(coll, directory, fname, max_chunk_size, chunk_overlap, model, tokenizer, user=user)
 
 def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: TextSplitter, embedding: Embeddings, user: str = None):
     if not fname.endswith(".pdf"):
@@ -187,6 +189,21 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
     if num_docs != len(ids):
         print(f" error: expected {num_docs} uploads but got {len(ids)}")
 
+def userupload_pdf(file: UploadFile, max_chunk_size: int, chunk_overlap: int, user: str):
+    elements = partition_pdf(file=file.file)
+    chunks = chunk_elements(elements, max_characters=max_chunk_size, overlap=chunk_overlap)
+    documents = []
+    for chunk in chunks:
+        doc = Document(chunk.text)
+        doc.metadata["source"] = file.filename
+        doc.metadata["page"] = chunk.metadata.page_number
+        doc.metadata["user"] = user
+        documents.append(doc)
+    ids = load_db(USER).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    if len(documents) != len(ids):
+        return {"message": f"Failure: expected {len(documents)} uploads but got {len(ids)}"}
+    return {"message": f"Success: {len(documents)} chunks uploaded"}
+
 def upload_pdf_unstructured(collection: Collection, directory: str, fname: str, max_chunk_size: int, chunk_overlap: int, model: PreTrainedModel,
                             tokenizer: PreTrainedTokenizerBase, batch_size: int = 1000, user: str = None):
     if not fname.endswith(".pdf"):
@@ -205,7 +222,8 @@ def upload_pdf_unstructured(collection: Collection, directory: str, fname: str, 
         [fname] * len(chunk_embeddings), # source
         [chunk.metadata.page_number for chunk in chunks] # page number
     ]
-    print(f' inserting {len(data) / batch_size if len(data) % batch_size == 0 else len(data) // batch_size + 1} batches of embeddings')
+    num_batches = len(data[0]) / batch_size if len(data[0]) % batch_size == 0 else len(data[0]) // batch_size + 1
+    print(f' inserting {num_batches} batch{"es" if num_batches > 1 else ""} of embeddings')
     for i in range(0, len(data), batch_size):
         batch_vector = data[0][i: i + batch_size]
         batch_text = data[1][i: i + batch_size]

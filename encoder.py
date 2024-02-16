@@ -1,7 +1,7 @@
 import torch
 from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 from transformers.modeling_outputs import BaseModelOutput
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings, HuggingFaceHubEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from unstructured.chunking.base import Element
 
@@ -9,6 +9,8 @@ device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is
 OPENAI = "openai"
 MPNET = "sentence-transformers/all-mpnet-base-v2"
 MINILM = "sentence-transformers/all-MiniLM-L6-v2"
+LEGALBERT = "nlpaueb/legal-bert-base-uncased"
+BERT = "bert-base-uncased"
 
 def get_model(model_name: str):
     return AutoModel.from_pretrained(model_name).to(device)
@@ -19,8 +21,10 @@ def get_tokenizer(model_name: str):
 def embedding_function(model_name: str):
     if model_name == OPENAI:
         return OpenAIEmbeddings()
-    else:
+    elif model_name == MPNET or model_name == MINILM:
         return HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": device})
+    else:
+        return HuggingFaceHubEmbeddings(model=model_name)
 
 def tokenize_embed_chunks(chunks: list[Element], model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
     num_chunks = len(chunks)

@@ -2,14 +2,11 @@
 import uuid
 import firebase_admin
 from typing import Annotated
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, UploadFile
 from firebase_admin import credentials, firestore
 from bot import BotRequest, MilvusRequest, opb_bot, youtube_bot, db_bot, db_query, db_retrieve, db_flare
-from json import loads
-from os import environ
-
-firebase_config = loads(environ["Firebase"])
-cred = credentials.Certificate(firebase_config)
+from milvusdb import userupload_pdf
+cred = credentials.Certificate("creds.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 # opb bot db root path has api prefix
@@ -108,6 +105,20 @@ def vectordb_retrieve(req: MilvusRequest):
 @api.post("/vdb-flare", tags=["Vector Database"])
 def vectordb_flare(req: MilvusRequest):
     return db_flare(req.database_name, req.query, req.k, None)
+
+@api.post("/vdb-upload-file", tags=["Vector Database"])
+def vectordb_upload(file: UploadFile):
+    user = "FastAPIUser"
+    return userupload_pdf(file, 1000, 150, user)
+
+@api.post("/vdb-upload-files", tags=["Vector Database"])
+def vectordb_upload(files: list[UploadFile]):
+    user = "FastAPIUser"
+    for i, file in enumerate(files, start=1):
+        result = userupload_pdf(file, 1000, 150, user)
+        if result["message"].startswith("Failure"):
+            return {"message": f"Failure: upload #{i} with filename {file.filename} failed"}
+    return {"message": f"Success: {len(files)} files uploaded"}
 
 helper = """
 This is an description of all the parameters that can be used. \n\n history: a list of messages in the conversation. (currently chat history is not working, ignores everything but last user message)

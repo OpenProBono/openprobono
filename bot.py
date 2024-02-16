@@ -4,7 +4,6 @@ from typing import Any
 import langchain
 from anyio.from_thread import start_blocking_portal
 from langchain import hub
-from langchain.embeddings.base import Embeddings
 from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, FlareChain, create_retrieval_chain
