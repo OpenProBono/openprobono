@@ -18,7 +18,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
 from pydantic import BaseModel
 
-from tools import search_toolset_creator, serpapi_toolset_creator
+from tools import BotTool, toolset_creator
 import milvusdb
 
 langchain.debug = True
@@ -27,7 +27,7 @@ class BotRequest(BaseModel):
     history: list
     user_prompt: str = ""
     message_prompt: str = ""
-    tools: list = []
+    tools: list[BotTool] = []
     youtube_urls: list = []
     session: str = None
     bot_id: str = None
@@ -67,7 +67,7 @@ def opb_bot(r: BotRequest):
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
 
-        toolset = serpapi_toolset_creator(r)
+        toolset = toolset_creator(r.tools)
 
         async def task(prompt):
             #definition of llm used for bot
@@ -82,7 +82,7 @@ def opb_bot(r: BotRequest):
                 #return_intermediate_steps=True
             )
             agent.agent.prompt.messages[0].content = system_message
-            ret = await agent.arun(prompt)
+            ret = await agent.ainvoke(prompt)
             q.put(job_done)
             return ret
 

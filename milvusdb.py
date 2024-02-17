@@ -1,4 +1,9 @@
 import os
+from langchain import hub
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_openai.llms import OpenAI
+from langchain.prompts import ChatPromptTemplate
 from langchain.embeddings.base import Embeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.vectorstores import VectorStoreRetriever, Field
@@ -233,6 +238,38 @@ def upload_pdf_unstructured(collection: Collection, directory: str, fname: str, 
         if user:
             batch.append([user] * batch_size)
         collection.insert(batch)
+
+def qa(database_name: str, query: str, k: int = 4, user: str = None):
+    """
+    Runs query on database_name and returns an answer along with the top k source chunks
+
+    This should be similar to db_bot, but using newer langchain LCEL
+
+    Args
+        database_name: the name of a pymilvus.Collection
+        query: the user query
+        k: return the top k chunks
+        user: the username for filtering user data
+
+    Returns dict with success or failure message and a result if success
+    """
+    if check_params(database_name, query, k, user):
+        return check_params(database_name, query, k, user)
+    
+    db = load_db(database_name)
+    retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
+    llm = OpenAI(temperature=0)
+    if user:
+        retriever = FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
+    else:
+        retriever = db.as_retriever(search_kwargs={"k": k})
+    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
+    retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
+    result = retrieval_chain.invoke({"input": query})
+    cited_sources = []
+    for doc in result["context"]:
+        cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
+    return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
 
 class FilteredRetriever(VectorStoreRetriever):
     vectorstore: VectorStoreRetriever

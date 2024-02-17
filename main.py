@@ -21,12 +21,12 @@ def store_conversation(r: BotRequest, output):
     t = firestore.SERVER_TIMESTAMP
     if(r.session is None or r.session == ""):
         r.session = get_uuid_id()
-    data = {"human": human, "ai": ai, 'user_prompt': r.user_prompt, 'message_prompt': r.message_prompt, 'tools': r.tools, 'youtube_urls': r.youtube_urls, 'timestamp': t, 'api_key': r.api_key, "bot_id":r.bot_id}
+    data = {"human": human, "ai": ai, 'user_prompt': r.user_prompt, 'message_prompt': r.message_prompt, 'tools': [tool.model_dump() for tool in r.tools], 'youtube_urls': r.youtube_urls, 'timestamp': t, 'api_key': r.api_key, "bot_id":r.bot_id}
     db.collection(root_path + "conversations").document(r.session).collection('conversations').document("msg" + str(len(r.history))).set(data)
     db.collection(root_path + "conversations").document(r.session).set({"last_message_timestamp": t}, merge=True)
 
 def create_bot(r: BotRequest):
-    data = {'user_prompt': r.user_prompt, 'message_prompt': r.message_prompt, 'youtube_urls': r.youtube_urls, 'tools': r.tools, 'timestamp':  firestore.SERVER_TIMESTAMP}
+    data = {'user_prompt': r.user_prompt, 'message_prompt': r.message_prompt, 'youtube_urls': r.youtube_urls, 'tools': [tool.model_dump() for tool in r.tools], 'timestamp':  firestore.SERVER_TIMESTAMP}
     db.collection("all_bots").document(r.bot_id).set(data)
 
 def load_bot(bot_id):
