@@ -205,14 +205,23 @@ def new_bot(request: Annotated[
                     "value": {
                         "tools": [{
                             "name": "google_search",
-                            "txt": "",
-                            "prompt": "Tool used to search the web, useful for current events or facts"
+                            "params": {
+                                "txt": "",
+                                "prompt": "Tool used to search the web, useful for current events or facts"
+                            }
                         }, {
                             "name": "wikipedia",
-                            "txt": "site:*wikipedia.com",
-                            "prompt": "Tool used to search the wikipedia, useful for facts and biographies"
-                        }
-                        ],
+                            "params": {
+                                "txt": "site:*wikipedia.com",
+                                "prompt": "Tool used to search the wikipedia, useful for facts and biographies"
+                            }
+                        }, {
+                            "name": "vectorstore-query",
+                            "params": {
+                                "database_name": "USCode",
+                                "k": 4
+                            }
+                        }],
                         "api_key":"xyz",
                     },
                 },
@@ -225,9 +234,11 @@ def new_bot(request: Annotated[
                         "message_prompt": "prompt to use for the bot, this is appended each message",
                         "session": "session id, used for analytics/logging conversations, not necessary",
                         "tools": [{
-                            "name": "name for tool, doesn't matter really i think, currently all tools are google_search_tools",
-                            "txt": "where to put google search syntax to filter or whitelist results",
-                            "prompt": "description for agent to know when to use the tool"
+                            "name": "name for tool",
+                            "params": {
+                                "txt": "where to put google search syntax to filter or whitelist results",
+                                "prompt": "description for agent to know when to use the tool"
+                            }
                         }],
                         "api_key": "api key necessary for auth",
                     },
