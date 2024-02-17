@@ -6,7 +6,11 @@ from fastapi import Body, FastAPI, UploadFile
 from firebase_admin import credentials, firestore
 from bot import BotRequest, MilvusRequest, opb_bot, youtube_bot, db_bot, db_query, db_retrieve, db_flare
 from milvusdb import userupload_pdf
-cred = credentials.Certificate("creds.json")
+from json import loads
+from os import environ
+
+firebase_config = loads(environ["Firebase"])
+cred = credentials.Certificate(firebase_config)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 # opb bot db root path has api prefix

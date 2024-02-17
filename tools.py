@@ -15,7 +15,7 @@ class BotTool(BaseModel):
 def check_api_keys():
     if("SERPAPI_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_CX" in os.environ.keys()):
         return True
-    cred = credentials.Certificate("../../creds.json")
+    cred = credentials.Certificate(os.environ["Firebase"])
     firebase_admin.initialize_app(cred, name="tools_app_1")
     db = firestore.client()
 
@@ -92,7 +92,7 @@ def vdb_qa_tool(tool: BotTool):
     
     tool_func = lambda q: vdb_tool(tool, q)
     co_func = lambda q: async_vdb_tool(tool, q)
-    print('returning tool')
+
     return Tool(
         name = tool.name,
         func = tool_func,

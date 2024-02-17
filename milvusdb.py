@@ -6,22 +6,18 @@ from langchain_openai.llms import OpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.embeddings.base import Embeddings
 from langchain_community.document_loaders import PyPDFLoader
+from pypdf import PdfReader
 from langchain_core.vectorstores import VectorStoreRetriever, Field
 from langchain.docstore.document import Document
 from langchain_community.vectorstores.milvus import Milvus
 from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
 from langchain_openai import OpenAIEmbeddings
 from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
-from json import load
+from json import loads
 from typing import List
-import encoder
-from unstructured.partition.pdf import partition_pdf
-from unstructured.chunking.basic import chunk_elements
-from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from fastapi import UploadFile
 
-with open("milvus_config.json") as f:
-    connection_args = load(f)
+connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 
@@ -29,17 +25,6 @@ connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 US = "USCode"
 NC = "NCGeneralStatutes"
 USER = "UserData"
-TEST = "Test"
-COLLECTIONS = {US, NC, USER, TEST}
-# pypdf for langchain (openai or huggingface embeddings)
-PYPDF = "pypdf"
-# unstructured for pytorch (huggingface embeddings)
-UNSTRUCTURED = "unstructured"
-PDF_LOADERS = {PYPDF, UNSTRUCTURED}
-# collection -> encoder mapping
-ENCODERS = {NC: encoder.OPENAI,
-            US: encoder.OPENAI,
-            USER: encoder.OPENAI}
 SEARCH_PARAMS = {
     "anns_field": "vector",
     "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
@@ -48,9 +33,10 @@ SEARCH_PARAMS = {
 
 def load_db(collection_name: str):
     return Milvus(
-        embedding_function=encoder.embedding_function(ENCODERS[collection_name]),
+        embedding_function=OpenAIEmbeddings(),
         collection_name=collection_name,
-        connection_args=connection_args
+        connection_args=connection_args,
+        auto_id=True
     )
 
 def collection_exists(collection_name: str) -> bool:
@@ -72,7 +58,7 @@ def query(database_name: str, query: str, k: int = 4, expr: str = None, user: st
     
     coll = Collection(database_name)
     coll.load()
-    SEARCH_PARAMS["data"] = encoder.embed_query(query, ENCODERS[database_name])
+    SEARCH_PARAMS["data"] = [OpenAIEmbeddings().embed_query(query)]
     SEARCH_PARAMS["limit"] = k
 
     if expr:
@@ -107,8 +93,8 @@ def delete_user(user: str):
         coll.load()
         return coll.delete(expr=f"user == '{user}'")
 
-def create_collection_pdf(collection_name: str, directory: str, encoder_name: str, embedding_dim: int = None,
-                          max_chunk_size: int = 1000, chunk_overlap: int = 150, max_src_length: int = 256, pdf_loader: str = PYPDF) -> bool:
+def create_collection_pdf(collection_name: str, directory: str, embedding_dim: int = 1536,
+                          max_chunk_size: int = 1000, chunk_overlap: int = 150, max_src_length: int = 256) -> bool:
     if utility.has_collection(collection_name):
         print(f"error: collection {collection_name} already exists")
         return False
@@ -116,23 +102,12 @@ def create_collection_pdf(collection_name: str, directory: str, encoder_name: st
         print("""error: a description.txt file containing a brief description of the 
               collection must be in the same directory as the data""")
         return False
-    if pdf_loader not in PDF_LOADERS:
-        print(f"error: unsupported pdf loader {pdf_loader}")
-        return False
-    if pdf_loader == UNSTRUCTURED and encoder_name == encoder.OPENAI:
-        print("error: unstructured parse only works with huggingface models, openai not yet supported")
-        return False
     
     with open(os.path.join(directory, "description.txt")) as f:
         description = ' '.join(f.readlines())
     
     # TODO: if possible, support custom embedding size for huggingface models
     # TODO: support other OpenAI models
-    if encoder_name != encoder.OPENAI:
-        model = encoder.get_model(encoder_name)
-        embedding_dim = model.config.hidden_size
-    elif embedding_dim is None:
-        embedding_dim = 1536
     # define schema, create collection, create index on vectors
     pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
     text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
@@ -145,32 +120,19 @@ def create_collection_pdf(collection_name: str, directory: str, encoder_name: st
     index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
     coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
 
-    # add collection -> encoder mapping
-    if collection_name not in ENCODERS:
-        ENCODERS[collection_name] = encoder_name
-    upload_pdfs(collection_name, directory, pdf_loader, encoder_name, embedding_dim, max_chunk_size, chunk_overlap)
+    upload_pdfs(collection_name, directory, embedding_dim, max_chunk_size, chunk_overlap)
     return True
 
-def upload_pdfs(collection_name: str, directory: str, pdf_loader: str, encoder_name: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int,
-                user: str = None):
+def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int, user: str = None):
     files = sorted(os.listdir(directory))
-    print(f"found {len(files)} files")
-    if pdf_loader == PYPDF:
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
-        db = load_db(collection_name)
-        embedding = encoder.embedding_function(encoder_name)
-        if isinstance(embedding, OpenAIEmbeddings):
-            embedding.dimensions = embedding_dim
-        for i, fname in enumerate(files, start=1):
-            print(f'{i}: {fname}')
-            upload_pdf_pypdf(db, directory, fname, text_splitter, embedding, user)
-    else: # unstructured
-        coll = Collection(name=collection_name)
-        model = encoder.get_model(encoder_name)
-        tokenizer = encoder.get_tokenizer(encoder_name)
-        for i, fname in enumerate(files, start=1):
-            print(f'{i}: {fname}')
-            upload_pdf_unstructured(coll, directory, fname, max_chunk_size, chunk_overlap, model, tokenizer, user=user)
+    print(f"found {len(files)} file{'s' if len(files) > 1 else ''}")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    db = load_db(collection_name)
+    embedding = OpenAIEmbeddings()
+    embedding.dimensions = embedding_dim
+    for i, fname in enumerate(files, start=1):
+        print(f'{i}: {fname}')
+        upload_pdf_pypdf(db, directory, fname, text_splitter, embedding, user)
 
 def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: TextSplitter, embedding: Embeddings, user: str = None):
     if not fname.endswith(".pdf"):
@@ -189,55 +151,26 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
         # add user data
         if user:
             documents[j].metadata["user"] = user
-    print(f" inserting {num_docs} chunks")
+    print(f" inserting {num_docs} chunk{'s' if num_docs > 1 else ''}")
     ids = db.add_documents(documents=documents, embedding=embedding, connection_args=connection_args)
     if num_docs != len(ids):
-        print(f" error: expected {num_docs} uploads but got {len(ids)}")
+        print(f" error: expected {num_docs} upload{'s' if num_docs > 1 else ''} but got {len(ids)}")
 
 def userupload_pdf(file: UploadFile, max_chunk_size: int, chunk_overlap: int, user: str):
-    elements = partition_pdf(file=file.file)
-    chunks = chunk_elements(elements, max_characters=max_chunk_size, overlap=chunk_overlap)
-    documents = []
-    for chunk in chunks:
-        doc = Document(chunk.text)
-        doc.metadata["source"] = file.filename
-        doc.metadata["page"] = chunk.metadata.page_number
-        doc.metadata["user"] = user
-        documents.append(doc)
+    reader = PdfReader(file.file)
+    documents = [
+        Document(
+            page_content=page.extract_text(),
+            metadata={"source": file.filename, "page": page_number, "user": user},
+        )
+        for page_number, page in enumerate(reader.pages)
+    ]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    documents = text_splitter.split_documents(documents)
     ids = load_db(USER).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
     if len(documents) != len(ids):
-        return {"message": f"Failure: expected {len(documents)} uploads but got {len(ids)}"}
-    return {"message": f"Success: {len(documents)} chunks uploaded"}
-
-def upload_pdf_unstructured(collection: Collection, directory: str, fname: str, max_chunk_size: int, chunk_overlap: int, model: PreTrainedModel,
-                            tokenizer: PreTrainedTokenizerBase, batch_size: int = 1000, user: str = None):
-    if not fname.endswith(".pdf"):
-        print(' skipping')
-        return
-    
-    print(' partitioning')
-    elements = partition_pdf(filename=directory + fname)
-    print(f' chunking {len(elements)} partitioned elements')
-    chunks = chunk_elements(elements, max_characters=max_chunk_size, overlap=chunk_overlap)
-    print(f' embedding {len(chunks)} chunks')
-    chunk_embeddings = encoder.tokenize_embed_chunks(chunks, model, tokenizer)
-    data = [
-        chunk_embeddings, # vector
-        [chunk.text for chunk in chunks], # text
-        [fname] * len(chunk_embeddings), # source
-        [chunk.metadata.page_number for chunk in chunks] # page number
-    ]
-    num_batches = len(data[0]) / batch_size if len(data[0]) % batch_size == 0 else len(data[0]) // batch_size + 1
-    print(f' inserting {num_batches} batch{"es" if num_batches > 1 else ""} of embeddings')
-    for i in range(0, len(data), batch_size):
-        batch_vector = data[0][i: i + batch_size]
-        batch_text = data[1][i: i + batch_size]
-        batch_source = data[2][i: i + batch_size]
-        batch_page = data[3][i: i + batch_size]
-        batch = [batch_vector, batch_text, batch_source, batch_page]
-        if user:
-            batch.append([user] * batch_size)
-        collection.insert(batch)
+        return {"message": f"Failure: expected to upload {len(documents)} chunk{'s' if len(documents) > 1 else ''} for {file.filename} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {file.filename} as {len(documents)} chunk{'s' if len(documents) > 1 else ''}"}
 
 def qa(database_name: str, query: str, k: int = 4, user: str = None):
     """
