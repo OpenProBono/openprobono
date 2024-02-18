@@ -44,32 +44,24 @@ def recompisition_bot(input, context):
     model = ChatOpenAI(model="gpt-4", temperature=0.0)
     return model(messages)
 
-def research_question(input_tuple):
-    q, bot = input_tuple
-    cr = ChatRequest(history=[[q,""]], api_key="xyz", bot_id="216bec82-f063-4f48-897b-8bf1e77e24ef")
+#research a specific aspect (q) or 'sub question' of the user's original request
+def research_aspect(input):
+    q, r, bot = input
+    cr = ChatRequest(history = [[q,""]], api_key = r.api_key, bot_id = r.bot_id, session = r.session if r.session is not None else " ")
     return opb_bot(cr, bot)
     
 
 NUM_PROCESSES = 4
-def flow(r, bot):
+def flow(r: ChatRequest, bot: BotRequest):
     #add try / retry here if json.loads fails
     input = r.history[-1][0]
     decomp = decompisition_bot(input)
     comp = json.loads(decomp.content)
     context = ""
     
-    # def research_question(q):
-    #     cr = ChatRequest(history=[[q,""]], api_key="xyz", bot_id=r.bot_id)
-    #     return opb_bot(r, bot)
-    
     if('sub-questions' in comp):
-        print(comp['sub-questions'])
-        zipped = list(zip(comp['sub-questions'], [bot]*len(comp['sub-questions'])))
-        print(zipped)
-        print("000")
-        # print(zipped.__dict__)
-        print(zipped[0])
-        results = Pool(NUM_PROCESSES).map(research_question, zipped)
+        zipped = list(zip(comp['sub-questions'], [r]*len(comp['sub-questions']), [bot]*len(comp['sub-questions'])))
+        results = Pool(NUM_PROCESSES).map(research_aspect, zipped)
         context += str(results)
 
     return recompisition_bot(input, context).content
