@@ -9,9 +9,10 @@ from fastapi import Body, FastAPI
 from firebase_admin import credentials, firestore
 
 from bot import BotRequest, ChatRequest, opb_bot
+from new_bot import flow
 
 #which version of db we are using
-version= "vf13"
+version= "vf17_flow"
 
 bot_collection = "bots"
 conversation_collection = "conversations"
@@ -76,6 +77,24 @@ def process_chat(r: ChatRequest):
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
         
+def process_flow(r: ChatRequest):
+    if(api_key_check(r.api_key) == False):
+        return {"message": "Invalid API Key"}
+    try:
+        bot = load_bot(r.bot_id)
+        if(bot is None):
+            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+
+        output = flow(r, bot)
+
+        #store conversation (and also log the api_key)
+        store_conversation(r, output)
+
+        #return the chat and the bot_id
+        return {"message": "Success", "output": output, "bot_id": r.bot_id}
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+        
 
 # FastAPI 
 
@@ -84,6 +103,10 @@ api = FastAPI()
 @api.get("/", tags=["General"])
 def read_root():
     return {"message": "API is alive"}
+
+@api.post("/flow", tags=["New Flow"])
+def new_flow(request: ChatRequest):
+    return process_flow(request)
 
 @api.post("/invoke_bot", tags=["Chat"])
 def chat(request: Annotated[
