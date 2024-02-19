@@ -7,6 +7,7 @@ from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 import milvusdb
 from pydantic import BaseModel
+from json import loads
 
 class BotTool(BaseModel):
     name: str
@@ -15,7 +16,7 @@ class BotTool(BaseModel):
 def check_api_keys():
     if("SERPAPI_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_CX" in os.environ.keys()):
         return True
-    cred = credentials.Certificate(os.environ["Firebase"])
+    cred = credentials.Certificate(loads(os.environ["Firebase"]))
     firebase_admin.initialize_app(cred, name="tools_app_1")
     db = firestore.client()
 

@@ -4,7 +4,7 @@ import firebase_admin
 from typing import Annotated
 from fastapi import Body, FastAPI, UploadFile
 from firebase_admin import credentials, firestore
-from bot import BotRequest, MilvusRequest, opb_bot, youtube_bot, db_bot, db_query, db_retrieve, db_flare
+from bot import BotTool, BotRequest, MilvusRequest, opb_bot, youtube_bot, db_bot, db_query, db_retrieve, db_flare
 from milvusdb import userupload_pdf
 from json import loads
 from os import environ
@@ -68,7 +68,7 @@ def process(r: BotRequest):
                     r.user_prompt = bot['user_prompt'] if "user_prompt" in bot.keys() else ""
                     r.message_prompt = bot['message_prompt'] if "message_prompt" in bot.keys() else ""
                     r.youtube_urls = bot['youtube_urls'] or []
-                    r.tools = bot['tools'] or []
+                    r.tools = [BotTool(name=d['name'], params=d['params']) for d in bot['tools']]
 
             #ONLY use youtube bot if youtube_urls is not empty
             if(r.youtube_urls is not None and r.youtube_urls != []):
