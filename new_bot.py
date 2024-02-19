@@ -15,7 +15,7 @@ def call_gpt4(input):
 
 def decompisition_bot(input):
     decomp_template = """GENERAL INSTRUCTIONS
-        You are a legal expert. Your task is to break down a legal question into simpler sub-parts. Consider different possibilites of interpretations and alternative ways to approach the question, but stay focused on the user's request. Generate a maximum of 20 sub-questions.
+        You are a legal expert. Your task is to break down a legal question into simpler sub-parts. Consider different possibilites of interpretations and alternative ways to approach the question, but stay focused on the user's request. Generate a maximum of 8 sub-questions.
         
         USER QUESTION
         {input}
