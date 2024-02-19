@@ -15,7 +15,7 @@ def call_gpt4(input):
 
 def decompisition_bot(input):
     decomp_template = """GENERAL INSTRUCTIONS
-        You are a legal expert. Your task is to break down a legal question into simpler sub-parts. Consider different possibilites of interpretations and alternative ways to approach the question, but stay focused on the user's request.
+        You are a legal expert. Your task is to break down a legal question into simpler sub-parts. Consider different possibilites of interpretations and alternative ways to approach the question, but stay focused on the user's request. Generate a maximum of 20 sub-questions.
         
         USER QUESTION
         {input}
@@ -72,7 +72,7 @@ def research_aspects(input):
     cr = ChatRequest(history = [[q,""]], api_key = r.api_key, bot_id = r.bot_id, session = r.session if r.session is not None else " ")
     return opb_bot(cr, bot)
 
-NUM_PROCESSES = 16
+NUM_PROCESSES = 64
 def flow(r: ChatRequest, bot: BotRequest):
     #add try / retry here if json.loads fails
     input = r.history[-1][0]
