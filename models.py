@@ -4,7 +4,21 @@ from pydantic import BaseModel
 class ChatRequest(BaseModel):
     history: list
     bot_id: str
-    session: str = None
+    session_id: str = None
+    api_key: str
+
+class ChatBySession(BaseModel):
+    message: str
+    session_id: str
+    api_key: str
+
+class InitializeSession(BaseModel):
+    message: str
+    bot_id: str
+    api_key: str
+
+class FetchSession(BaseModel):
+    session_id: str
     api_key: str
 
 class BotRequest(BaseModel):
