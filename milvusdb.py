@@ -24,7 +24,7 @@ connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 # collections by jurisdiction?
 US = "USCode"
 NC = "NCGeneralStatutes"
-USER = "UserData"
+SESSION_PDF = "SessionPDF"
 SEARCH_PARAMS = {
     "anns_field": "vector",
     "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
@@ -42,19 +42,19 @@ def load_db(collection_name: str):
 def collection_exists(collection_name: str) -> bool:
     return utility.has_collection(collection_name)
 
-def check_params(database_name: str, query: str, k: int, user: str = None):
+def check_params(database_name: str, query: str, k: int, session_id: str = None):
     if not collection_exists(database_name):
         return {"message": f"Failure: database {database_name} not found"}
     if not query or query == "":
         return {"message": "Failure: query not found"}
     if k < 0 or k > 10:
         return {"message": "Failure: k out of range"}
-    if user is None and database_name == USER:
-        return {"message": "Failure: missing user"}
+    if session_id is None and database_name == SESSION_PDF:
+        return {"message": "Failure: missing session ID"}
 
-def query(database_name: str, query: str, k: int = 4, expr: str = None, user: str = None):
-    if check_params(database_name, query, k, user):
-        return check_params(database_name, query, k, user)
+def query(database_name: str, query: str, k: int = 4, expr: str = None, session_id: str = None):
+    if check_params(database_name, query, k, session_id):
+        return check_params(database_name, query, k, session_id)
     
     coll = Collection(database_name)
     coll.load()
@@ -63,13 +63,13 @@ def query(database_name: str, query: str, k: int = 4, expr: str = None, user: st
 
     if expr:
         SEARCH_PARAMS["expr"] = expr
-    if user:
-        user_filter = f"user=='{user}'"
+    if session_id:
+        session_filter = f"session_id=='{session_id}'"
         # append to existing filter expr or create new filter
         if expr:
-            SEARCH_PARAMS["expr"] += f" and {user_filter}"
+            SEARCH_PARAMS["expr"] += f" and {session_filter}"
         else:
-            SEARCH_PARAMS["expr"] = user_filter
+            SEARCH_PARAMS["expr"] = session_filter
     res = coll.search(**SEARCH_PARAMS)
     if res:
         # on success, returns a list containing a single inner list containing result objects
@@ -86,12 +86,12 @@ def delete_file(database_name: str, filename: str):
         coll.load()
         return coll.delete(expr=f"source == '{filename}'")
     
-def delete_user(user: str):
+def delete_session(session_id: str):
     # non atomic
-    if utility.has_collection(USER):
-        coll = Collection(USER)
+    if utility.has_collection(SESSION_PDF):
+        coll = Collection(SESSION_PDF)
         coll.load()
-        return coll.delete(expr=f"user == '{user}'")
+        return coll.delete(expr=f"session_id == '{session_id}'")
 
 def create_collection_pdf(collection_name: str, directory: str, embedding_dim: int = 1536,
                           max_chunk_size: int = 1000, chunk_overlap: int = 150, max_src_length: int = 256) -> bool:
@@ -110,6 +110,7 @@ def create_collection_pdf(collection_name: str, directory: str, embedding_dim: i
     # TODO: support other OpenAI models
     # define schema, create collection, create index on vectors
     pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
+    # unstructured chunk lengths are sketchy
     text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
     source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
@@ -123,7 +124,7 @@ def create_collection_pdf(collection_name: str, directory: str, embedding_dim: i
     upload_pdfs(collection_name, directory, embedding_dim, max_chunk_size, chunk_overlap)
     return True
 
-def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int, user: str = None):
+def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int, session_id: str = None):
     files = sorted(os.listdir(directory))
     print(f"found {len(files)} file{'s' if len(files) > 1 else ''}")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
@@ -132,9 +133,9 @@ def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_ch
     embedding.dimensions = embedding_dim
     for i, fname in enumerate(files, start=1):
         print(f'{i}: {fname}')
-        upload_pdf_pypdf(db, directory, fname, text_splitter, embedding, user)
+        upload_pdf_pypdf(db, directory, fname, text_splitter, embedding, session_id)
 
-def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: TextSplitter, embedding: Embeddings, user: str = None):
+def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: TextSplitter, embedding: Embeddings, session_id: str = None):
     if not fname.endswith(".pdf"):
         print(' skipping')
         return
@@ -149,30 +150,30 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
         # change pages from 0-index to 1-index
         documents[j].metadata.update({"page": documents[j].metadata["page"] + 1})
         # add user data
-        if user:
-            documents[j].metadata["user"] = user
+        if session_id:
+            documents[j].metadata["session_id"] = session_id
     print(f" inserting {num_docs} chunk{'s' if num_docs > 1 else ''}")
     ids = db.add_documents(documents=documents, embedding=embedding, connection_args=connection_args)
     if num_docs != len(ids):
         print(f" error: expected {num_docs} upload{'s' if num_docs > 1 else ''} but got {len(ids)}")
 
-def userupload_pdf(file: UploadFile, max_chunk_size: int, chunk_overlap: int, user: str):
+def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int, chunk_overlap: int):
     reader = PdfReader(file.file)
     documents = [
         Document(
             page_content=page.extract_text(),
-            metadata={"source": file.filename, "page": page_number, "user": user},
+            metadata={"source": file.filename, "page": page_number, "session_id": session_id},
         )
-        for page_number, page in enumerate(reader.pages)
+        for page_number, page in enumerate(reader.pages, start=1)
     ]
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
     documents = text_splitter.split_documents(documents)
-    ids = load_db(USER).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
     if len(documents) != len(ids):
         return {"message": f"Failure: expected to upload {len(documents)} chunk{'s' if len(documents) > 1 else ''} for {file.filename} but got {len(ids)}"}
     return {"message": f"Success: uploaded {file.filename} as {len(documents)} chunk{'s' if len(documents) > 1 else ''}"}
 
-def qa(database_name: str, query: str, k: int = 4, user: str = None):
+def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
     """
     Runs query on database_name and returns an answer along with the top k source chunks
 
@@ -182,18 +183,18 @@ def qa(database_name: str, query: str, k: int = 4, user: str = None):
         database_name: the name of a pymilvus.Collection
         query: the user query
         k: return the top k chunks
-        user: the username for filtering user data
+        session_id: the session id for filtering session data
 
     Returns dict with success or failure message and a result if success
     """
-    if check_params(database_name, query, k, user):
-        return check_params(database_name, query, k, user)
+    if check_params(database_name, query, k, session_id):
+        return check_params(database_name, query, k, session_id)
     
     db = load_db(database_name)
     retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
     llm = OpenAI(temperature=0)
-    if user:
-        retriever = FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
+    if session_id:
+        retriever = FilteredRetriever(vectorstore=db.as_retriever(), session_filter=session_id, search_kwargs={"k": k})
     else:
         retriever = db.as_retriever(search_kwargs={"k": k})
     combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
@@ -208,8 +209,8 @@ class FilteredRetriever(VectorStoreRetriever):
     vectorstore: VectorStoreRetriever
     search_type: str = "similarity"
     search_kwargs: dict = Field(default_factory=dict)
-    user_filter: str
+    session_filter: str
     
     def get_relevant_documents(self, query: str) -> List[Document]:
         results = self.vectorstore.get_relevant_documents(query=query)
-        return [doc for doc in results if doc.metadata['user'] == self.user_filter]
+        return [doc for doc in results if doc.metadata['session_id'] == self.session_filter]

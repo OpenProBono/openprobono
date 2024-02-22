@@ -9,7 +9,7 @@ import firebase_admin
 from typing import Annotated
 from fastapi import Body, FastAPI, Query, UploadFile
 from firebase_admin import credentials, firestore
-from milvusdb import userupload_pdf
+from milvusdb import session_upload_pdf
 
 from tools import BotTool
 from bot import BotRequest, ChatRequest, MilvusRequest, opb_bot, db_bot, db_query, db_retrieve, db_flare
@@ -324,15 +324,13 @@ def vectordb_flare(req: MilvusRequest):
     return db_flare(req.database_name, req.query, req.k, None)
 
 @api.post("/vdb-upload-file", tags=["Vector Database"])
-def vectordb_upload(file: UploadFile):
-    user = "FastAPIUser"
-    return userupload_pdf(file, 1000, 150, user)
+def vectordb_upload(file: UploadFile, session_id: str):
+    return session_upload_pdf(file, session_id, 1000, 150)
 
 @api.post("/vdb-upload-files", tags=["Vector Database"])
-def vectordb_upload(files: list[UploadFile]):
-    user = "FastAPIUser"
+def vectordb_upload(files: list[UploadFile], session_id: str):
     for i, file in enumerate(files, start=1):
-        result = userupload_pdf(file, 1000, 150, user)
+        result = session_upload_pdf(file, session_id, 1000, 150)
         if result["message"].startswith("Failure"):
             return {"message": f"Failure: upload #{i} with filename {file.filename} failed"}
     return {"message": f"Success: {len(files)} files uploaded"}
