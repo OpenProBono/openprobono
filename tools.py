@@ -1,8 +1,6 @@
 import os
 
-import firebase_admin
 import requests
-from firebase_admin import credentials, firestore
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 import milvusdb
@@ -13,20 +11,7 @@ class BotTool(BaseModel):
     name: str
     params: dict[str, object]
 
-def check_api_keys():
-    if("SERPAPI_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_KEY" in os.environ.keys() and "GOOGLE_SEARCH_API_CX" in os.environ.keys()):
-        return True
-    cred = credentials.Certificate(loads(os.environ["Firebase"]))
-    firebase_admin.initialize_app(cred, name="tools_app_1")
-    db = firestore.client()
-
-    os.environ["SERPAPI_KEY"] = db.collection("third_party_api_keys").document("serpapi").get().to_dict()['key']
-    GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
-
-    os.environ["GOOGLE_SEARCH_API_KEY"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['key']
-
-    os.environ["GOOGLE_SEARCH_API_CX"] = db.collection("third_party_api_keys").document("google_search").get().to_dict()['cx']
-    return True
+GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
 def search_tool_creator(tool: BotTool):
     headers = {
@@ -35,7 +20,6 @@ def search_tool_creator(tool: BotTool):
     }
 
     def search_tool(qr, txt, prompt):
-        data = {"search": txt + " " + qr, 'prompt': prompt, 'timestamp': firestore.SERVER_TIMESTAMP}
         params = {
             'key': os.environ["GOOGLE_SEARCH_API_KEY"],
             'cx': os.environ["GOOGLE_SEARCH_API_CX"],
@@ -120,7 +104,6 @@ def vdb_query_tool(tool: BotTool):
     )
 
 def toolset_creator(tools: list[BotTool]):
-    check_api_keys()
     toolset = []
     for t in tools:
         if t.name == "serpapi":

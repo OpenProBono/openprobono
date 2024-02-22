@@ -8,7 +8,7 @@ from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, FlareChain, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_openai.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain_openai.llms import OpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain.document_loaders.youtube import YoutubeLoader
@@ -16,30 +16,17 @@ from langchain.memory import ConversationSummaryBufferMemory
 from langchain.prompts import MessagesPlaceholder, PromptTemplate, ChatPromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
-from pydantic import BaseModel
 
-from tools import BotTool, toolset_creator
+from tools import toolset_creator
+from models import BotRequest, ChatRequest, MilvusRequest
 import milvusdb
 
 langchain.debug = True
 
-class BotRequest(BaseModel):
-    history: list
-    user_prompt: str = ""
-    message_prompt: str = ""
-    tools: list[BotTool] = []
-    youtube_urls: list = []
-    session: str = None
-    bot_id: str = None
-    api_key: str = None
 
-class MilvusRequest(BaseModel):
-    database_name: str
-    query: str
-    k: int = 4
 
 # OPB bot main function
-def opb_bot(r: BotRequest):
+def opb_bot(r: ChatRequest, bot: BotRequest):
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, q):
             self.q = q
@@ -61,17 +48,17 @@ def opb_bot(r: BotRequest):
 
         #------- agent definition -------#
         system_message = 'You are a helpful AI assistant. ALWAYS use tools to answer questions.'
-        system_message += r.user_prompt
+        system_message += bot.user_prompt
         system_message += '. If you used a tool, ALWAYS return a "SOURCES" part in your answer.'
         agent_kwargs = {
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
 
-        toolset = toolset_creator(r.tools)
+        toolset = toolset_creator(bot.tools)
 
         async def task(prompt):
             #definition of llm used for bot
-            prompt = r.message_prompt + prompt
+            prompt = bot.message_prompt + prompt
             agent = initialize_agent(
                 tools=toolset,
                 llm=bot_llm,
