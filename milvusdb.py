@@ -1,6 +1,6 @@
 import os
 from langchain import hub
-from langchain.chains import create_retrieval_chain
+from langchain.chains import create_retrieval_chain, load_summarize_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_openai.llms import OpenAI
 from langchain.prompts import ChatPromptTemplate
@@ -161,6 +161,7 @@ def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 
     if not file.filename.endswith(".pdf"):
         return {"message": f"Failure: {file.filename} is not a PDF file"}
     
+    # parse
     reader = PdfReader(file.file)
     documents = [
         Document(
@@ -171,11 +172,34 @@ def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 
     ]
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
     documents = text_splitter.split_documents(documents)
+
+    # summarize
+    chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
+    result = chain.invoke({"input_documents": documents[:200]})
+    for doc in documents:
+        doc.metadata["summary"] = result["output_text"].strip()
+
+    # upload
     ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
     return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+
+def session_source_summaries(session_id: str):
+    coll = Collection(SESSION_PDF)
+    coll.load()
+    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'", output_fields=["source", "summary"])
+    source_summary = {}
+    while True:
+        res = q_iter.next()
+        if len(res) == 0:
+            q_iter.close()
+            break
+        for item in res:
+            if item["source"] not in source_summary:
+                source_summary[item["source"]] = item["summary"]
+    return source_summary
 
 def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
     """

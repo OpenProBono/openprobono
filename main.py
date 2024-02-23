@@ -3,7 +3,6 @@ import uuid
 from json import loads
 import os
 from typing import Annotated
-from urllib import response
 
 import firebase_admin
 from typing import Annotated
@@ -306,11 +305,11 @@ def create_bot(request: Annotated[
 
     return {"message": "Success", "bot_id": bot_id}
 
-@api.post("/vdb-upload-file", tags=["Vector Database"])
+@api.post("/upload_file", tags=["Vector Database"])
 def vectordb_upload(file: UploadFile, session_id: str):
     return session_upload_pdf(file, session_id)
 
-@api.post("/vdb-upload-files", tags=["Vector Database"])
+@api.post("/upload_files", tags=["Vector Database"])
 def vectordb_upload(files: list[UploadFile], session_id: str):
     failures = []
     for i, file in enumerate(files, start=1):

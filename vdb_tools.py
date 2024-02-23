@@ -1,4 +1,4 @@
-from milvusdb import qa, query
+from milvusdb import qa, query, SESSION_PDF, session_source_summaries
 from langchain.agents import Tool
 
 def vdb_qa_tool(tool: dict):
@@ -32,6 +32,22 @@ def vdb_query_tool(tool: dict):
         func = tool_func,
         coroutine = co_func,
         description = f"""Tool used to query a vector database named {tool["database_name"]} and return the {tool["k"]} most relevant text chunks."""
+    )
+
+def session_query_tool(session_id: str):
+    def query_tool(q: str):
+        return query(SESSION_PDF, q, session_id=session_id)
+    
+    async def async_query_tool(q: str):
+        return query_tool(q)
+    
+    tool_func = lambda q: query_tool(q)
+    co_func = lambda q: async_query_tool(q)
+    return Tool(
+        name = "session_query_tool",
+        func = tool_func,
+        coroutine = co_func,
+        description = f"Tool used to query a vector database containing the following summarized sources: {session_source_summaries(session_id)}"
     )
 
 def vdb_toolset_creator(tools: list[dict]):

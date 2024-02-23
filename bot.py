@@ -15,7 +15,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
 
 from search_tools import search_toolset_creator, serpapi_toolset_creator
-from vdb_tools import vdb_toolset_creator
+from vdb_tools import vdb_toolset_creator, session_query_tool
 from models import BotRequest, ChatRequest
 
 langchain.debug = True
@@ -57,6 +57,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         else:
             toolset += serpapi_toolset_creator(bot)
         toolset += vdb_toolset_creator(bot.vdb_tools)
+        toolset.append(session_query_tool(r.session_id))
 
         async def task(prompt):
             #definition of llm used for bot

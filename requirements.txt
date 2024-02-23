@@ -1,5 +1,4 @@
 fastapi>0.105.0
-gunicorn==20.1.0
 uvicorn[standard]==0.20.0
 anyio==3.7.1
 firebase-admin==6.2.0
