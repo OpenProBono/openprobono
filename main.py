@@ -306,16 +306,23 @@ def create_bot(request: Annotated[
     return {"message": "Success", "bot_id": bot_id}
 
 @api.post("/upload_file", tags=["Vector Database"])
-def vectordb_upload(file: UploadFile, session_id: str):
-    return session_upload_pdf(file, session_id)
+def vectordb_upload(file: UploadFile, session_id: str, summary: str = None):
+    if summary:
+        return session_upload_pdf(file, session_id, summary)
+    else:
+        return session_upload_pdf(file, session_id, file.filename)
 
 @api.post("/upload_files", tags=["Vector Database"])
-def vectordb_upload(files: list[UploadFile], session_id: str):
+def vectordb_upload(files: list[UploadFile], session_id: str, summaries: list[str] = None):
+    if not summaries:
+        summaries = [file.filename for file in files]
+    elif len(files) != len(summaries):
+        return {"message": f"Failure: did not find equal numbers of files and summaries, instead found {len(files)} files and {len(summaries)} summaries."}
     failures = []
-    for i, file in enumerate(files, start=1):
-        result = session_upload_pdf(file, session_id)
+    for i, file in enumerate(files):
+        result = session_upload_pdf(file, session_id, summaries[i])
         if result["message"].startswith("Failure"):
-            failures.append(f"Upload #{i} of {len(files)} failed. Internal message: {result['message']}")
+            failures.append(f"Upload #{i + 1} of {len(files)} failed. Internal message: {result['message']}")
             
     if len(failures) == 0:
         return {"message": f"Success: {len(files)} file{'s' if len(files) > 1 else ''} uploaded"}

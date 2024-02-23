@@ -157,7 +157,7 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
     if num_docs != len(ids):
         print(f" error: expected {num_docs} upload{'s' if num_docs > 1 else ''} but got {len(ids)}")
 
-def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+def session_upload_pdf(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
     if not file.filename.endswith(".pdf"):
         return {"message": f"Failure: {file.filename} is not a PDF file"}
     
@@ -166,7 +166,7 @@ def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 
     documents = [
         Document(
             page_content=page.extract_text(),
-            metadata={"source": file.filename, "page": page_number, "session_id": session_id},
+            metadata={"source": file.filename, "page": page_number, "session_id": session_id, "user_summary": summary},
         )
         for page_number, page in enumerate(reader.pages, start=1)
     ]
@@ -177,7 +177,7 @@ def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 
     chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
     result = chain.invoke({"input_documents": documents[:200]})
     for doc in documents:
-        doc.metadata["summary"] = result["output_text"].strip()
+        doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
     ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
@@ -189,7 +189,7 @@ def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 
 def session_source_summaries(session_id: str):
     coll = Collection(SESSION_PDF)
     coll.load()
-    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'", output_fields=["source", "summary"])
+    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'", output_fields= ["source", "ai_summary", "user_summary"])
     source_summary = {}
     while True:
         res = q_iter.next()
@@ -198,7 +198,7 @@ def session_source_summaries(session_id: str):
             break
         for item in res:
             if item["source"] not in source_summary:
-                source_summary[item["source"]] = item["summary"]
+                source_summary[item["source"]] = {"ai_summary": item["ai_summary"], "user_summary": item["user_summary"]}
     return source_summary
 
 def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
