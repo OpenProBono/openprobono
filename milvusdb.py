@@ -157,7 +157,10 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
     if num_docs != len(ids):
         print(f" error: expected {num_docs} upload{'s' if num_docs > 1 else ''} but got {len(ids)}")
 
-def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int, chunk_overlap: int):
+def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+    if not file.filename.endswith(".pdf"):
+        return {"message": f"Failure: {file.filename} is not a PDF file"}
+    
     reader = PdfReader(file.file)
     documents = [
         Document(
@@ -169,9 +172,10 @@ def session_upload_pdf(file: UploadFile, session_id: str, max_chunk_size: int, c
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
     documents = text_splitter.split_documents(documents)
     ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
-    if len(documents) != len(ids):
-        return {"message": f"Failure: expected to upload {len(documents)} chunk{'s' if len(documents) > 1 else ''} for {file.filename} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {file.filename} as {len(documents)} chunk{'s' if len(documents) > 1 else ''}"}
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
 def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
     """

@@ -24,13 +24,9 @@ class FetchSession(BaseModel):
 class BotRequest(BaseModel):
     user_prompt: str = ""
     message_prompt: str = ""
-    tools: list = []
+    search_tools: list = []
+    vdb_tools: list = []
     youtube_urls: list = []
     beta: bool = False
     search_tool_method: str = "serpapi"
     api_key: str
-
-class MilvusRequest(BaseModel):
-    database_name: str
-    query: str
-    k: int = 4

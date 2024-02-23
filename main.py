@@ -9,10 +9,9 @@ import firebase_admin
 from typing import Annotated
 from fastapi import Body, FastAPI, Query, UploadFile
 from firebase_admin import credentials, firestore
-from milvusdb import session_upload_pdf
+from milvusdb import session_upload_pdf, US, NC
 
-from tools import BotTool
-from bot import BotRequest, ChatRequest, MilvusRequest, opb_bot, db_bot, db_query, db_retrieve, db_flare
+from bot import BotRequest, ChatRequest, opb_bot
 from models import ChatBySession, FetchSession, InitializeSession
 from new_bot import flow
 
@@ -74,9 +73,7 @@ def store_bot(r: BotRequest, bot_id: str):
 def load_bot(bot_id):
     bot = db.collection(bot_collection + version).document(bot_id).get()
     if(bot.exists):
-        br = BotRequest(**bot.to_dict())
-        br.tools = [BotTool(name=d['name'], params=d['params']) for d in br.tools]
-        return br
+        return BotRequest(**bot.to_dict())
     else:
         return None
     
@@ -171,7 +168,7 @@ def chat(request: Annotated[
     
     return process_chat(request)
 
-@api.post("/initialize_sesion", tags=["Session Chat"])
+@api.post("/initialize_session", tags=["Session Chat"])
 def init_session(request: Annotated[
         InitializeSession,
         Body(
@@ -239,24 +236,19 @@ def create_bot(request: Annotated[
                     "summary": "create new bot",
                     "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",
                     "value": {
-                        "tools": [{
+                        "search_tools": [{
                             "name": "google_search",
-                            "params": {
-                                "txt": "",
-                                "prompt": "Tool used to search the web, useful for current events or facts"
-                            }
+                            "txt": "",
+                            "prompt": "Tool used to search the web, useful for current events or facts"
                         }, {
                             "name": "wikipedia",
-                            "params": {
-                                "txt": "site:*wikipedia.com",
-                                "prompt": "Tool used to search the wikipedia, useful for facts and biographies"
-                            }
-                        }, {
-                            "name": "vectorstore-query",
-                            "params": {
-                                "database_name": "USCode",
-                                "k": 4
-                            }
+                            "txt": "site:*wikipedia.com",
+                            "prompt": "Tool used to search the wikipedia, useful for facts and biographies"
+                        }],
+                        "vdb_tools": [{
+                            "name": "query",
+                            "database_name": "USCode",
+                            "k": 4
                         }],
                         "api_key":"xyz",
                     },
@@ -265,7 +257,7 @@ def create_bot(request: Annotated[
                     "summary": "create opb bot",
                     "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",
                     "value": {
-                        "tools": [{
+                        "search_tools": [{
                             "name": "government-search",
                             "txt": "site:*.gov | site:*.edu | site:*scholar.google.com",
                             "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources."
@@ -273,9 +265,13 @@ def create_bot(request: Annotated[
                             "name": "case-search",
                             "txt": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com",
                             "prompt": "Use for finding case law. Always cite your sources."
-                        }
-                        ],
-                        "api_key":"xyz",
+                        }],
+                        "vdb_tools": [{
+                            "name": "query",
+                            "database_name": US,
+                            "k": 4
+                        }],
+                        "api_key":"xyz"
                     },
                 },
                 "full descriptions of every parameter": {
@@ -284,12 +280,15 @@ def create_bot(request: Annotated[
                     "value": {
                         "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",
                         "message_prompt": "prompt to use for the bot, this is appended each message",
-                        "tools": [{
+                        "search_tools": [{
                             "name": "name for tool",
-                            "params": {
-                                "txt": "where to put google search syntax to filter or whitelist results",
-                                "prompt": "description for agent to know when to use the tool"
-                            }
+                            "txt": "where to put google search syntax to filter or whitelist results",
+                            "prompt": "description for agent to know when to use the tool"
+                        }],
+                        "vdb_tools": [{
+                            "name": "name for tool, must be one of: qa, query",
+                            "database_name": f"name of database to query, must be one of: {US}, {NC}",
+                            "k": "the number of text chunks to return when querying the database"
                         }],
                         "beta": "whether to use beta features or not, if they are available",
                         "search_tool_method": "which search tool to use, between google_search and serpapi: default is serpapi",
@@ -307,30 +306,18 @@ def create_bot(request: Annotated[
 
     return {"message": "Success", "bot_id": bot_id}
 
-@api.post("/vdb-qa", tags=["Vector Database"])
-def vectordb_qa(req: MilvusRequest):
-    return db_bot(req.database_name, req.query, req.k, None)
-
-@api.post("/vdb-query", tags=["Vector Database"])
-def vectordb_query(req: MilvusRequest):
-    return db_query(req.database_name, req.query, req.k, None)
-
-@api.post("/vdb-retrieve", tags=["Vector Database"])
-def vectordb_retrieve(req: MilvusRequest):
-    return db_retrieve(req.database_name, req.query, req.k, None)
-
-@api.post("/vdb-flare", tags=["Vector Database"])
-def vectordb_flare(req: MilvusRequest):
-    return db_flare(req.database_name, req.query, req.k, None)
-
 @api.post("/vdb-upload-file", tags=["Vector Database"])
 def vectordb_upload(file: UploadFile, session_id: str):
-    return session_upload_pdf(file, session_id, 1000, 150)
+    return session_upload_pdf(file, session_id)
 
 @api.post("/vdb-upload-files", tags=["Vector Database"])
 def vectordb_upload(files: list[UploadFile], session_id: str):
+    failures = []
     for i, file in enumerate(files, start=1):
-        result = session_upload_pdf(file, session_id, 1000, 150)
+        result = session_upload_pdf(file, session_id)
         if result["message"].startswith("Failure"):
-            return {"message": f"Failure: upload #{i} with filename {file.filename} failed"}
-    return {"message": f"Success: {len(files)} files uploaded"}
+            failures.append(f"Upload #{i} of {len(files)} failed. Internal message: {result['message']}")
+            
+    if len(failures) == 0:
+        return {"message": f"Success: {len(files)} file{'s' if len(files) > 1 else ''} uploaded"}
+    return {"message": f"Warning: {len(failures)} failure{'s' if len(failures) > 1 else ''} occurred: {failures}"}

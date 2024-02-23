@@ -3,23 +3,20 @@ from typing import Any
 
 import langchain
 from anyio.from_thread import start_blocking_portal
-from langchain import hub
 from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
-from langchain.chains import RetrievalQA, RetrievalQAWithSourcesChain, FlareChain, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_community.chat_models import ChatOpenAI
-from langchain_openai.llms import OpenAI
+from langchain.chains import RetrievalQA
+from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain.document_loaders.youtube import YoutubeLoader
 from langchain.memory import ConversationSummaryBufferMemory
-from langchain.prompts import MessagesPlaceholder, PromptTemplate, ChatPromptTemplate
+from langchain.prompts import MessagesPlaceholder, PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
 
-from tools import toolset_creator
-from models import BotRequest, ChatRequest, MilvusRequest
-import milvusdb
+from search_tools import search_toolset_creator, serpapi_toolset_creator
+from vdb_tools import vdb_toolset_creator
+from models import BotRequest, ChatRequest
 
 langchain.debug = True
 
@@ -53,8 +50,13 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         agent_kwargs = {
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
-
-        toolset = toolset_creator(bot.tools)
+        
+        toolset = []
+        if(bot.search_tool_method == "google_search"):
+            toolset += search_toolset_creator(bot)
+        else:
+            toolset += serpapi_toolset_creator(bot)
+        toolset += vdb_toolset_creator(bot.vdb_tools)
 
         async def task(prompt):
             #definition of llm used for bot
@@ -142,127 +144,3 @@ def youtube_bot(r: BotRequest):
         return ""
     else:
         return qa_chain.run(r.message_prompt + query)
-    
-def db_query(database_name: str, query: str, k: int = 4, user: str = None):
-    """
-    Runs query on database_name and returns the top k chunks
-
-    Args
-        database_name: the name of a pymilvus.Collection
-        query: the user query
-        k: return the top k chunks
-        user: the username for filtering user data
-
-    Returns dict with success or failure message and a result if success
-    """
-    if milvusdb.check_params(database_name, query, k, user):
-        return milvusdb.check_params(database_name, query, k, user)
-    
-    db = milvusdb.load_db(database_name)
-    if user:
-        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
-    else:
-        retriever = db.as_retriever(search_kwargs={"k": k})
-
-    results = retriever.get_relevant_documents(query)
-    results_json = [{"text": result.page_content,
-                     "source": result.metadata["source"],
-                     "page": result.metadata["page"]} for result in results]
-    return {"message": "Success", "result": results_json}
-
-def db_retrieve(database_name: str, query: str, k: int = 4, user: str = None):
-    """
-    Runs query on database_name and returns an answer along with the top k source chunks
-
-    This should be similar to db_bot, but using newer langchain LCEL
-
-    Args
-        database_name: the name of a pymilvus.Collection
-        query: the user query
-        k: return the top k chunks
-        user: the username for filtering user data
-
-    Returns dict with success or failure message and a result if success
-    """
-    if milvusdb.check_params(database_name, query, k, user):
-        return milvusdb.check_params(database_name, query, k, user)
-    
-    db = milvusdb.load_db(database_name)
-    retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
-    llm = OpenAI(temperature=0)
-    if user:
-        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
-    else:
-        retriever = db.as_retriever(search_kwargs={"k": k})
-    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
-    retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
-    result = retrieval_chain.invoke({"input": query})
-    cited_sources = []
-    for doc in result["context"]:
-        cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
-    return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
-
-def db_bot(database_name: str, question: str, k: int = 4, user: str = None):
-    """
-    Runs the question query on database_name and returns an answer along with cited sources from the top k chunks
-
-    Args
-        database_name: the name of a pymilvus.Collection
-        question: the user question
-        k: return cited sources from the top k chunks
-        user: the username for filtering user data
-
-    Returns dict with success or failure message and a result if success
-    """
-    if milvusdb.check_params(database_name, question, k, user):
-        return milvusdb.check_params(database_name, question, k, user)
-    
-    db = milvusdb.load_db(database_name)
-    if user:
-        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
-    else:
-        retriever = db.as_retriever(search_kwargs={"k": k})
-    chain = RetrievalQAWithSourcesChain.from_chain_type(OpenAI(temperature=0),
-                                                        chain_type="stuff",
-                                                        retriever=retriever,
-                                                        return_source_documents=True)
-    result = chain.invoke({"question": question})
-    answer = result["answer"]
-    cited_sources = result["sources"].split(", ")
-    source_docs = result["source_documents"]
-    cited_sources_docs = []
-    for cited_source in cited_sources:
-        for doc in source_docs:
-            if doc.metadata["source"] == cited_source:
-                cited_sources_docs.append({"source": cited_source, "page": doc.metadata["page"]})
-    return {"message": "Success", "result": {"answer": answer.strip(), "sources": cited_sources_docs}}
-
-def db_flare(database_name: str, question: str, k: int = 3, user: str = None):
-    """
-    Runs the question query on database_name and returns an answer using a retriever that returns the top k chunks
-
-    This uses Forward-Looking Active REtrieval augmented generation (FLARE) with langchain FlareChain
-
-    Args
-        database_name: the name of a pymilvus.Collection
-        question: the user question
-        k: return cited sources from the top k chunks
-        user: the username for filtering user data
-
-    Returns dict with success or failure message and a result if success
-    """
-    if milvusdb.check_params(database_name, question, k, user):
-        return milvusdb.check_params(database_name, question, k, user)
-    
-    db = milvusdb.load_db(database_name)
-    if user:
-        retriever = milvusdb.FilteredRetriever(vectorstore=db.as_retriever(), user_filter=user, search_kwargs={"k": k})
-    else:
-        retriever = db.as_retriever(search_kwargs={"k": k})
-    flare = FlareChain.from_llm(
-        ChatOpenAI(temperature=0),
-        retriever=retriever,
-        max_generation_len=164,
-        min_prob=0.4,
-    )
-    return {"message": "Success", "result": flare.invoke({"user_input": question})["response"].strip()}
