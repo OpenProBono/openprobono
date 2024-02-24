@@ -7,7 +7,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.embeddings.base import Embeddings
 from langchain_community.document_loaders import PyPDFLoader
 from pypdf import PdfReader
-from langchain_core.vectorstores import VectorStoreRetriever, Field
+from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain.docstore.document import Document
 from langchain_community.vectorstores.milvus import Milvus
 from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
@@ -222,7 +222,7 @@ def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
     retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
     llm = OpenAI(temperature=0)
     if session_id:
-        retriever = FilteredRetriever(vectorstore=db.as_retriever(), session_filter=session_id, search_kwargs={"k": k})
+        retriever = FilteredRetriever(vectorstore=db, session_filter=session_id, search_kwargs={"k": k})
     else:
         retriever = db.as_retriever(search_kwargs={"k": k})
     combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
@@ -234,11 +234,19 @@ def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
     return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
 
 class FilteredRetriever(VectorStoreRetriever):
-    vectorstore: VectorStoreRetriever
+    vectorstore: VectorStore
     search_type: str = "similarity"
     search_kwargs: dict = Field(default_factory=dict)
     session_filter: str
     
     def get_relevant_documents(self, query: str) -> List[Document]:
-        results = self.vectorstore.get_relevant_documents(query=query)
-        return [doc for doc in results if doc.metadata['session_id'] == self.session_filter]
+        docs = []
+        k = self.search_kwargs["k"]
+        # TODO: determine if get_relevant_documents() kwargs param supports filtering by metadata
+        # double k on each call to get_relevant_documents() until there are k filtered documents
+        while len(docs) < k:
+            results = self.vectorstore.as_retriever(search_kwargs={"k": self.search_kwargs["k"]}).get_relevant_documents(query=query)
+            docs += [doc for doc in results if doc.metadata['session_id'] == self.session_filter and doc not in docs]
+            self.search_kwargs["k"] = 2 * self.search_kwargs["k"]
+        self.search_kwargs["k"] = k
+        return docs[:k]

@@ -50,6 +50,22 @@ def session_query_tool(session_id: str, source_summaries: dict):
             description = f"Tool used to query a vector database containing the following sources: {source_summaries.keys()}"
         )
 
+def session_qa_tool(session_id: str, source_summaries: dict):
+    def qa_tool(q: str):
+        return qa(SESSION_PDF, q, session_id=session_id)
+    
+    async def async_qa_tool(q: str):
+        return qa_tool(q)
+    
+    tool_func = lambda q: qa_tool(q)
+    co_func = lambda q: async_qa_tool(q)
+    return Tool(
+            name = "session_qa_tool",
+            func = tool_func,
+            coroutine = co_func,
+            description = f"Tool used to answer questions using the 4 most relevant text chunks from a vector database containing the following sources: {source_summaries.keys()}"
+        )
+
 def vdb_toolset_creator(tools: list[dict]):
     toolset = []
     for t in tools:

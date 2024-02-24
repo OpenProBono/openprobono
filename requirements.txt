@@ -6,6 +6,7 @@ google-search-results==2.4.2
 langchain>0.1.0
 langchain-openai>0.0.4
 langchain-community
+langchainhub
 openai<2.0.0
 pip==23.2.1
 pydantic>2.0.0
