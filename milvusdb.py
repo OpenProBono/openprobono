@@ -24,6 +24,7 @@ connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 # collections by jurisdiction?
 US = "USCode"
 NC = "NCGeneralStatutes"
+COLLECTIONS = {US, NC}
 SESSION_PDF = "SessionPDF"
 SEARCH_PARAMS = {
     "anns_field": "vector",
@@ -42,21 +43,21 @@ def load_db(collection_name: str):
 def collection_exists(collection_name: str) -> bool:
     return utility.has_collection(collection_name)
 
-def check_params(database_name: str, query: str, k: int, session_id: str = None):
-    if not collection_exists(database_name):
-        return {"message": f"Failure: database {database_name} not found"}
+def check_params(collection_name: str, query: str, k: int, session_id: str = None):
+    if not collection_exists(collection_name):
+        return {"message": f"Failure: collection {collection_name} not found"}
     if not query or query == "":
         return {"message": "Failure: query not found"}
-    if k < 0 or k > 10:
-        return {"message": "Failure: k out of range"}
-    if session_id is None and database_name == SESSION_PDF:
-        return {"message": "Failure: missing session ID"}
+    if k < 1 or k > 10:
+        return {"message": f"Failure: k = {k} out of range [1, 10]"}
+    if session_id is None and collection_name == SESSION_PDF:
+        return {"message": "Failure: session_id not found"}
 
-def query(database_name: str, query: str, k: int = 4, expr: str = None, session_id: str = None):
-    if check_params(database_name, query, k, session_id):
-        return check_params(database_name, query, k, session_id)
+def query(collection_name: str, query: str, k: int = 4, expr: str = None, session_id: str = None):
+    if check_params(collection_name, query, k, session_id):
+        return check_params(collection_name, query, k, session_id)
     
-    coll = Collection(database_name)
+    coll = Collection(collection_name)
     coll.load()
     SEARCH_PARAMS["data"] = [OpenAIEmbeddings().embed_query(query)]
     SEARCH_PARAMS["limit"] = k
@@ -79,22 +80,22 @@ def query(database_name: str, query: str, k: int = 4, expr: str = None, session_
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
-def delete_file(database_name: str, filename: str):
-    # not atomic i.e. may only delete some then fail: https://milvus.io/docs/delete_data.md#Delete-Entities
-    if utility.has_collection(database_name):
-        coll = Collection(database_name)
-        coll.load()
-        return coll.delete(expr=f"source == '{filename}'")
+def delete_expr(collection_name: str, expr: str):
+    """
+    Deletes database entries according to expr.
+    Not atomic, i.e. may only delete some then fail: https://milvus.io/docs/delete_data.md#Delete-Entities.
     
-def delete_session(session_id: str):
-    # non atomic
-    if utility.has_collection(SESSION_PDF):
-        coll = Collection(SESSION_PDF)
+    Args
+        collection_name: the name of a pymilvus.Collection
+        expr: a boolean expression to specify conditions for ANN search
+    """
+    if utility.has_collection(collection_name):
+        coll = Collection(collection_name)
         coll.load()
-        return coll.delete(expr=f"session_id == '{session_id}'")
+        ids = coll.delete(expr=expr)
+        return {"message": f"Success: deleted {ids.delete_count} chunks"}
 
-def create_collection_pdf(collection_name: str, directory: str, embedding_dim: int = 1536,
-                          max_chunk_size: int = 1000, chunk_overlap: int = 150, max_src_length: int = 256) -> bool:
+def create_collection(collection_name: str, directory: str, extra_fields: List = [], embedding_dim: int = 1536, max_src_length: int = 256) -> bool:
     if utility.has_collection(collection_name):
         print(f"error: collection {collection_name} already exists")
         return False
@@ -114,14 +115,12 @@ def create_collection_pdf(collection_name: str, directory: str, embedding_dim: i
     text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
     source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
-    page_field = FieldSchema(name="page", dtype=DataType.INT16, description="The page number")
-    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field, page_field],
+    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field] + extra_fields,
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=collection_name, schema=schema)
     index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
     coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
 
-    upload_pdfs(collection_name, directory, embedding_dim, max_chunk_size, chunk_overlap)
     return True
 
 def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int, session_id: str = None):
@@ -186,39 +185,38 @@ def session_upload_pdf(file: UploadFile, session_id: str, summary: str, max_chun
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
     return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def session_source_summaries(session_id: str):
+def session_source_summaries(session_id: str, batch_size: int = 1000):
     coll = Collection(SESSION_PDF)
     coll.load()
-    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'", output_fields= ["source", "ai_summary", "user_summary"])
-    source_summary = {}
-    while True:
-        res = q_iter.next()
-        if len(res) == 0:
-            q_iter.close()
-            break
+    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'", output_fields= ["source", "ai_summary", "user_summary"], batch_size=batch_size)
+    source_summaries = {}
+    res = q_iter.next()
+    while len(res) > 0:
         for item in res:
-            if item["source"] not in source_summary:
-                source_summary[item["source"]] = {"ai_summary": item["ai_summary"], "user_summary": item["user_summary"]}
-    return source_summary
+            if item["source"] not in source_summaries:
+                source_summaries[item["source"]] = {"ai_summary": item["ai_summary"]}
+                if item["user_summary"] != item["source"]:
+                    source_summaries[item["source"]]["user_summary"] = item["user_summary"]
+        res = q_iter.next()
+    q_iter.close()
+    return source_summaries
 
-def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
+def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
     """
-    Runs query on database_name and returns an answer along with the top k source chunks
-
-    This should be similar to db_bot, but using newer langchain LCEL
+    Runs query on collection_name and returns an answer along with the top k source chunks
 
     Args
-        database_name: the name of a pymilvus.Collection
+        collection_name: the name of a pymilvus.Collection
         query: the user query
         k: return the top k chunks
         session_id: the session id for filtering session data
 
-    Returns dict with success or failure message and a result if success
+    Returns dict with success message, result, and sources or else failure message
     """
-    if check_params(database_name, query, k, session_id):
-        return check_params(database_name, query, k, session_id)
+    if check_params(collection_name, query, k, session_id):
+        return check_params(collection_name, query, k, session_id)
     
-    db = load_db(database_name)
+    db = load_db(collection_name)
     retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
     llm = OpenAI(temperature=0)
     if session_id:
@@ -245,8 +243,7 @@ class FilteredRetriever(VectorStoreRetriever):
         # TODO: determine if get_relevant_documents() kwargs param supports filtering by metadata
         # double k on each call to get_relevant_documents() until there are k filtered documents
         while len(docs) < k:
-            results = self.vectorstore.as_retriever(search_kwargs={"k": self.search_kwargs["k"]}).get_relevant_documents(query=query)
+            results = self.vectorstore.as_retriever(search_kwargs={"k": k}).get_relevant_documents(query=query)
             docs += [doc for doc in results if doc.metadata['session_id'] == self.session_filter and doc not in docs]
-            self.search_kwargs["k"] = 2 * self.search_kwargs["k"]
-        self.search_kwargs["k"] = k
-        return docs[:k]
+            k = 2 * k
+        return docs[:self.search_kwargs["k"]]

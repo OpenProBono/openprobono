@@ -1,9 +1,12 @@
-from milvusdb import qa, query, SESSION_PDF
+from milvusdb import qa, query, COLLECTIONS, SESSION_PDF
 from langchain.agents import Tool
 
 def vdb_qa_tool(tool: dict):
+    if tool["collection_name"] not in COLLECTIONS:
+        raise ValueError(f"invalid collection_name {tool["collection_name"]}")
+
     def vdb_tool(tool: dict, question: str):
-        return qa(tool["database_name"], question, tool["k"])
+        return qa(tool["collection_name"], question, tool["k"])
 
     async def async_vdb_tool(tool: dict, question: str):
         return vdb_tool(tool, question)
@@ -15,12 +18,15 @@ def vdb_qa_tool(tool: dict):
         name = tool["name"],
         func = tool_func,
         coroutine = co_func,
-        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["database_name"]}."""
+        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["collection_name"]}."""
     )
 
 def vdb_query_tool(tool: dict):
+    if tool["collection_name"] not in COLLECTIONS:
+        raise ValueError(f"invalid collection_name {tool["collection_name"]}")
+
     def vdb_tool(tool: dict, q: str):
-        return query(tool["database_name"], q, tool["k"])
+        return query(tool["collection_name"], q, tool["k"])
 
     async def async_vdb_tool(tool: dict, q: str):
         return vdb_tool(tool, q)
@@ -31,7 +37,7 @@ def vdb_query_tool(tool: dict):
         name = tool["name"],
         func = tool_func,
         coroutine = co_func,
-        description = f"""Tool used to query a vector database named {tool["database_name"]} and return the {tool["k"]} most relevant text chunks."""
+        description = f"""Tool used to query a vector database named {tool["collection_name"]} and return the {tool["k"]} most relevant text chunks."""
     )
 
 def session_query_tool(session_id: str, source_summaries: dict):
@@ -47,7 +53,7 @@ def session_query_tool(session_id: str, source_summaries: dict):
             name = "session_query_tool",
             func = tool_func,
             coroutine = co_func,
-            description = f"Tool used to query a vector database containing the following sources: {source_summaries.keys()}"
+            description = f"Tool used to query a vector database containing the following sources: {source_summaries.keys()}."
         )
 
 def session_qa_tool(session_id: str, source_summaries: dict):
@@ -63,7 +69,7 @@ def session_qa_tool(session_id: str, source_summaries: dict):
             name = "session_qa_tool",
             func = tool_func,
             coroutine = co_func,
-            description = f"Tool used to answer questions using the 4 most relevant text chunks from a vector database containing the following sources: {source_summaries.keys()}"
+            description = f"Tool used to answer questions from a vector database containing the following sources: {source_summaries.keys()}."
         )
 
 def vdb_toolset_creator(tools: list[dict]):

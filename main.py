@@ -8,7 +8,7 @@ import firebase_admin
 from typing import Annotated
 from fastapi import Body, FastAPI, Query, UploadFile
 from firebase_admin import credentials, firestore
-from milvusdb import session_upload_pdf, US, NC
+from milvusdb import session_upload_pdf, delete_expr, US, NC, SESSION_PDF
 
 from bot import BotRequest, ChatRequest, opb_bot
 from models import ChatBySession, FetchSession, InitializeSession
@@ -209,7 +209,7 @@ def chat_session(request: Annotated[
     return {"message": "Success", "output": response["output"], "bot_id": response["bot_id"], "session_id": cr.session_id}
 
 @api.post("/fetch_session", tags=["Session Chat"])
-def get_sesion(request: Annotated[
+def get_session(request: Annotated[
         FetchSession,
         Body(
             openapi_examples={
@@ -246,7 +246,7 @@ def create_bot(request: Annotated[
                         }],
                         "vdb_tools": [{
                             "name": "query",
-                            "database_name": "USCode",
+                            "collection_name": "USCode",
                             "k": 4
                         }],
                         "api_key":"xyz",
@@ -267,7 +267,7 @@ def create_bot(request: Annotated[
                         }],
                         "vdb_tools": [{
                             "name": "query",
-                            "database_name": US,
+                            "collection_name": US,
                             "k": 4
                         }],
                         "api_key":"xyz"
@@ -286,7 +286,7 @@ def create_bot(request: Annotated[
                         }],
                         "vdb_tools": [{
                             "name": "name for tool, must be one of: qa, query",
-                            "database_name": f"name of database to query, must be one of: {US}, {NC}",
+                            "collection_name": f"name of database to query, must be one of: {US}, {NC}",
                             "k": "the number of text chunks to return when querying the database"
                         }],
                         "beta": "whether to use beta features or not, if they are available",
@@ -306,14 +306,11 @@ def create_bot(request: Annotated[
     return {"message": "Success", "bot_id": bot_id}
 
 @api.post("/upload_file", tags=["Vector Database"])
-def vectordb_upload(file: UploadFile, session_id: str, summary: str = None):
-    if summary:
-        return session_upload_pdf(file, session_id, summary)
-    else:
-        return session_upload_pdf(file, session_id, file.filename)
+def upload_file(file: UploadFile, session_id: str, summary: str = None):
+    return session_upload_pdf(file, session_id, summary if summary else file.filename)
 
 @api.post("/upload_files", tags=["Vector Database"])
-def vectordb_upload(files: list[UploadFile], session_id: str, summaries: list[str] = None):
+def upload_files(files: list[UploadFile], session_id: str, summaries: list[str] = None):
     if not summaries:
         summaries = [file.filename for file in files]
     elif len(files) != len(summaries):
@@ -327,3 +324,17 @@ def vectordb_upload(files: list[UploadFile], session_id: str, summaries: list[st
     if len(failures) == 0:
         return {"message": f"Success: {len(files)} file{'s' if len(files) > 1 else ''} uploaded"}
     return {"message": f"Warning: {len(failures)} failure{'s' if len(failures) > 1 else ''} occurred: {failures}"}
+
+@api.post("/delete_file", tags=["Vector Database"])
+def delete_file(filename: str, session_id: str):
+    return delete_expr(SESSION_PDF, f"source=='{filename}' and session_id=='{session_id}'")
+
+@api.post("/delete_files", tags=["Vector Database"])
+def delete_files(filenames: list[str], session_id: str):
+    for filename in filenames:
+        delete_expr(SESSION_PDF, f"source=='{filename}' and session_id=='{session_id}'")
+    return {"message": f"Success: deleted {len(filenames)} files"}
+
+@api.post("/delete_session_files", tags=["Vector Database"])
+def delete_session_files(session_id: str):
+    return delete_expr(SESSION_PDF, f"session_id=='{session_id}'")

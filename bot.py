@@ -61,7 +61,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         source_summaries = session_source_summaries(r.session_id)
         if source_summaries:
             toolset.append(session_query_tool(r.session_id, source_summaries))
-            system_message += f' The session_query_tool sources have these summaries: {source_summaries}.'
+            system_message += f' When citing the session_query_tool, include the filename and page. The sources have these summaries: {source_summaries}.'
 
         async def task(prompt):
             #definition of llm used for bot
