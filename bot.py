@@ -58,9 +58,10 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         else:
             toolset += serpapi_toolset_creator(bot)
         toolset += vdb_toolset_creator(bot.vdb_tools)
+        # sesssion tool
         source_summaries = session_source_summaries(r.session_id)
+        toolset.append(session_query_tool(r.session_id, source_summaries))
         if source_summaries:
-            toolset.append(session_query_tool(r.session_id, source_summaries))
             system_message += f' When citing the session_query_tool, include the filename and page. The sources have these summaries: {source_summaries}.'
 
         async def task(prompt):

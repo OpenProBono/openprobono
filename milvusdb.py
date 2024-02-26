@@ -24,12 +24,20 @@ connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 # collections by jurisdiction?
 US = "USCode"
 NC = "NCGeneralStatutes"
-COLLECTIONS = {US, NC}
 SESSION_PDF = "SessionPDF"
+COLLECTIONS = {US, NC}
+PDF = "PDF"
+HTML = "HTML"
+COLLECTION_TYPES = {
+    US: PDF,
+    NC: PDF,
+    SESSION_PDF: PDF
+}
+OUTPUT_FIELDS = {PDF: ["page"], HTML: []}
 SEARCH_PARAMS = {
     "anns_field": "vector",
     "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
-    "output_fields": ["text", "source", "page"]
+    "output_fields": ["text", "source"]
 }
 
 def load_db(collection_name: str):
@@ -48,8 +56,8 @@ def check_params(collection_name: str, query: str, k: int, session_id: str = Non
         return {"message": f"Failure: collection {collection_name} not found"}
     if not query or query == "":
         return {"message": "Failure: query not found"}
-    if k < 1 or k > 10:
-        return {"message": f"Failure: k = {k} out of range [1, 10]"}
+    if k < 1 or k > 16384:
+        return {"message": f"Failure: k = {k} out of range [1, 16384]"}
     if session_id is None and collection_name == SESSION_PDF:
         return {"message": "Failure: session_id not found"}
 
@@ -59,19 +67,21 @@ def query(collection_name: str, query: str, k: int = 4, expr: str = None, sessio
     
     coll = Collection(collection_name)
     coll.load()
-    SEARCH_PARAMS["data"] = [OpenAIEmbeddings().embed_query(query)]
-    SEARCH_PARAMS["limit"] = k
+    search_params = SEARCH_PARAMS
+    search_params["data"] = [OpenAIEmbeddings().embed_query(query)]
+    search_params["limit"] = k
+    search_params["output_fields"] += OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
 
     if expr:
-        SEARCH_PARAMS["expr"] = expr
+        search_params["expr"] = expr
     if session_id:
         session_filter = f"session_id=='{session_id}'"
         # append to existing filter expr or create new filter
         if expr:
-            SEARCH_PARAMS["expr"] += f" and {session_filter}"
+            search_params["expr"] += f" and {session_filter}"
         else:
-            SEARCH_PARAMS["expr"] = session_filter
-    res = coll.search(**SEARCH_PARAMS)
+            search_params["expr"] = session_filter
+    res = coll.search(**search_params)
     if res:
         # on success, returns a list containing a single inner list containing result objects
         if len(res) == 1:

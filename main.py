@@ -8,7 +8,7 @@ import firebase_admin
 from typing import Annotated
 from fastapi import Body, FastAPI, Query, UploadFile
 from firebase_admin import credentials, firestore
-from milvusdb import session_upload_pdf, delete_expr, US, NC, SESSION_PDF
+from milvusdb import session_upload_pdf, session_source_summaries, delete_expr, US, NC, SESSION_PDF
 
 from bot import BotRequest, ChatRequest, opb_bot
 from models import ChatBySession, FetchSession, InitializeSession
@@ -334,6 +334,11 @@ def delete_files(filenames: list[str], session_id: str):
     for filename in filenames:
         delete_expr(SESSION_PDF, f"source=='{filename}' and session_id=='{session_id}'")
     return {"message": f"Success: deleted {len(filenames)} files"}
+
+@api.post("/get_session_files", tags=["Vector Database"])
+def get_session_files(session_id: str):
+    source_summaries = session_source_summaries(session_id)
+    return {"message": f"Success: found {len(source_summaries)} files", "result": source_summaries.keys()}
 
 @api.post("/delete_session_files", tags=["Vector Database"])
 def delete_session_files(session_id: str):
