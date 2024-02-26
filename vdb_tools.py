@@ -3,7 +3,7 @@ from langchain.agents import Tool
 
 def vdb_qa_tool(tool: dict):
     if tool["collection_name"] not in COLLECTIONS:
-        raise ValueError(f"invalid collection_name {tool["collection_name"]}")
+        raise ValueError(f"invalid collection_name {tool['collection_name']}")
 
     def vdb_tool(tool: dict, question: str):
         return qa(tool["collection_name"], question, tool["k"])
@@ -23,7 +23,7 @@ def vdb_qa_tool(tool: dict):
 
 def vdb_query_tool(tool: dict):
     if tool["collection_name"] not in COLLECTIONS:
-        raise ValueError(f"invalid collection_name {tool["collection_name"]}")
+        raise ValueError(f"invalid collection_name {tool['collection_name']}")
 
     def vdb_tool(tool: dict, q: str):
         return query(tool["collection_name"], q, tool["k"])
