@@ -1,7 +1,10 @@
 fastapi>0.105.0
 uvicorn[standard]==0.20.0
 anyio==3.7.1
+bs4
+unstructured[all-docs]
 firebase-admin==6.2.0
+google-cloud-documentai
 google-search-results==2.4.2
 langchain>0.1.0
 langchain-openai>0.0.4

@@ -1,22 +1,22 @@
 #fastapi implementation
+import os
 import uuid
 from json import loads
-import os
 from typing import Annotated
 
 import firebase_admin
-from typing import Annotated
-from fastapi import Body, FastAPI, Query, UploadFile
+from fastapi import Body, FastAPI, UploadFile
 from firebase_admin import credentials, firestore
-from milvusdb import session_upload_pdf, US, NC
+from requests import session
 
 from bot import BotRequest, ChatRequest, opb_bot
+from milvusdb import (NC, US, crawl_and_scrape, session_upload_ocr,
+                      session_upload_pdf)
 from models import ChatBySession, FetchSession, InitializeSession
 from new_bot import flow
 
 #which version of db we are using
-version= "vf17_flow"
-
+version= "vf23_db"
 bot_collection = "bots"
 conversation_collection = "conversations"
 
@@ -177,7 +177,7 @@ def init_session(request: Annotated[
                     "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was used, session_id: the session_id which was created",
                     "value": {
                         "message": "hi, I need help",
-                        "bot_id": "216bec82-f063-4f48-897b-8bf1e77e24ef",
+                        "bot_id": "83f74a4e-0f8f-4142-b4e7-92a20f688a0b",
                         "api_key":"xyz",
                     },
                 },
@@ -304,6 +304,17 @@ def create_bot(request: Annotated[
     store_bot(request, bot_id)
 
     return {"message": "Success", "bot_id": bot_id}
+
+@api.post("/upload_site_ocr", tags=["Vector Database"])
+def vectordb_upload_site(site: str, session_id: str):
+    return crawl_and_scrape(site, session_id)
+
+@api.post("/upload_file_ocr", tags=["Vector Database"])
+def vectordb_upload_ocr(file: UploadFile, session_id: str, summary: str = None):
+    if summary:
+        return session_upload_ocr(file, session_id, summary)
+    else:
+        return session_upload_ocr(file, session_id, file.filename)
 
 @api.post("/upload_file", tags=["Vector Database"])
 def vectordb_upload(file: UploadFile, session_id: str, summary: str = None):
