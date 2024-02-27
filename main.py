@@ -322,8 +322,8 @@ def upload_files(files: list[UploadFile], session_id: str, summaries: list[str] 
             failures.append(f"Upload #{i + 1} of {len(files)} failed. Internal message: {result['message']}")
             
     if len(failures) == 0:
-        return {"message": f"Success: {len(files)} file{'s' if len(files) > 1 else ''} uploaded"}
-    return {"message": f"Warning: {len(failures)} failure{'s' if len(failures) > 1 else ''} occurred: {failures}"}
+        return {"message": f"Success: {len(files)} files uploaded"}
+    return {"message": f"Warning: {len(failures)} failures occurred: {failures}"}
 
 @api.post("/delete_file", tags=["Vector Database"])
 def delete_file(filename: str, session_id: str):
@@ -338,7 +338,8 @@ def delete_files(filenames: list[str], session_id: str):
 @api.post("/get_session_files", tags=["Vector Database"])
 def get_session_files(session_id: str):
     source_summaries = session_source_summaries(session_id)
-    return {"message": f"Success: found {len(source_summaries)} files", "result": source_summaries.keys()}
+    files = list(source_summaries.keys())
+    return {"message": f"Success: found {len(files)} files", "result": files}
 
 @api.post("/delete_session_files", tags=["Vector Database"])
 def delete_session_files(session_id: str):

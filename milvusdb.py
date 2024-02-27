@@ -135,7 +135,7 @@ def create_collection(collection_name: str, directory: str, extra_fields: List =
 
 def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int, session_id: str = None):
     files = sorted(os.listdir(directory))
-    print(f"found {len(files)} file{'s' if len(files) > 1 else ''}")
+    print(f"found {len(files)} files")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
     db = load_db(collection_name)
     embedding = OpenAIEmbeddings()
@@ -161,10 +161,10 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
         # add user data
         if session_id:
             documents[j].metadata["session_id"] = session_id
-    print(f" inserting {num_docs} chunk{'s' if num_docs > 1 else ''}")
+    print(f" inserting {num_docs} chunks")
     ids = db.add_documents(documents=documents, embedding=embedding, connection_args=connection_args)
     if num_docs != len(ids):
-        print(f" error: expected {num_docs} upload{'s' if num_docs > 1 else ''} but got {len(ids)}")
+        print(f" error: expected {num_docs} uploads but got {len(ids)}")
 
 def session_upload_pdf(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
     if not file.filename.endswith(".pdf"):
@@ -192,8 +192,8 @@ def session_upload_pdf(file: UploadFile, session_id: str, summary: str, max_chun
     ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+        return {"message": f"Failure: expected to upload {num_docs} chunks for {file.filename} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunks"}
 
 def session_source_summaries(session_id: str, batch_size: int = 1000):
     coll = Collection(SESSION_PDF)
