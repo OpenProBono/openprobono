@@ -17,6 +17,11 @@ class InitializeSession(BaseModel):
     bot_id: str
     api_key: str
 
+class InitializeSessionScrapeSite(BaseModel):
+    site: str
+    bot_id: str
+    api_key: str
+
 class FetchSession(BaseModel):
     session_id: str
     api_key: str

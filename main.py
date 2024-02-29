@@ -1,5 +1,6 @@
 #fastapi implementation
 import os
+import re
 import uuid
 from json import loads
 from typing import Annotated
@@ -12,8 +13,12 @@ from requests import session
 from bot import BotRequest, ChatRequest, opb_bot
 from milvusdb import (NC, US, crawl_and_scrape, session_upload_ocr,
                       session_upload_pdf)
-from models import ChatBySession, FetchSession, InitializeSession
+from models import (ChatBySession, FetchSession, InitializeSession,
+                    InitializeSessionScrapeSite)
 from new_bot import flow
+
+#sdvlp session
+#1076cca8-a1fa-415a-b5f8-c11da178d224
 
 #which version of db we are using
 version= "vf23_db"
@@ -43,6 +48,9 @@ def store_conversation(r: ChatRequest, output):
     db.collection(conversation_collection + version).document(r.session_id).collection('conversations').document("msg" + str(len(r.history))).set(data)
     db.collection(conversation_collection + version).document(r.session_id).set({"last_message_timestamp": t}, merge=True)
 
+def set_session_to_bot(session_id: str, bot_id: str):
+    db.collection(conversation_collection + version).document(session_id).set({"bot_id": bot_id}, merge=True)
+
 def load_session(r: ChatBySession):
     msgs = db.collection(conversation_collection + version).document(r.session_id).collection('conversations').order_by("timestamp", direction=firestore.Query.ASCENDING).get()
     history = []
@@ -51,7 +59,8 @@ def load_session(r: ChatBySession):
         msg_pair = [conversation["human"], conversation["bot"]]
         history.append(msg_pair)
     history.append([r.message, ""])
-    return ChatRequest(history=history, bot_id=msgs[0].to_dict()["bot_id"], session_id=r.session_id, api_key=r.api_key)
+    metadata =  db.collection(conversation_collection + version).document(r.session_id).get()
+    return ChatRequest(history=history, bot_id=metadata.to_dict()["bot_id"], session_id=r.session_id, api_key=r.api_key)
 
 def fetch_session(r: FetchSession):
     msgs = db.collection(conversation_collection + version).document(r.session_id).collection('conversations').order_by("timestamp", direction=firestore.Query.ASCENDING).get()
@@ -167,7 +176,7 @@ def chat(request: Annotated[
     
     return process_chat(request)
 
-@api.post("/initialize_session", tags=["Session Chat"])
+@api.post("/initialize_session_chat", tags=["Session Chat"])
 def init_session(request: Annotated[
         InitializeSession,
         Body(
@@ -184,9 +193,37 @@ def init_session(request: Annotated[
             },
         )]):
     session_id = get_uuid_id()
+    set_session_to_bot(session_id, request.bot_id)
     cr = ChatRequest(history=[[request.message, ""]], bot_id=request.bot_id, session_id=session_id, api_key=request.api_key)
     response =  process_chat(cr)
-    return {"message": "Success", "output": response["output"], "bot_id": request.bot_id, "session_id": session_id}
+    try:
+        return {"message": "Success", "output": response["output"], "bot_id": request.bot_id, "session_id": session_id}
+    except:
+        return response
+    
+@api.post("/initialize_session_site", tags=["Session Chat"])
+def init_session_site(request: Annotated[
+        InitializeSessionScrapeSite,
+        Body(
+            openapi_examples={
+                "init session": {
+                    "summary": "initialize a session",
+                    "description": "Returns: {message: 'Success', urls: every url which was scraped, bot_id: the bot_id which was used, session_id: the session_id which was created",
+                    "value": {
+                        "site": "https://sdvlp.org/",
+                        "bot_id": "83f74a4e-0f8f-4142-b4e7-92a20f688a0b",
+                        "api_key":"xyz",
+                    },
+                },
+            },
+        )]):
+    session_id = get_uuid_id()
+    set_session_to_bot(session_id, request.bot_id)
+    response = crawl_and_scrape(request.site, session_id)
+    try:
+        return {"message": "Success", "urls": response, "bot_id": request.bot_id, "session_id": session_id}
+    except:
+        return response
 
 @api.post("/chat_session", tags=["Session Chat"])
 def chat_session(request: Annotated[
@@ -206,7 +243,11 @@ def chat_session(request: Annotated[
         )]):
     cr = load_session(request)
     response = process_chat(cr)
-    return {"message": "Success", "output": response["output"], "bot_id": response["bot_id"], "session_id": cr.session_id}
+    try:
+        return {"message": "Success", "output": response["output"], "bot_id": response["bot_id"], "session_id": cr.session_id}
+    except:
+        return response
+    
 
 @api.post("/fetch_session", tags=["Session Chat"])
 def get_sesion(request: Annotated[

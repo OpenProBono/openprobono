@@ -1,5 +1,7 @@
-from milvusdb import qa, query, SESSION_PDF
 from langchain.agents import Tool
+
+from milvusdb import SESSION_PDF, qa, query
+
 
 def vdb_qa_tool(tool: dict):
     def vdb_tool(tool: dict, question: str):
@@ -47,7 +49,7 @@ def session_query_tool(session_id: str, source_summaries: dict):
             name = "session_query_tool",
             func = tool_func,
             coroutine = co_func,
-            description = f"Tool used to query a vector database containing the following sources: {source_summaries.keys()}"
+            description = f"Tool used to query a vector database including information about the San Diego Volunteer Lawyer Program and return the most relevant text chunks. You can use this tool to query for legal and procedural information as well."
         )
 
 def vdb_toolset_creator(tools: list[dict]):
