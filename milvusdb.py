@@ -23,6 +23,7 @@ from langchain_community.vectorstores.milvus import Milvus
 from langchain_core.vectorstores import Field, VectorStoreRetriever
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai.llms import OpenAI
+from networkx import circular_layout
 from pymilvus import (Collection, CollectionSchema, DataType, FieldSchema,
                       connections, utility)
 from pypdf import PdfReader
@@ -32,7 +33,6 @@ connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 
-# TODO: Uncomment these variables before running the sample.
 project_id = "h2o-gpt"
 location = "us"  # Format is "us" or "eu"
 processor_id = "c99e554bb49cf45d"
@@ -62,43 +62,56 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
     return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def scrape(site: str, old_urls: list[str], session_id: str): 
-    r = requests.get(site) 
-
+def scrape(site: str, old_urls: list[str], common_elements: list[str], session_id: str, get_links: bool = False): 
+    print("site: ", site)
+    r = requests.get(site)
+    site_base = "//".join(site.split("//")[:-1])
     # converting the text 
     s = BeautifulSoup(r.content,"html.parser") 
     urls = []
 
-    for i in s.find_all("a"): 
-        href = i.attrs['href'] 
-        
-        if href.startswith("/"): 
-            link = site+href 
-        elif href.startswith("http"):
-            link = href
-        else:
-            link = old_urls[0]
-            #skip this link
+    if(get_links):
+        for i in s.find_all("a"): 
+            if("href" in i.attrs):
+                href = i.attrs['href'] 
+                
+                if href.startswith("/"): 
+                    link = site_base+href 
+                elif href.startswith("http"):
+                    link = href
+                else:
+                    link = old_urls[0]
+                    #skip this link
 
-        if link not in old_urls: 
-            old_urls.append(link)
-            urls.append(link)
+                if link not in old_urls: 
+                    old_urls.append(link)
+                    urls.append(link)
 
     try:
         elements = partition(url=site)
     except:
         elements = partition(url=site, content_type="text/html")
-    e_text = "\n\n".join([str(el) for el in elements[:-1]])
+    e_text = ""
+    for el in elements:
+        el = str(el)
+        if(el not in common_elements):
+            e_text += el + "\n\n"
+    print("elements: ", e_text)
+    print("site: ", site)
     session_upload_str(e_text, session_id, site)
-
-    return urls
+    return [urls, elements]
 
 def crawl_and_scrape(site: str, session_id: str):
     urls = [site]
-    new_urls = scrape(site, urls, session_id)
+    new_urls, common_elements = scrape(site, urls, [], session_id, True)
+    print("new_urls: ", new_urls)
     while len(new_urls) > 0:
-        urls += new_urls
-        new_urls = scrape(site, urls, session_id)
+        cur_url = new_urls.pop()
+        if site == cur_url[:len(site)]:
+            urls.append(cur_url)
+            add_urls, common_elements = scrape(cur_url, urls + new_urls, common_elements, session_id)
+            new_urls += add_urls
+    print(urls)
     return urls
                 
 def quickstart_ocr(

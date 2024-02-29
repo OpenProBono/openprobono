@@ -305,7 +305,7 @@ def create_bot(request: Annotated[
 
     return {"message": "Success", "bot_id": bot_id}
 
-@api.post("/upload_site_ocr", tags=["Vector Database"])
+@api.post("/upload_site", tags=["Vector Database"])
 def vectordb_upload_site(site: str, session_id: str):
     return crawl_and_scrape(site, session_id)
 
