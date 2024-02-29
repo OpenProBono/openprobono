@@ -2,16 +2,18 @@ import os
 from langchain import hub
 from langchain.chains import create_retrieval_chain, load_summarize_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_openai.llms import OpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.embeddings.base import Embeddings
-from langchain_community.document_loaders import PyPDFLoader
-from pypdf import PdfReader
-from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain.docstore.document import Document
-from langchain_community.vectorstores.milvus import Milvus
 from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
+from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain_openai import OpenAIEmbeddings
+from langchain_openai.llms import OpenAI
+from pypdf import PdfReader
+from unstructured.partition.auto import partition_text
+from unstructured.chunking.basic import chunk_elements
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores.milvus import Milvus
 from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
 from json import loads
 from typing import List
@@ -40,6 +42,7 @@ SEARCH_PARAMS = {
     "output_fields": ["text", "source"]
 }
 
+# TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
     return Milvus(
         embedding_function=OpenAIEmbeddings(),
@@ -89,6 +92,36 @@ def query(collection_name: str, query: str, k: int = 4, expr: str = None, sessio
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
+
+def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
+    """
+    Runs query on collection_name and returns an answer along with the top k source chunks
+
+    Args
+        collection_name: the name of a pymilvus.Collection
+        query: the user query
+        k: return the top k chunks
+        session_id: the session id for filtering session data
+
+    Returns dict with success message, result, and sources or else failure message
+    """
+    if check_params(collection_name, query, k, session_id):
+        return check_params(collection_name, query, k, session_id)
+    
+    db = load_db(collection_name)
+    retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
+    llm = OpenAI(temperature=0)
+    if session_id:
+        retriever = FilteredRetriever(vectorstore=db, session_filter=session_id, search_kwargs={"k": k})
+    else:
+        retriever = db.as_retriever(search_kwargs={"k": k})
+    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
+    retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
+    result = retrieval_chain.invoke({"input": query})
+    cited_sources = []
+    for doc in result["context"]:
+        cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
+    return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
 
 def delete_expr(collection_name: str, expr: str):
     """
@@ -158,7 +191,7 @@ def upload_pdf_pypdf(db: Milvus, directory: str, fname: str, text_splitter: Text
         documents[j].metadata.update({"source": fname})
         # change pages from 0-index to 1-index
         documents[j].metadata.update({"page": documents[j].metadata["page"] + 1})
-        # add user data
+        # add session data
         if session_id:
             documents[j].metadata["session_id"] = session_id
     print(f" inserting {num_docs} chunks")
@@ -211,36 +244,6 @@ def session_source_summaries(session_id: str, batch_size: int = 1000):
     q_iter.close()
     return source_summaries
 
-def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
-    """
-    Runs query on collection_name and returns an answer along with the top k source chunks
-
-    Args
-        collection_name: the name of a pymilvus.Collection
-        query: the user query
-        k: return the top k chunks
-        session_id: the session id for filtering session data
-
-    Returns dict with success message, result, and sources or else failure message
-    """
-    if check_params(collection_name, query, k, session_id):
-        return check_params(collection_name, query, k, session_id)
-    
-    db = load_db(collection_name)
-    retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
-    llm = OpenAI(temperature=0)
-    if session_id:
-        retriever = FilteredRetriever(vectorstore=db, session_filter=session_id, search_kwargs={"k": k})
-    else:
-        retriever = db.as_retriever(search_kwargs={"k": k})
-    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
-    retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
-    result = retrieval_chain.invoke({"input": query})
-    cited_sources = []
-    for doc in result["context"]:
-        cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
-    return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
-
 class FilteredRetriever(VectorStoreRetriever):
     vectorstore: VectorStore
     search_type: str = "similarity"
@@ -257,3 +260,149 @@ class FilteredRetriever(VectorStoreRetriever):
             docs += [doc for doc in results if doc.metadata['session_id'] == self.session_filter and doc not in docs]
             k = 2 * k
         return docs[:self.search_kwargs["k"]]
+
+def min_set():
+    import subprocess
+    root_dir = "cap/"
+    fields = [0] * 11
+    no_opinions = False
+    no_citations = False
+    for subdir in sorted(os.listdir(f"{os.getcwd()}/{root_dir}")):
+        if "metadata" in subdir:
+            continue
+        task = subprocess.Popen(["xzcat", f"{root_dir + subdir}/{subdir}/data/data.jsonl.xz"], stdout=subprocess.PIPE)
+        lines = task.stdout.readlines()
+        print(f"{subdir} contains {len(lines)} cases")
+        for i, line in enumerate(lines):
+            if i % 1000 == 0:
+                print(f" {len(lines) - i} cases remaining, nulls: {fields}")
+            json = loads(line)
+            opinions = json["casebody"]["data"]["opinions"]
+            if len(opinions) < 1:
+                continue
+            for opinion in opinions:
+                opinion_text = opinion["text"]
+                if opinion_text and len(opinion_text) > fields[1]:
+                    fields[1] = len(opinion_text)
+                opinion_type = opinion["type"]
+                if opinion_type and len(opinion_type) > fields[2]:
+                    fields[2] = len(opinion_type)
+                    print(f"type ({len(opinion_type)}): {opinion_type}")
+                opinion_author = opinion["author"]
+                if opinion_author and len(opinion_author) > fields[3]:
+                    fields[3] = len(opinion_author)
+                    print(f"author ({len(opinion_author)}): {opinion_author}")
+            case_name = json["name"]
+            if case_name and len(case_name) > fields[4]:
+                fields[4] = len(case_name)
+                print(f"case name ({len(case_name)}): {case_name}")
+            case_name_abbr = json["name_abbreviation"]
+            if case_name_abbr and len(case_name_abbr) > fields[5]:
+                fields[5] = len(case_name_abbr)
+                print(f"case name abbreviated ({len(case_name)}): {case_name}")
+            decision_date = json["decision_date"]
+            if decision_date and len(decision_date) > fields[6]:
+                fields[6] = len(decision_date)
+            citations = json["citations"]
+            for cite in citations:
+                if cite["cite"] and len(cite["cite"]) > fields[7]:
+                    fields[7] = len(cite["cite"])
+                    print(f"""cite ({len(cite["cite"])}): {cite["cite"]}""")
+                if cite["type"] and len(cite["type"]) > fields[8]:
+                    fields[8] = len(cite["type"])
+            court_name = json["court"]["name"]
+            if court_name and len(court_name) > fields[9]:
+                fields[9] = len(court_name)
+                print(f"court name ({len(court_name)}): {court_name}")
+            jurisdiction_name = json["jurisdiction"]["name"]
+            if jurisdiction_name and len(jurisdiction_name) > fields[10]:
+                fields[10] = len(jurisdiction_name)
+    print(fields)
+    
+def cap_data():
+    embedding_dim = 1536
+    collection_name = "CAP"
+    with open(os.path.join(os.getcwd(), "description.txt")) as f:
+        description = ' '.join(f.readlines())
+    
+    # define schema, create collection, create index on vectors
+    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
+    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
+    caseid_field = FieldSchema(name="case_id", dtype=DataType.INT64, description="The id of the case on the CAP API")
+    type_field = FieldSchema(name="opinion_type", dtype=DataType.VARCHAR, description="The opinion type", max_length=128)
+    author_field = FieldSchema(name="opinion_author", dtype=DataType.VARCHAR, description="The opinion author", max_length=embedding_dim)
+    casenameabbr_field = FieldSchema(name="case_name_abbreviation", dtype=DataType.VARCHAR, description="The abbreviated name of the case", max_length=embedding_dim)
+    date_field = FieldSchema(name="decision_date", dtype=DataType.VARCHAR, description="The date of the decision", max_length=10)
+    cite_field = FieldSchema(name="cite", dtype=DataType.VARCHAR, description="The official citation", max_length=embedding_dim)
+    court_field = FieldSchema(name="court_name", dtype=DataType.VARCHAR, description="The name of the court", max_length=embedding_dim // 2)
+    jurisdiction_field = FieldSchema(name="jurisdiction_name", dtype=DataType.VARCHAR, description="The name of the jurisdiction", max_length=embedding_dim // 4)
+    extra_fields = [author_field, type_field, caseid_field, casenameabbr_field, date_field, cite_field, court_field, jurisdiction_field]
+    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
+                              auto_id=True, enable_dynamic_field=True, description=description)
+    coll = Collection(name=collection_name, schema=schema)
+    index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
+    coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
+
+    import subprocess
+    root_dir = "cap/"
+    chunk_size = 1000
+    chunk_overlap = 150
+    batch_size = 1000
+    encoder = OpenAIEmbeddings(chunk_size=chunk_size)
+    for subdir in sorted(os.listdir(f"{os.getcwd()}/{root_dir}")):
+        if "metadata" in subdir:
+            continue
+        task = subprocess.Popen(["xzcat", f"{root_dir + subdir}/{subdir}/data/data.jsonl.xz"], stdout=subprocess.PIPE)
+        lines = task.stdout.readlines()
+        print(f"{subdir} contains {len(lines)} cases")
+        num_chunks = 0
+        for i, line in enumerate(lines, start=1):
+            if i % 1000 == 0:
+                print(f" {num_chunks} chunks processed, {len(lines) - i} cases remaining")
+            json = loads(line)
+            case_id = json["id"]
+            opinions = json["casebody"]["data"]["opinions"]
+            for opinion in opinions:
+                if not opinion["text"]:
+                    continue
+                opinion_type = opinion["type"] if opinion["type"] else "unknown"
+                opinion_author = opinion["author"] if opinion["author"] else "unknown"
+                elements = partition_text(text=opinion["text"])
+                chunks = chunk_elements(elements, max_characters=chunk_size, overlap=chunk_overlap)
+                num_case_chunks = len(chunks)
+                chunk_embeddings = encoder.embed_documents([chunk.text for chunk in chunks])
+                case_name_abbr = json["name_abbreviation"]
+                decision_date = json["decision_date"]
+                citations = json["citations"]
+                official_cite = next(iter([cite for cite in citations if cite["type"] == "official"]), None)
+                if not official_cite:
+                    print(f" error: citation not found for case id {case_id}")
+                    continue
+                official_cite = official_cite["cite"]
+                court_name = json["court"]["name"]
+                jurisdiction_name = json["jurisdiction"]["name"]
+                data = [
+                    chunk_embeddings, # opinion vector
+                    [chunk.text for chunk in chunks] # opinion text
+                ]
+                for j in range(0, len(data), batch_size):
+                    batch_vector = data[0][j: j + batch_size]
+                    batch_text = data[1][j: j + batch_size]
+                    current_batch_size = len(batch_text)
+                    batch_type = [opinion_type] * current_batch_size
+                    batch_author = [opinion_author] * current_batch_size
+                    batch_id = [case_id] * current_batch_size
+                    batch_name_abbr = [case_name_abbr] * current_batch_size
+                    batch_decision_date = [decision_date] * current_batch_size
+                    batch_cite = [official_cite] * current_batch_size
+                    batch_court_name = [court_name] * current_batch_size
+                    batch_jurisdiction_name = [jurisdiction_name] * current_batch_size
+                    batch = [batch_vector, batch_text, batch_type, batch_author, batch_id, batch_name_abbr,
+                            batch_decision_date, batch_cite, batch_court_name, batch_jurisdiction_name]
+                    result = coll.insert(batch)
+                    if result.insert_count != current_batch_size:
+                        print(f" error: expected {current_batch_size} uploads but got {result.insert_count}")
+                num_chunks += num_case_chunks
+        print(f"uploaded {num_chunks} chunks")
+        print()
