@@ -260,64 +260,6 @@ class FilteredRetriever(VectorStoreRetriever):
             docs += [doc for doc in results if doc.metadata['session_id'] == self.session_filter and doc not in docs]
             k = 2 * k
         return docs[:self.search_kwargs["k"]]
-
-def min_set():
-    import subprocess
-    root_dir = "cap/"
-    fields = [0] * 11
-    no_opinions = False
-    no_citations = False
-    for subdir in sorted(os.listdir(f"{os.getcwd()}/{root_dir}")):
-        if "metadata" in subdir:
-            continue
-        task = subprocess.Popen(["xzcat", f"{root_dir + subdir}/{subdir}/data/data.jsonl.xz"], stdout=subprocess.PIPE)
-        lines = task.stdout.readlines()
-        print(f"{subdir} contains {len(lines)} cases")
-        for i, line in enumerate(lines):
-            if i % 1000 == 0:
-                print(f" {len(lines) - i} cases remaining, nulls: {fields}")
-            json = loads(line)
-            opinions = json["casebody"]["data"]["opinions"]
-            if len(opinions) < 1:
-                continue
-            for opinion in opinions:
-                opinion_text = opinion["text"]
-                if opinion_text and len(opinion_text) > fields[1]:
-                    fields[1] = len(opinion_text)
-                opinion_type = opinion["type"]
-                if opinion_type and len(opinion_type) > fields[2]:
-                    fields[2] = len(opinion_type)
-                    print(f"type ({len(opinion_type)}): {opinion_type}")
-                opinion_author = opinion["author"]
-                if opinion_author and len(opinion_author) > fields[3]:
-                    fields[3] = len(opinion_author)
-                    print(f"author ({len(opinion_author)}): {opinion_author}")
-            case_name = json["name"]
-            if case_name and len(case_name) > fields[4]:
-                fields[4] = len(case_name)
-                print(f"case name ({len(case_name)}): {case_name}")
-            case_name_abbr = json["name_abbreviation"]
-            if case_name_abbr and len(case_name_abbr) > fields[5]:
-                fields[5] = len(case_name_abbr)
-                print(f"case name abbreviated ({len(case_name)}): {case_name}")
-            decision_date = json["decision_date"]
-            if decision_date and len(decision_date) > fields[6]:
-                fields[6] = len(decision_date)
-            citations = json["citations"]
-            for cite in citations:
-                if cite["cite"] and len(cite["cite"]) > fields[7]:
-                    fields[7] = len(cite["cite"])
-                    print(f"""cite ({len(cite["cite"])}): {cite["cite"]}""")
-                if cite["type"] and len(cite["type"]) > fields[8]:
-                    fields[8] = len(cite["type"])
-            court_name = json["court"]["name"]
-            if court_name and len(court_name) > fields[9]:
-                fields[9] = len(court_name)
-                print(f"court name ({len(court_name)}): {court_name}")
-            jurisdiction_name = json["jurisdiction"]["name"]
-            if jurisdiction_name and len(jurisdiction_name) > fields[10]:
-                fields[10] = len(jurisdiction_name)
-    print(fields)
     
 def cap_data():
     embedding_dim = 1536
@@ -390,15 +332,15 @@ def cap_data():
                     batch_vector = data[0][j: j + batch_size]
                     batch_text = data[1][j: j + batch_size]
                     current_batch_size = len(batch_text)
-                    batch_type = [opinion_type] * current_batch_size
                     batch_author = [opinion_author] * current_batch_size
+                    batch_type = [opinion_type] * current_batch_size
                     batch_id = [case_id] * current_batch_size
                     batch_name_abbr = [case_name_abbr] * current_batch_size
                     batch_decision_date = [decision_date] * current_batch_size
                     batch_cite = [official_cite] * current_batch_size
                     batch_court_name = [court_name] * current_batch_size
                     batch_jurisdiction_name = [jurisdiction_name] * current_batch_size
-                    batch = [batch_vector, batch_text, batch_type, batch_author, batch_id, batch_name_abbr,
+                    batch = [batch_vector, batch_text, batch_author, batch_type, batch_id, batch_name_abbr,
                             batch_decision_date, batch_cite, batch_court_name, batch_jurisdiction_name]
                     result = coll.insert(batch)
                     if result.insert_count != current_batch_size:
