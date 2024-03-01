@@ -205,29 +205,29 @@ def init_session(request: Annotated[
     except:
         return response
     
-@api.post("/initialize_session_site", tags=["Init Session"])
-def init_session_site(request: Annotated[
-        InitializeSessionScrapeSite,
-        Body(
-            openapi_examples={
-                "init session": {
-                    "summary": "initialize a session",
-                    "description": "Returns: {message: 'Success', urls: every url which was scraped, bot_id: the bot_id which was used, session_id: the session_id which was created",
-                    "value": {
-                        "site": "https://sdvlp.org/",
-                        "bot_id": "83f74a4e-0f8f-4142-b4e7-92a20f688a0b",
-                        "api_key":"xyz",
-                    },
-                },
-            },
-        )]):
-    session_id = get_uuid_id()
-    set_session_to_bot(session_id, request.bot_id)
-    response = crawl_and_scrape(request.site, session_id)
-    try:
-        return {"message": "Success", "urls": response, "bot_id": request.bot_id, "session_id": session_id}
-    except:
-        return response
+# @api.post("/initialize_session_site", tags=["Init Session"])
+# def init_session_site(request: Annotated[
+#         InitializeSessionScrapeSite,
+#         Body(
+#             openapi_examples={
+#                 "init session": {
+#                     "summary": "initialize a session",
+#                     "description": "Returns: {message: 'Success', urls: every url which was scraped, bot_id: the bot_id which was used, session_id: the session_id which was created",
+#                     "value": {
+#                         "site": "https://sdvlp.org/",
+#                         "bot_id": "83f74a4e-0f8f-4142-b4e7-92a20f688a0b",
+#                         "api_key":"xyz",
+#                     },
+#                 },
+#             },
+#         )]):
+#     session_id = get_uuid_id()
+#     set_session_to_bot(session_id, request.bot_id)
+#     response = crawl_and_scrape(request.site, session_id)
+#     try:
+#         return {"message": "Success", "urls": response, "bot_id": request.bot_id, "session_id": session_id}
+#     except:
+#         return response
 
 @api.post("/chat_session", tags=["Session Chat"])
 def chat_session(request: Annotated[

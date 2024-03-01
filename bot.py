@@ -46,7 +46,6 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         agent_kwargs = {
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
-        
         toolset = []
         if(bot.search_tool_method == "google_search"):
             toolset += search_toolset_creator(bot)
