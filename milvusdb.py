@@ -27,6 +27,7 @@ from networkx import circular_layout
 from pymilvus import (Collection, CollectionSchema, DataType, FieldSchema,
                       connections, utility)
 from pypdf import PdfReader
+from sqlalchemy import desc
 from unstructured.partition.auto import partition
 
 connection_args = loads(os.environ["Milvus"])
@@ -62,7 +63,32 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
     return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def scrape(site: str, old_urls: list[str], common_elements: list[str], session_id: str, get_links: bool = False): 
+def collection_upload_str(reader: str, collection: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+    documents = [
+        Document(
+            page_content=page,
+            metadata={"source": summary, "page": page_number, "user_summary": summary},
+        )
+        for page_number, page in enumerate([reader], start=1)
+    ]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    documents = text_splitter.split_documents(documents)
+
+    # summarize
+    chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
+    result = chain.invoke({"input_documents": documents[:200]})
+    for doc in documents:
+        doc.metadata["ai_summary"] = result["output_text"].strip()
+
+    # upload
+    ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+
+
+def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False): 
     print("site: ", site)
     r = requests.get(site)
     site_base = "//".join(site.split("//")[:-1])
@@ -98,18 +124,19 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], session_i
             e_text += el + "\n\n"
     print("elements: ", e_text)
     print("site: ", site)
-    session_upload_str(e_text, session_id, site)
+    collection_upload_str(e_text, collection, site)
     return [urls, elements]
 
-def crawl_and_scrape(site: str, session_id: str):
+def crawl_and_scrape(site: str, collection: str, description: str):
+    create_collection(collection, description)
     urls = [site]
-    new_urls, common_elements = scrape(site, urls, [], session_id, True)
+    new_urls, common_elements = scrape(site, urls, [], collection, True)
     print("new_urls: ", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
         if site == cur_url[:len(site)]:
             urls.append(cur_url)
-            add_urls, common_elements = scrape(cur_url, urls + new_urls, common_elements, session_id)
+            add_urls, common_elements = scrape(cur_url, urls + new_urls, common_elements, collection)
             new_urls += add_urls
     print(urls)
     return urls
@@ -234,6 +261,29 @@ def delete_session(session_id: str):
         coll = Collection(SESSION_PDF)
         coll.load()
         return coll.delete(expr=f"session_id == '{session_id}'")
+
+def create_collection(collection_name: str, description: str, embedding_dim: int = 1536,
+                          max_chunk_size: int = 1000, chunk_overlap: int = 150, max_src_length: int = 256) -> bool:
+    if utility.has_collection(collection_name):
+        print(f"error: collection {collection_name} already exists")
+        return False
+    
+    # TODO: if possible, support custom embedding size for huggingface models
+    # TODO: support other OpenAI models
+    # define schema, create collection, create index on vectors
+    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
+    # unstructured chunk lengths are sketchy
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
+    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
+    source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
+    page_field = FieldSchema(name="page", dtype=DataType.INT16, description="The page number")
+    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field, page_field],
+                              auto_id=True, enable_dynamic_field=True, description=description)
+    coll = Collection(name=collection_name, schema=schema)
+    index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
+    coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
+
+    return True
 
 def create_collection_pdf(collection_name: str, directory: str, embedding_dim: int = 1536,
                           max_chunk_size: int = 1000, chunk_overlap: int = 150, max_src_length: int = 256) -> bool:
@@ -367,6 +417,35 @@ def session_source_summaries(session_id: str):
             if item["source"] not in source_summary:
                 source_summary[item["source"]] = {"ai_summary": item["ai_summary"], "user_summary": item["user_summary"]}
     return source_summary
+
+def collection_upload_pdf(file: UploadFile, collection: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+    if not file.filename.endswith(".pdf"):
+        return {"message": f"Failure: {file.filename} is not a PDF file"}
+    
+    # parse
+    reader = PdfReader(file.file)
+    documents = [
+        Document(
+            page_content=page.extract_text(),
+            metadata={"source": file.filename, "page": page_number, "user_summary": summary},
+        )
+        for page_number, page in enumerate(reader.pages, start=1)
+    ]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    documents = text_splitter.split_documents(documents)
+
+    # summarize
+    chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
+    result = chain.invoke({"input_documents": documents[:200]})
+    for doc in documents:
+        doc.metadata["ai_summary"] = result["output_text"].strip()
+
+    # upload
+    ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
 def qa(database_name: str, query: str, k: int = 4, session_id: str = None):
     """

@@ -7,7 +7,7 @@ from typing import Annotated
 
 import firebase_admin
 from fastapi import Body, FastAPI, UploadFile
-from firebase_admin import credentials, firestore
+from firebase_admin import auth, credentials, firestore
 from requests import session
 
 from bot import BotRequest, ChatRequest, opb_bot
@@ -32,6 +32,10 @@ db = firestore.client()
 
 def get_uuid_id():
     return str(uuid.uuid4())
+ 
+#make this a real api key check
+def admin_check(api_key):
+    return api_key in ["xyz"]
 
 def store_conversation(r: ChatRequest, output):
     if(r.session_id is None or r.session_id == ""):
@@ -176,7 +180,7 @@ def chat(request: Annotated[
     
     return process_chat(request)
 
-@api.post("/initialize_session_chat", tags=["Session Chat"])
+@api.post("/initialize_session_chat", tags=["Init Session"])
 def init_session(request: Annotated[
         InitializeSession,
         Body(
@@ -201,7 +205,7 @@ def init_session(request: Annotated[
     except:
         return response
     
-@api.post("/initialize_session_site", tags=["Session Chat"])
+@api.post("/initialize_session_site", tags=["Init Session"])
 def init_session_site(request: Annotated[
         InitializeSessionScrapeSite,
         Body(
@@ -346,25 +350,14 @@ def create_bot(request: Annotated[
 
     return {"message": "Success", "bot_id": bot_id}
 
-@api.post("/upload_site", tags=["Vector Database"])
-def vectordb_upload_site(site: str, session_id: str):
-    return crawl_and_scrape(site, session_id)
-
-@api.post("/upload_file_ocr", tags=["Vector Database"])
-def vectordb_upload_ocr(file: UploadFile, session_id: str, summary: str = None):
-    if summary:
-        return session_upload_ocr(file, session_id, summary)
-    else:
-        return session_upload_ocr(file, session_id, file.filename)
-
-@api.post("/upload_file", tags=["Vector Database"])
+@api.post("/upload_file", tags=["User Upload"])
 def vectordb_upload(file: UploadFile, session_id: str, summary: str = None):
     if summary:
         return session_upload_pdf(file, session_id, summary)
     else:
         return session_upload_pdf(file, session_id, file.filename)
 
-@api.post("/upload_files", tags=["Vector Database"])
+@api.post("/upload_files", tags=["User Upload"])
 def vectordb_upload(files: list[UploadFile], session_id: str, summaries: list[str] = None):
     if not summaries:
         summaries = [file.filename for file in files]
@@ -379,3 +372,37 @@ def vectordb_upload(files: list[UploadFile], session_id: str, summaries: list[st
     if len(failures) == 0:
         return {"message": f"Success: {len(files)} file{'s' if len(files) > 1 else ''} uploaded"}
     return {"message": f"Warning: {len(failures)} failure{'s' if len(failures) > 1 else ''} occurred: {failures}"}
+
+
+@api.post("/upload_file_ocr", tags=["User Upload"])
+def vectordb_upload_ocr(file: UploadFile, session_id: str, summary: str = None):
+    if summary:
+        return session_upload_ocr(file, session_id, summary)
+    else:
+        return session_upload_ocr(file, session_id, file.filename)
+
+
+@api.post("/upload_site", tags=["Admin Upload"])
+def vectordb_upload_site(site: str, collection_name: str, description: str, api_key: str):
+    if(not admin_check(api_key)):
+        return {"message": "Failure: API key invalid"}
+    return crawl_and_scrape(site, collection_name, description)
+
+# TODO: implement this (reuse code from user/session uploads)
+# @api.post("/upload_files", tags=["Admin Upload"]) 
+# def vectordb_upload(files: list[UploadFile], collection_name: str, api_key: str, summaries: list[str] = None):
+#     if(not admin_check(api_key)):
+#         return {"message": "Failure: API key invalid"}
+#     if not summaries:
+#         summaries = [file.filename for file in files]
+#     elif len(files) != len(summaries):
+#         return {"message": f"Failure: did not find equal numbers of files and summaries, instead found {len(files)} files and {len(summaries)} summaries."}
+#     failures = []
+#     for i, file in enumerate(files):
+#         result = collection_upload_pdf(file, collection_name, summaries[i])
+#         if result["message"].startswith("Failure"):
+#             failures.append(f"Upload #{i + 1} of {len(files)} failed. Internal message: {result['message']}")
+            
+#     if len(failures) == 0:
+#         return {"message": f"Success: {len(files)} file{'s' if len(files) > 1 else ''} uploaded"}
+#     return {"message": f"Warning: {len(failures)} failure{'s' if len(failures) > 1 else ''} occurred: {failures}"}
