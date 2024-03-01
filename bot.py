@@ -3,11 +3,13 @@ from typing import Any
 
 import langchain
 from anyio.from_thread import start_blocking_portal
+from bs4 import ResultSet
 from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.prompts import MessagesPlaceholder
 from langchain_openai import ChatOpenAI
+from matplotlib.backend_tools import ToolSetCursor
 
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest
@@ -16,7 +18,41 @@ from vdb_tools import session_query_tool, vdb_toolset_creator
 
 langchain.debug = True
 
+tools_template = """GENERAL INSTRUCTIONS
+    You are a legal expert. Your task is to decide which tools to use to answer a user's question. You can use up to X tools, and you can use tools multiple times with different inputs as well.
 
+    These are the tools which are at your disposale
+    {tools}
+
+    When choosing tools, use this template:
+    {{"tool": "name of the tool", "input": "input given to the tool"}}
+
+    USER QUESTION
+    {input}
+    
+    ANSWER FORMAT
+    {{"tools":["<FILL>"]}}"""
+
+
+
+answer_template = """GENERAL INSTRUCTIONS
+    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context. 
+
+    CONTEXT:
+    {context}
+
+    USER QUESTION
+    {input}"""
+
+# 1 subquestion
+
+# decide x tools to use and their inputs
+# out of these tools and their descriptions, choose up to x ToolS
+
+# -> run all the tools and returns ResultSet
+
+
+# -> here are the results from the tools, create your answer
 
 # OPB bot main function
 def opb_bot(r: ChatRequest, bot: BotRequest):

@@ -3,6 +3,7 @@ import os
 from csv import reader
 from hmac import new
 from json import loads
+from signal import SIGTERM
 from typing import List
 
 import requests
@@ -63,11 +64,11 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
     return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def collection_upload_str(reader: str, collection: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+def collection_upload_str(reader: str, collection: str, site: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
     documents = [
         Document(
             page_content=page,
-            metadata={"source": summary, "page": page_number, "user_summary": summary},
+            metadata={"source": site},
         )
         for page_number, page in enumerate([reader], start=1)
     ]
@@ -84,8 +85,8 @@ def collection_upload_str(reader: str, collection: str, summary: str, max_chunk_
     ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {site} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {site} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
 
 def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False): 
@@ -273,11 +274,10 @@ def create_collection(collection_name: str, description: str, embedding_dim: int
     # define schema, create collection, create index on vectors
     pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
     # unstructured chunk lengths are sketchy
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
+    #text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
     source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
-    page_field = FieldSchema(name="page", dtype=DataType.INT16, description="The page number")
-    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field, page_field],
+    schema = CollectionSchema(fields=[pk_field, embedding_field, source_field],
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=collection_name, schema=schema)
     index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}

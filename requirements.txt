@@ -7,6 +7,7 @@ firebase-admin==6.2.0
 google-cloud-documentai
 google-search-results==2.4.2
 langchain>0.1.0
+langchainhub
 langchain-openai>0.0.4
 langchain-community
 openai<2.0.0
