@@ -3,25 +3,56 @@ from typing import Any
 
 import langchain
 from anyio.from_thread import start_blocking_portal
+from bs4 import ResultSet
 from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
-from langchain.chains import RetrievalQA
-from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings
-from langchain.document_loaders.youtube import YoutubeLoader
 from langchain.memory import ConversationSummaryBufferMemory
-from langchain.prompts import MessagesPlaceholder, PromptTemplate
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores.faiss import FAISS
+from langchain.prompts import MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from matplotlib.backend_tools import ToolSetCursor
 
-from search_tools import search_toolset_creator, serpapi_toolset_creator
-from vdb_tools import vdb_toolset_creator, session_query_tool
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest
+from search_tools import search_toolset_creator, serpapi_toolset_creator
+from vdb_tools import session_query_tool, vdb_toolset_creator
 
 langchain.debug = True
 
+tools_template = """GENERAL INSTRUCTIONS
+    You are a legal expert. Your task is to decide which tools to use to answer a user's question. You can use up to X tools, and you can use tools multiple times with different inputs as well.
 
+    These are the tools which are at your disposale
+    {tools}
+
+    When choosing tools, use this template:
+    {{"tool": "name of the tool", "input": "input given to the tool"}}
+
+    USER QUESTION
+    {input}
+    
+    ANSWER FORMAT
+    {{"tools":["<FILL>"]}}"""
+
+
+
+answer_template = """GENERAL INSTRUCTIONS
+    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context. 
+
+    CONTEXT:
+    {context}
+
+    USER QUESTION
+    {input}"""
+
+# 1 subquestion
+
+# decide x tools to use and their inputs
+# out of these tools and their descriptions, choose up to x ToolS
+
+# -> run all the tools and returns ResultSet
+
+
+# -> here are the results from the tools, create your answer
 
 # OPB bot main function
 def opb_bot(r: ChatRequest, bot: BotRequest):
@@ -51,7 +82,6 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         agent_kwargs = {
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
-        
         toolset = []
         if(bot.search_tool_method == "google_search"):
             toolset += search_toolset_creator(bot)
@@ -62,7 +92,8 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         source_summaries = session_source_summaries(r.session_id)
         toolset.append(session_query_tool(r.session_id, source_summaries))
         if source_summaries:
-            system_message += f' When citing the session_query_tool, include the filename and page. The sources have these summaries: {source_summaries}.'
+            toolset.append(session_query_tool(r.session_id, source_summaries))
+            # system_message += f'The session_query_tool sources have these summaries: {source_summaries}.' #this temporary change for testings
 
         async def task(prompt):
             #definition of llm used for bot
@@ -89,64 +120,3 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
                 if next_token is job_done:
                     return content
                 content += next_token
-                
-        
-
-
-#TODO: cache vector db with bot_id
-#TODO: do actual chat memory
-#TODO: try cutting off intro and outro part of videos
-def youtube_bot(r: BotRequest):
-    if(r.user_prompt is None or r.user_prompt == ""):
-        r.user_prompt = "Respond in the same style as the youtuber in the context below."
-
-    prompt_template = r.user_prompt + """
-    \n\nContext: {context}
-    \n\n\n\n
-    Question: {question}
-    Response:"""
-
-    PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    chain_type_kwargs = {"prompt": PROMPT}
-
-    embeddings = OpenAIEmbeddings()
-    bot_path = "./youtube_bots/" + r.bot_id
-    try:
-        vectordb = FAISS.load_local(bot_path, embeddings)
-    except:
-        text = ""
-        for url in r.youtube_urls:
-            try:
-                # Load the audio
-                loader = YoutubeLoader.from_youtube_url(
-                    url, add_video_info=False
-                )
-                docs = loader.load()
-                # Combine doc
-                combined_docs = [doc.page_content for doc in docs]
-                text += " ".join(combined_docs)
-            except:
-                print("Error occured while loading transcript from video with url: " + url)
-
-        # Split them
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
-        splits = text_splitter.split_text(text)
-
-        # Build an index
-        vectordb = FAISS.from_texts(splits, embeddings)
-        vectordb.save_local(bot_path)
-
-    # Build a QA chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0),
-        chain_type="stuff",
-        retriever=vectordb.as_retriever(),
-        chain_type_kwargs=chain_type_kwargs,
-    )
-
-    query = r.history[-1][0]
-    #check for empty query
-    if(query.strip() == ""):
-        return ""
-    else:
-        return qa_chain.run(r.message_prompt + query)

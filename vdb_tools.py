@@ -13,12 +13,15 @@ def vdb_qa_tool(tool: dict):
     
     tool_func = lambda q: vdb_tool(tool, q)
     co_func = lambda q: async_vdb_tool(tool, q)
-
+    if "description" in tool:
+        description = tool["description"]
+    else:
+        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["database_name"]}."""
     return Tool(
         name = tool["name"],
         func = tool_func,
         coroutine = co_func,
-        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["collection_name"]}."""
+        description = description
     )
 
 def vdb_query_tool(tool: dict):
@@ -33,11 +36,15 @@ def vdb_query_tool(tool: dict):
     
     tool_func = lambda q: vdb_tool(tool, q)
     co_func = lambda q: async_vdb_tool(tool, q)
+    if 'description' in tool:
+        description = tool["description"]
+    else:
+        description = f"""Tool used to query a vector database named {tool["database_name"]} and return the {tool["k"]} most relevant text chunks."""
     return Tool(
         name = tool["name"],
         func = tool_func,
         coroutine = co_func,
-        description = f"""Tool used to query a vector database named {tool["collection_name"]} and return the {tool["k"]} most relevant text chunks."""
+        description = description
     )
 
 def session_query_tool(session_id: str, source_summaries: dict):
@@ -53,30 +60,14 @@ def session_query_tool(session_id: str, source_summaries: dict):
             name = "session_query_tool",
             func = tool_func,
             coroutine = co_func,
-            description = f"Tool used to query a vector database containing the following sources: {source_summaries.keys()}."
-        )
-
-def session_qa_tool(session_id: str, source_summaries: dict):
-    def qa_tool(q: str):
-        return qa(SESSION_PDF, q, session_id=session_id)
-    
-    async def async_qa_tool(q: str):
-        return qa_tool(q)
-    
-    tool_func = lambda q: qa_tool(q)
-    co_func = lambda q: async_qa_tool(q)
-    return Tool(
-            name = "session_qa_tool",
-            func = tool_func,
-            coroutine = co_func,
-            description = f"Tool used to answer questions from a vector database containing the following sources: {source_summaries.keys()}."
+            description = f"Tool used to query a vector database including information about the San Diego Volunteer Lawyer Program and return the most relevant text chunks. You can use this tool to query for legal and procedural information as well." #this temporary change for testings
         )
 
 def vdb_toolset_creator(tools: list[dict]):
     toolset = []
     for t in tools:
-        if t["name"] == "qa":
+        if "qa" in t["name"]:
             toolset.append(vdb_qa_tool(t))
-        elif t["name"] == "query":
+        elif "query" in t["name"]:
             toolset.append(vdb_query_tool(t))
     return toolset

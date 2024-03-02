@@ -1,4 +1,16 @@
+import mimetypes
 import os
+from csv import reader
+from hmac import new
+from json import loads
+from signal import SIGTERM
+from typing import List
+
+import requests
+from bs4 import BeautifulSoup
+from fastapi import UploadFile
+from google.api_core.client_options import ClientOptions
+from google.cloud import documentai
 from langchain import hub
 from langchain.chains import create_retrieval_chain, load_summarize_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -12,16 +24,173 @@ from langchain_openai.llms import OpenAI
 from pypdf import PdfReader
 from unstructured.partition.auto import partition_text
 from unstructured.chunking.basic import chunk_elements
+from unstructured.partition.auto import partition
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores.milvus import Milvus
+from langchain_openai.llms import OpenAI
+from networkx import circular_layout
 from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
-from json import loads
-from typing import List
-from fastapi import UploadFile
+from sqlalchemy import desc
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
+
+project_id = "h2o-gpt"
+location = "us"  # Format is "us" or "eu"
+processor_id = "c99e554bb49cf45d"
+#processor_display_name = "my" # Must be unique per project, e.g.: "My Processor"
+
+def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+    documents = [
+        Document(
+            page_content=page,
+            metadata={"source": summary, "page": page_number, "session_id": session_id, "user_summary": summary},
+        )
+        for page_number, page in enumerate([reader], start=1)
+    ]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    documents = text_splitter.split_documents(documents)
+
+    # summarize
+    chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
+    result = chain.invoke({"input_documents": documents[:200]})
+    for doc in documents:
+        doc.metadata["ai_summary"] = result["output_text"].strip()
+
+    # upload
+    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+
+def collection_upload_str(reader: str, collection: str, site: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+    documents = [
+        Document(
+            page_content=page,
+            metadata={"source": site},
+        )
+        for page_number, page in enumerate([reader], start=1)
+    ]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    documents = text_splitter.split_documents(documents)
+
+    # summarize
+    chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
+    result = chain.invoke({"input_documents": documents[:200]})
+    for doc in documents:
+        doc.metadata["ai_summary"] = result["output_text"].strip()
+
+    # upload
+    ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {site} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {site} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+
+
+def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False): 
+    print("site: ", site)
+    r = requests.get(site)
+    site_base = "//".join(site.split("//")[:-1])
+    # converting the text 
+    s = BeautifulSoup(r.content,"html.parser") 
+    urls = []
+
+    if(get_links):
+        for i in s.find_all("a"): 
+            if("href" in i.attrs):
+                href = i.attrs['href'] 
+                
+                if href.startswith("/"): 
+                    link = site_base+href 
+                elif href.startswith("http"):
+                    link = href
+                else:
+                    link = old_urls[0]
+                    #skip this link
+
+                if link not in old_urls: 
+                    old_urls.append(link)
+                    urls.append(link)
+
+    try:
+        elements = partition(url=site)
+    except:
+        elements = partition(url=site, content_type="text/html")
+    e_text = ""
+    for el in elements:
+        el = str(el)
+        if(el not in common_elements):
+            e_text += el + "\n\n"
+    print("elements: ", e_text)
+    print("site: ", site)
+    collection_upload_str(e_text, collection, site)
+    return [urls, elements]
+
+def crawl_and_scrape(site: str, collection: str, description: str):
+    create_collection(collection, description)
+    urls = [site]
+    new_urls, common_elements = scrape(site, urls, [], collection, True)
+    print("new_urls: ", new_urls)
+    while len(new_urls) > 0:
+        cur_url = new_urls.pop()
+        if site == cur_url[:len(site)]:
+            urls.append(cur_url)
+            add_urls, common_elements = scrape(cur_url, urls + new_urls, common_elements, collection)
+            new_urls += add_urls
+    print(urls)
+    return urls
+                
+def quickstart_ocr(
+    file: UploadFile,
+):
+    if not file.filename.endswith(".pdf"):
+        process_options = documentai.ProcessOptions(
+            ocr_config=documentai.OcrConfig(
+                language_code="en",
+                enable_native_pdf_parsing=True,
+            )
+        )
+    else:
+        process_options = documentai.ProcessOptions(
+            ocr_config=documentai.OcrConfig(
+                language_code="en",
+            )
+        )
+
+    # You must set the `api_endpoint`if you use a location other than "us".
+    opts = ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com" )
+    
+    client = documentai.DocumentProcessorServiceClient(client_options=opts)
+
+    processor_name = client.processor_path(project_id, location, processor_id)
+
+    # Print the processor information
+    print(f"Processor Name: {processor_name}")
+
+    # Load binary data
+    raw_document = documentai.RawDocument(
+        content=file.file.read(),
+        mime_type=mimetypes.guess_type(file.filename)[0], # Refer to https://cloud.google.com/document-ai/docs/file-types for supported file types
+    )
+
+    # Configure the process request
+    # `processor.name` is the full resource name of the processor, e.g.:
+    # `projects/{project_id}/locations/{location}/processors/{processor_id}`
+    request = documentai.ProcessRequest(name=processor_name, raw_document=raw_document, process_options=process_options)
+
+    result = client.process_document(request=request)
+
+    # For a full list of `Document` object attributes, reference this page:
+    # https://cloud.google.com/document-ai/docs/reference/rest/v1/Document
+    document = result.document
+
+    # Read the text recognition output from the processor
+    print("The document contains the following text:")
+    print(document.text)
+    return document.text
 
 # collections by jurisdiction?
 US = "USCode"
@@ -226,6 +395,31 @@ def session_upload_pdf(file: UploadFile, session_id: str, summary: str, max_chun
     if num_docs != len(ids):
         return {"message": f"Failure: expected to upload {num_docs} chunks for {file.filename} but got {len(ids)}"}
     return {"message": f"Success: uploaded {file.filename} as {num_docs} chunks"}
+
+def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+    reader = quickstart_ocr(file)
+    documents = [
+        Document(
+            page_content=page,
+            metadata={"source": file.filename, "page": page_number, "session_id": session_id, "user_summary": summary},
+        )
+        for page_number, page in enumerate([reader], start=1)
+    ]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
+    documents = text_splitter.split_documents(documents)
+
+    # summarize
+    chain = load_summarize_chain(OpenAI(temperature=0), chain_type="map_reduce")
+    result = chain.invoke({"input_documents": documents[:200]})
+    for doc in documents:
+        doc.metadata["ai_summary"] = result["output_text"].strip()
+
+    # upload
+    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
 def session_source_summaries(session_id: str, batch_size: int = 1000):
     coll = Collection(SESSION_PDF)

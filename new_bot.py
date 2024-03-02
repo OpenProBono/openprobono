@@ -2,9 +2,9 @@ import json
 import re
 from multiprocessing import Pool
 
-from langchain_community.chat_models import ChatOpenAI
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain_community.chat_models import ChatOpenAI
 
 from bot import opb_bot
 from models import BotRequest, ChatRequest
@@ -81,7 +81,7 @@ def research_aspects(input):
     cr = ChatRequest(history = [[q,""]], api_key = r.api_key, bot_id = r.bot_id, session_id = "")
     return opb_bot(cr, bot)
 
-NUM_PROCESSES = 64
+NUM_PROCESSES = 8
 def flow(r: ChatRequest, bot: BotRequest):
     
     memory_llm = ChatOpenAI(temperature=0.0, model='gpt-3.5-turbo-1106')
