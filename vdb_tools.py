@@ -16,7 +16,7 @@ def vdb_qa_tool(tool: dict):
     if "description" in tool:
         description = tool["description"]
     else:
-        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["database_name"]}."""
+        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["collection_name"]}."""
     return Tool(
         name = tool["name"],
         func = tool_func,
@@ -39,7 +39,7 @@ def vdb_query_tool(tool: dict):
     if 'description' in tool:
         description = tool["description"]
     else:
-        description = f"""Tool used to query a vector database named {tool["database_name"]} and return the {tool["k"]} most relevant text chunks."""
+        description = f"""Tool used to query a vector database named {tool["collection_name"]} and return the {tool["k"]} most relevant text chunks."""
     return Tool(
         name = tool["name"],
         func = tool_func,

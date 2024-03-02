@@ -349,11 +349,11 @@ def create_bot(request: Annotated[
     return {"message": "Success", "bot_id": bot_id}
 
 @api.post("/upload_file", tags=["User Upload"])
-def vectordb_upload(file: UploadFile, session_id: str, summary: str = None):
-        return session_upload_pdf(file, session_id, summary if summary else file.filename)
+def upload_file(file: UploadFile, session_id: str, summary: str = None):
+    return session_upload_pdf(file, session_id, summary if summary else file.filename)
 
 @api.post("/upload_files", tags=["User Upload"])
-def vectordb_upload(files: list[UploadFile], session_id: str, summaries: list[str] = None):
+def upload_files(files: list[UploadFile], session_id: str, summaries: list[str] = None):
     if not summaries:
         summaries = [file.filename for file in files]
     elif len(files) != len(summaries):
