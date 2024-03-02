@@ -26,8 +26,9 @@ connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 # collections by jurisdiction?
 US = "USCode"
 NC = "NCGeneralStatutes"
+CAP = "CAP"
 SESSION_PDF = "SessionPDF"
-COLLECTIONS = {US, NC}
+COLLECTIONS = {US, NC, CAP}
 PDF = "PDF"
 HTML = "HTML"
 COLLECTION_TYPES = {
@@ -42,6 +43,35 @@ SEARCH_PARAMS = {
     "output_fields": ["text", "source"]
 }
 
+def create_collection(collection_name: str, directory: str, extra_fields: list = [], embedding_dim: int = 1536, max_src_length: int = 256) -> Collection:
+    if utility.has_collection(collection_name):
+        print(f"error: collection {collection_name} already exists")
+        return False
+    if not os.path.exists(os.path.join(directory, "description.txt")):
+        print("""error: a description.txt file containing a brief description of the 
+              collection must be in the same directory as the data""")
+        return False
+    
+    with open(os.path.join(directory, "description.txt")) as f:
+        description = ' '.join(f.readlines())
+    
+    # TODO: if possible, support custom embedding size for huggingface models
+    # TODO: support other OpenAI models
+    # define schema, create collection, create index on vectors
+    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
+    # unstructured chunk lengths are sketchy
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
+    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
+    source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
+    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field] + extra_fields,
+                              auto_id=True, enable_dynamic_field=True, description=description)
+    coll = Collection(name=collection_name, schema=schema)
+    index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
+    coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
+
+    # must call coll.load() before query/search
+    return coll
+
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
     return Milvus(
@@ -51,11 +81,8 @@ def load_db(collection_name: str):
         auto_id=True
     )
 
-def collection_exists(collection_name: str) -> bool:
-    return utility.has_collection(collection_name)
-
 def check_params(collection_name: str, query: str, k: int, session_id: str = None):
-    if not collection_exists(collection_name):
+    if not utility.has_collection(collection_name):
         return {"message": f"Failure: collection {collection_name} not found"}
     if not query or query == "":
         return {"message": "Failure: query not found"}
@@ -137,34 +164,6 @@ def delete_expr(collection_name: str, expr: str):
         coll.load()
         ids = coll.delete(expr=expr)
         return {"message": f"Success: deleted {ids.delete_count} chunks"}
-
-def create_collection(collection_name: str, directory: str, extra_fields: List = [], embedding_dim: int = 1536, max_src_length: int = 256) -> bool:
-    if utility.has_collection(collection_name):
-        print(f"error: collection {collection_name} already exists")
-        return False
-    if not os.path.exists(os.path.join(directory, "description.txt")):
-        print("""error: a description.txt file containing a brief description of the 
-              collection must be in the same directory as the data""")
-        return False
-    
-    with open(os.path.join(directory, "description.txt")) as f:
-        description = ' '.join(f.readlines())
-    
-    # TODO: if possible, support custom embedding size for huggingface models
-    # TODO: support other OpenAI models
-    # define schema, create collection, create index on vectors
-    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
-    # unstructured chunk lengths are sketchy
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
-    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
-    source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
-    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field] + extra_fields,
-                              auto_id=True, enable_dynamic_field=True, description=description)
-    coll = Collection(name=collection_name, schema=schema)
-    index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
-    coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
-
-    return True
 
 def upload_pdfs(collection_name: str, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int, session_id: str = None):
     files = sorted(os.listdir(directory))
@@ -262,31 +261,32 @@ class FilteredRetriever(VectorStoreRetriever):
         return docs[:self.search_kwargs["k"]]
     
 def cap_data():
-    embedding_dim = 1536
+    # embedding_dim = 1536
     collection_name = "CAP"
-    with open(os.path.join(os.getcwd(), "description.txt")) as f:
-        description = ' '.join(f.readlines())
+    # with open(os.path.join(os.getcwd(), "description.txt")) as f:
+    #     description = ' '.join(f.readlines())
     
-    # define schema, create collection, create index on vectors
-    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
-    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
-    caseid_field = FieldSchema(name="case_id", dtype=DataType.INT64, description="The id of the case on the CAP API")
-    type_field = FieldSchema(name="opinion_type", dtype=DataType.VARCHAR, description="The opinion type", max_length=128)
-    author_field = FieldSchema(name="opinion_author", dtype=DataType.VARCHAR, description="The opinion author", max_length=embedding_dim)
-    casenameabbr_field = FieldSchema(name="case_name_abbreviation", dtype=DataType.VARCHAR, description="The abbreviated name of the case", max_length=embedding_dim)
-    date_field = FieldSchema(name="decision_date", dtype=DataType.VARCHAR, description="The date of the decision", max_length=10)
-    cite_field = FieldSchema(name="cite", dtype=DataType.VARCHAR, description="The official citation", max_length=embedding_dim)
-    court_field = FieldSchema(name="court_name", dtype=DataType.VARCHAR, description="The name of the court", max_length=embedding_dim // 2)
-    jurisdiction_field = FieldSchema(name="jurisdiction_name", dtype=DataType.VARCHAR, description="The name of the jurisdiction", max_length=embedding_dim // 4)
-    extra_fields = [author_field, type_field, caseid_field, casenameabbr_field, date_field, cite_field, court_field, jurisdiction_field]
-    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
-                              auto_id=True, enable_dynamic_field=True, description=description)
-    coll = Collection(name=collection_name, schema=schema)
-    index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
-    coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
-
+    # # define schema, create collection, create index on vectors
+    # pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
+    # embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
+    # text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
+    # caseid_field = FieldSchema(name="case_id", dtype=DataType.INT64, description="The id of the case on the CAP API")
+    # type_field = FieldSchema(name="opinion_type", dtype=DataType.VARCHAR, description="The opinion type", max_length=128)
+    # author_field = FieldSchema(name="opinion_author", dtype=DataType.VARCHAR, description="The opinion author", max_length=embedding_dim)
+    # casenameabbr_field = FieldSchema(name="case_name_abbreviation", dtype=DataType.VARCHAR, description="The abbreviated name of the case", max_length=embedding_dim)
+    # date_field = FieldSchema(name="decision_date", dtype=DataType.VARCHAR, description="The date of the decision", max_length=10)
+    # cite_field = FieldSchema(name="cite", dtype=DataType.VARCHAR, description="The official citation", max_length=embedding_dim)
+    # court_field = FieldSchema(name="court_name", dtype=DataType.VARCHAR, description="The name of the court", max_length=embedding_dim // 2)
+    # jurisdiction_field = FieldSchema(name="jurisdiction_name", dtype=DataType.VARCHAR, description="The name of the jurisdiction", max_length=embedding_dim // 4)
+    # extra_fields = [author_field, type_field, caseid_field, casenameabbr_field, date_field, cite_field, court_field, jurisdiction_field]
+    # schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
+    #                           auto_id=True, enable_dynamic_field=True, description=description)
+    # coll = Collection(name=collection_name, schema=schema)
+    # index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
+    # coll.create_index("vector", index_params=index_params, index_name="HnswL2M8eFCons64Index")
+    
     import subprocess
+    coll = Collection(collection_name)
     root_dir = "cap/"
     chunk_size = 1000
     chunk_overlap = 150

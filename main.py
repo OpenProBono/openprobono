@@ -8,7 +8,7 @@ import firebase_admin
 from typing import Annotated
 from fastapi import Body, FastAPI, Query, UploadFile
 from firebase_admin import credentials, firestore
-from milvusdb import session_upload_pdf, session_source_summaries, delete_expr, US, NC, SESSION_PDF
+from milvusdb import session_upload_pdf, session_source_summaries, delete_expr, US, COLLECTIONS, SESSION_PDF
 
 from bot import BotRequest, ChatRequest, opb_bot
 from models import ChatBySession, FetchSession, InitializeSession
@@ -246,7 +246,7 @@ def create_bot(request: Annotated[
                         }],
                         "vdb_tools": [{
                             "name": "query",
-                            "collection_name": "USCode",
+                            "collection_name": US,
                             "k": 4
                         }],
                         "api_key":"xyz",
@@ -286,7 +286,7 @@ def create_bot(request: Annotated[
                         }],
                         "vdb_tools": [{
                             "name": "name for tool, must be one of: qa, query",
-                            "collection_name": f"name of database to query, must be one of: {US}, {NC}",
+                            "collection_name": f"name of database to query, must be one of: {', '.join(list(COLLECTIONS)[:-1])} {list(COLLECTIONS)[-1]}",
                             "k": "the number of text chunks to return when querying the database"
                         }],
                         "beta": "whether to use beta features or not, if they are available",
