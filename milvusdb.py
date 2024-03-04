@@ -33,6 +33,7 @@ from sqlalchemy import desc
 
 from openai import OpenAI
 import tiktoken
+import time
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
@@ -277,12 +278,19 @@ def embed_strs(text: list[str], openai_engine: str = "text-embedding-3-small", d
             batch_tokens += num_tokens_from_string(text[i], "cl100k_base")
             batch.append(text[i])
             i += 1
-        response = client.embeddings.create(
-            input=batch,
-            model=openai_engine,
-            dimensions=dimensions
-        )
-        data += [data.embedding for data in response.data]
+        attempt = 1
+        while attempt < 75:
+            try:
+                response = client.embeddings.create(
+                    input=batch,
+                    model=openai_engine,
+                    dimensions=dimensions
+                )
+                data += [data.embedding for data in response.data]
+                break
+            except:
+                time.sleep(1)
+                attempt += 1
     return data
 
 def check_params(collection_name: str, query: str, k: int, session_id: str = None):
@@ -539,28 +547,83 @@ class FilteredRetriever(VectorStoreRetriever):
 def cap_data():
     embedding_dim = 768
     collection_name = "CAP"
-    description = "Case text and metadata provided by the Caselaw Access Project. Version 20210921."
-    caseid_field = FieldSchema(name="case_id", dtype=DataType.INT64, description="The id of the case on the CAP API")
-    type_field = FieldSchema(name="opinion_type", dtype=DataType.VARCHAR, description="The opinion type", max_length=128)
-    author_field = FieldSchema(name="opinion_author", dtype=DataType.VARCHAR, description="The opinion author", max_length=embedding_dim)
-    casenameabbr_field = FieldSchema(name="case_name_abbreviation", dtype=DataType.VARCHAR, description="The abbreviated name of the case", max_length=embedding_dim)
-    date_field = FieldSchema(name="decision_date", dtype=DataType.VARCHAR, description="The date of the decision", max_length=10)
-    cite_field = FieldSchema(name="cite", dtype=DataType.VARCHAR, description="The official citation", max_length=embedding_dim // 2)
-    court_field = FieldSchema(name="court_name", dtype=DataType.VARCHAR, description="The name of the court", max_length=embedding_dim // 2)
-    jurisdiction_field = FieldSchema(name="jurisdiction_name", dtype=DataType.VARCHAR, description="The name of the jurisdiction", max_length=embedding_dim // 8)
-    extra_fields = [author_field, type_field, caseid_field, casenameabbr_field, date_field, cite_field, court_field, jurisdiction_field]
-    coll = create_collection(collection_name, description, extra_fields, embedding_dim)
+    # description = "Case text and metadata provided by the Caselaw Access Project. Version 20210921."
+    # caseid_field = FieldSchema(name="case_id", dtype=DataType.INT64, description="The id of the case on the CAP API")
+    # type_field = FieldSchema(name="opinion_type", dtype=DataType.VARCHAR, description="The opinion type", max_length=128)
+    # author_field = FieldSchema(name="opinion_author", dtype=DataType.VARCHAR, description="The opinion author", max_length=embedding_dim)
+    # casenameabbr_field = FieldSchema(name="case_name_abbreviation", dtype=DataType.VARCHAR, description="The abbreviated name of the case", max_length=embedding_dim)
+    # date_field = FieldSchema(name="decision_date", dtype=DataType.VARCHAR, description="The date of the decision", max_length=10)
+    # cite_field = FieldSchema(name="cite", dtype=DataType.VARCHAR, description="The official citation", max_length=embedding_dim // 2)
+    # court_field = FieldSchema(name="court_name", dtype=DataType.VARCHAR, description="The name of the court", max_length=embedding_dim // 2)
+    # jurisdiction_field = FieldSchema(name="jurisdiction_name", dtype=DataType.VARCHAR, description="The name of the jurisdiction", max_length=embedding_dim // 8)
+    # extra_fields = [author_field, type_field, caseid_field, casenameabbr_field, date_field, cite_field, court_field, jurisdiction_field]
+    # coll = create_collection(collection_name, description, extra_fields, embedding_dim)
+    coll = Collection(collection_name)
     
-    import subprocess
     root_dir = "CAP/"
     chunk_size = 1000
     chunk_overlap = 150
     batch_size = 1000
     for subdir in sorted(os.listdir(f"{os.getcwd()}/data/{root_dir}")):
-        if "metadata" in subdir:
+        if "metadata" in subdir or "DS_Store" in subdir:
             continue
-        task = subprocess.Popen(["xzcat", f"data/{root_dir + subdir}/{subdir}/data/data.jsonl.xz"], stdout=subprocess.PIPE)
-        lines = task.stdout.readlines()
+        with open(f"data/{root_dir + subdir}/{subdir}/data/data.jsonl") as f:
+            lines = f.readlines()
+        if "ark" in subdir:
+            # the code below is for reuploading the batch that was in process if the upload crashes
+            # for i, line in enumerate(lines[41499:42000]):
+            #     json = loads(line)
+            #     case_id = json["id"]
+            #     ids = coll.delete(expr=f"case_id == {case_id}")
+            #     deletions = ids.delete_count
+            #     while ids.delete_count > 0:
+            #         ids = coll.delete(expr=f"case_id == {case_id}")
+            #         deletions += ids.delete_count
+            #     print(f" deleted {deletions} chunks for case {case_id}, reinserting")
+            #     opinions = json["casebody"]["data"]["opinions"]
+            #     case_chunks = 0
+            #     for opinion in opinions:
+            #         if not opinion["text"]:
+            #             continue
+            #         opinion_type = opinion["type"] if opinion["type"] else "unknown"
+            #         opinion_author = opinion["author"] if opinion["author"] else "unknown"
+            #         elements = partition_text(text=opinion["text"])
+            #         chunks = chunk_elements(elements, max_characters=chunk_size, overlap=chunk_overlap)
+            #         num_opinion_chunks = len(chunks)
+            #         case_chunks += num_opinion_chunks
+            #         text = [chunk.text for chunk in chunks]
+            #         chunk_embeddings = embed_strs(text)
+            #         case_name_abbr = json["name_abbreviation"]
+            #         decision_date = json["decision_date"]
+            #         citations = json["citations"]
+            #         official_cite = next(iter([cite for cite in citations if cite["type"] == "official"]), None)
+            #         if not official_cite:
+            #             print(f" error: citation not found for case id {case_id}")
+            #             official_cite = "unknown"
+            #         else:
+            #             official_cite = official_cite["cite"]
+            #         court_name = json["court"]["name"]
+            #         jurisdiction_name = json["jurisdiction"]["name"]
+            #         for j in range(0, num_opinion_chunks, batch_size):
+            #             batch_vector = chunk_embeddings[j: j + batch_size]
+            #             batch_text = text[j: j + batch_size]
+            #             current_batch_size = len(batch_text)
+            #             batch_author = [opinion_author] * current_batch_size
+            #             batch_type = [opinion_type] * current_batch_size
+            #             batch_id = [case_id] * current_batch_size
+            #             batch_name_abbr = [case_name_abbr] * current_batch_size
+            #             batch_decision_date = [decision_date] * current_batch_size
+            #             batch_cite = [official_cite] * current_batch_size
+            #             batch_court_name = [court_name] * current_batch_size
+            #             batch_jurisdiction_name = [jurisdiction_name] * current_batch_size
+            #             batch = [batch_vector, batch_text, batch_author, batch_type, batch_id, batch_name_abbr,
+            #                     batch_decision_date, batch_cite, batch_court_name, batch_jurisdiction_name]
+            #             result = coll.insert(batch)
+            #             if result.insert_count != current_batch_size:
+            #                 print(f" error: expected {current_batch_size} uploads but got {result.insert_count} for case id {case_id}")
+            #     print(f" reinserted {case_chunks} chunks")
+            lines = lines[42000:]
+        
         print(f"{subdir} contains {len(lines)} cases")
         num_chunks = 0
         for i, line in enumerate(lines, start=1):
@@ -576,7 +639,7 @@ def cap_data():
                 opinion_author = opinion["author"] if opinion["author"] else "unknown"
                 elements = partition_text(text=opinion["text"])
                 chunks = chunk_elements(elements, max_characters=chunk_size, overlap=chunk_overlap)
-                num_case_chunks = len(chunks)
+                num_opinion_chunks = len(chunks)
                 text = [chunk.text for chunk in chunks]
                 chunk_embeddings = embed_strs(text)
                 case_name_abbr = json["name_abbreviation"]
@@ -590,7 +653,7 @@ def cap_data():
                     official_cite = official_cite["cite"]
                 court_name = json["court"]["name"]
                 jurisdiction_name = json["jurisdiction"]["name"]
-                for j in range(0, num_case_chunks, batch_size):
+                for j in range(0, num_opinion_chunks, batch_size):
                     batch_vector = chunk_embeddings[j: j + batch_size]
                     batch_text = text[j: j + batch_size]
                     current_batch_size = len(batch_text)
@@ -607,15 +670,8 @@ def cap_data():
                     result = coll.insert(batch)
                     if result.insert_count != current_batch_size:
                         print(f" error: expected {current_batch_size} uploads but got {result.insert_count} for case id {case_id}")
-                num_chunks += num_case_chunks
+                num_chunks += num_opinion_chunks
         print(f"uploaded {num_chunks} chunks")
         print()
-
-source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=256)
-page_field = FieldSchema(name="page", dtype=DataType.INT16, description="The page number")
-embedding_dim = 768
-coll = create_collection(NC, "NC General Statutes. Includes changes through SL 2022-75. Downloaded from the North Carolina General Assembly.", [source_field, page_field], embedding_dim)
-if coll:
-    upload_pdfs(coll, os.getcwd() + "/data/NC/", embedding_dim, 1000, 150)
 
 cap_data()
