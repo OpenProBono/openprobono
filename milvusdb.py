@@ -273,20 +273,19 @@ def embed_strs(text: list[str], openai_engine: str = "text-embedding-3-small", d
             print(f"  {len(text) - i} chunks remaining")
             checkpoint += 1000
         batch_tokens = 0
-        batch = []
-        while i < len(text) and batch_tokens + num_tokens_from_string(text[i], "cl100k_base") < 8191:
-            batch_tokens += num_tokens_from_string(text[i], "cl100k_base")
-            batch.append(text[i])
-            i += 1
+        j = i
+        while j < len(text) and (batch_tokens := batch_tokens + num_tokens_from_string(text[j], "cl100k_base")) < 8191:
+            j += 1
         attempt = 1
         while attempt < 75:
             try:
                 response = client.embeddings.create(
-                    input=batch,
+                    input=text[i:j],
                     model=openai_engine,
                     dimensions=dimensions
                 )
                 data += [data.embedding for data in response.data]
+                i = j
                 break
             except:
                 time.sleep(1)
@@ -673,5 +672,3 @@ def cap_data():
                 num_chunks += num_opinion_chunks
         print(f"uploaded {num_chunks} chunks")
         print()
-
-cap_data()
