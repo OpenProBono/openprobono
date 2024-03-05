@@ -1,9 +1,8 @@
 import json
-import re
 from multiprocessing import Pool
 
 from langchain.memory import ConversationSummaryBufferMemory
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.schema import HumanMessage
 from langchain_community.chat_models import ChatOpenAI
 
 from bot import opb_bot
