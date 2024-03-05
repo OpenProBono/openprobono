@@ -120,6 +120,8 @@ def flow(r: ChatRequest, bot: BotRequest):
     if source_summaries:
         toolset.append(session_query_tool(r.session_id, source_summaries))
     
+    print("hiii")
+    print(tool_selector(input, toolset))
     decomp = decompisition_bot(input, str(memory.chat_memory))
     #add try / retry here if json.loads fails
     comp = json.loads(decomp.content)
