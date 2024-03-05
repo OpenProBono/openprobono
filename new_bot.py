@@ -6,12 +6,33 @@ from langchain.schema import HumanMessage
 from langchain_community.chat_models import ChatOpenAI
 
 from bot import opb_bot
+from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest
+from search_tools import search_toolset_creator, serpapi_toolset_creator
+from vdb_tools import session_query_tool, vdb_toolset_creator
 
 
 def call_gpt4(input):
     model = ChatOpenAI(model="gpt-4", temperature=0.0)
     return model([HumanMessage(content=input)])
+
+def tool_selector(input, tools):
+    tool_template = """GENERAL INSTRUCTIONS
+
+    As a legal expert, your role is to strategically select up to 8 tools to address a user's question. Optimize the template for clarity and flexibility in utilizing the available tools.
+
+    AVAILABLE TOOLS
+    {tools}
+
+    TEMPLATE FOR TOOL SELECTION
+    {{"tool": "name of the tool", "input": "input provided for the tool"}}
+
+    USER QUESTION
+    {input}
+
+    ANSWER FORMAT
+    {{"tools": ["<FILL>"]}}"""
+    return call_gpt4(tool_template.format(input=input, tools=tools))
 
 def decompisition_bot(input, memory):
     decomp_template = """GENERAL INSTRUCTIONS
@@ -88,6 +109,16 @@ def flow(r: ChatRequest, bot: BotRequest):
     for i in range(0, len(r.history)-1):
         memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
     input = r.history[-1][0]
+
+    toolset = []
+    if(bot.search_tool_method == "google_search"):
+        toolset += search_toolset_creator(bot)
+    else:
+        toolset += serpapi_toolset_creator(bot)
+    toolset += vdb_toolset_creator(bot.vdb_tools)
+    source_summaries = session_source_summaries(r.session_id)
+    if source_summaries:
+        toolset.append(session_query_tool(r.session_id, source_summaries))
     
     decomp = decompisition_bot(input, str(memory.chat_memory))
     #add try / retry here if json.loads fails
@@ -95,11 +126,11 @@ def flow(r: ChatRequest, bot: BotRequest):
     context = ""
     response = ""
     while('sub-questions' in comp):
-        zipped = list(zip(comp['sub-questions'], [r]*len(comp['sub-questions']), [bot]*len(comp['sub-questions'])))
-        results = Pool(NUM_PROCESSES).map(research_aspects, zipped)
+        zipped = list(zip(comp['sub-questions'], [toolset]*len(comp['sub-questions'])))
+        results = Pool(NUM_PROCESSES).map(tool_selector, zipped)
         context += str(results)
-        
-        response = recompisition_bot(input, context, str(memory.chat_memory)).content
-        comp = json.loads(further_aspects_bot(input, response, context, str(memory.chat_memory)).content)
+        print(context)
+        # response = recompisition_bot(input, context, str(memory.chat_memory)).content
+        # comp = json.loads(further_aspects_bot(input, response, context, str(memory.chat_memory)).content)
 
     return response
