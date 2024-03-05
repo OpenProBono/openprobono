@@ -277,7 +277,7 @@ def create_collection(collection_name: str, description: str, embedding_dim: int
     text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
     source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
-    schema = CollectionSchema(fields=[pk_field, embedding_field, source_field],
+    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field],
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=collection_name, schema=schema)
     index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
