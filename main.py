@@ -139,9 +139,9 @@ api = FastAPI()
 def read_root():
     return {"message": "API is alive"}
 
-@api.post("/flow", tags=["History Chat (new agent flow)"])
-def new_flow(request: ChatRequest):
-    return process_flow(request)
+# @api.post("/flow", tags=["History Chat (new agent flow)"])
+# def new_flow(request: ChatRequest):
+#     return process_flow(request)
 
 @api.post("/invoke_bot", tags=["History Chat"])
 def chat(request: Annotated[
