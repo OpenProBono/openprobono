@@ -34,4 +34,5 @@ class BotRequest(BaseModel):
     youtube_urls: list = []
     beta: bool = False
     search_tool_method: str = "serpapi"
+    engine: str = "langchain"
     api_key: str

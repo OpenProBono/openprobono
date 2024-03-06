@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, UploadFile
 from firebase_admin import auth, credentials, firestore
 from requests import session
 
-from bot import BotRequest, ChatRequest, opb_bot
+from bot import BotRequest, ChatRequest, opb_bot, openai_bot
 from milvusdb import session_upload_pdf, session_source_summaries, delete_expr, crawl_and_scrape, session_upload_ocr, US, COLLECTIONS, SESSION_PDF
 from models import ChatBySession, FetchSession, InitializeSession
 from new_bot import flow
@@ -100,8 +100,13 @@ def process_chat(r: ChatRequest):
         if(bot is None):
             return {"message": "Failure: No bot found with bot id: " + r.bot_id}
 
-        output = opb_bot(r, bot)
-
+        if bot.engine == 'langchain':
+            output = opb_bot(r, bot)
+        elif bot.engine == 'openai':
+            output = openai_bot(r, bot)
+        else:
+            return {"message": f"Failure: invalid bot engine {bot.engine}"}
+        
         #store conversation (and also log the api_key)
         store_conversation(r, output)
 
@@ -292,6 +297,7 @@ def create_bot(request: Annotated[
                             "collection_name": US,
                             "k": 4
                         }],
+                        "engine": "langchain",
                         "api_key":"xyz",
                     },
                 },
@@ -334,6 +340,7 @@ def create_bot(request: Annotated[
                         }],
                         "beta": "whether to use beta features or not, if they are available",
                         "search_tool_method": "which search tool to use, between google_search and serpapi: default is serpapi",
+                        "engine": "which library to use for model calls, must be one of: langchain, openai. Default is langchain.",
                         "api_key": "api key necessary for auth",
                     },
                 },
