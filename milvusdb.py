@@ -15,7 +15,6 @@ from langchain import hub
 from langchain.chains import create_retrieval_chain, load_summarize_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.prompts import ChatPromptTemplate
-from langchain.embeddings.base import Embeddings
 from langchain.docstore.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
 from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
@@ -24,8 +23,7 @@ from langchain_openai.llms import OpenAI as LangChainOpenAI
 from pypdf import PdfReader
 from unstructured.chunking.base import Element
 from unstructured.chunking.basic import chunk_elements
-from unstructured.partition.auto import partition, partition_text
-from langchain_community.document_loaders import PyPDFLoader
+from unstructured.partition.auto import partition
 from langchain_community.vectorstores.milvus import Milvus
 from networkx import circular_layout
 from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
@@ -246,7 +244,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
     return Milvus(
-        embedding_function=OpenAIEmbeddings(),
+        embedding_function=OpenAIEmbeddings(model="text-embedding-3-small", dimensions=768),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True

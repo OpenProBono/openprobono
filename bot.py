@@ -14,8 +14,8 @@ from matplotlib.backend_tools import ToolSetCursor
 
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest
-from search_tools import search_toolset_creator, serpapi_toolset_creator
-from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_toolset_creator
+from search_tools import search_toolset_creator, serpapi_toolset_creator, search_openai_tool
+from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_toolset_creator, vdb_openai_tool
 
 from openai import OpenAI
 import json
@@ -132,46 +132,49 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         if tup[1]:
             messages.append({"role": "assistant", "content": tup[1]})
     # [openai tool definitions, tool name -> actual function to call on response mappings]
-    definitions, mappings = vdb_openai_toolset_creator(bot.vdb_tools)
+    toolset = vdb_openai_toolset_creator(bot.vdb_tools)
     response = client.chat.completions.create(
         model="gpt-3.5-turbo-0125",
         messages=messages,
-        tools=definitions,
+        tools=toolset,
         tool_choice="auto",  # auto is default, but we'll be explicit
         temperature=0
     )
     response_message = response.choices[0].message
+    messages.append(response_message)  # extend conversation with assistant's reply
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
-        # Step 3: call the function
-        # Note: the JSON response may not always be valid; be sure to handle errors
-        messages.append(response_message)  # extend conversation with assistant's reply
-        # Step 4: send the info for each function call and function response to the model
         for tool_call in tool_calls:
             function_name = tool_call.function.name
-            if 'query' in function_name:
-                function_to_call = mappings[function_name]["func"]
-                function_args = json.loads(tool_call.function.arguments)
-                function_response = function_to_call(
-                    query=function_args.get("query"),
-                    collection_name=mappings[function_name]["args"]["collection_name"],
-                    k=mappings[function_name]["args"]["k"]
-                )
-                function_response_json = json.dumps(list(function_response))
-                messages.append(
-                    {
-                        "tool_call_id": tool_call.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": function_response_json,
-                    }
-                )  # extend conversation with function response
-                second_response = client.chat.completions.create(
-                    model="gpt-3.5-turbo-0125",
-                    messages=messages,
-                    temperature=0
-                )  # get a new response from the model where it can see the function response
-                return second_response.choices[0].message.content
+            print(f"function_name = {function_name}")
+            function_args = json.loads(tool_call.function.arguments)
+            vdb_tool = next((t for t in bot.vdb_tools if function_name == f"{t['name']}_{t['collection_name']}"), None)
+            print(f"vdb_tool = {vdb_tool}")
+            search_tool = None # TODO: openai search tools
+            # Step 3: call the function
+            # Note: the JSON response may not always be valid; be sure to handle errors
+            if vdb_tool:
+                tool_response = vdb_openai_tool(vdb_tool, function_args)
+            elif search_tool:
+                tool_response = search_openai_tool(search_tool, function_args)
+            else:
+                tool_response = "error: unable to run tool"
+            print(f"tool_response = {tool_response}")
+            messages.append(
+                {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": tool_response,
+                }
+            )  # extend conversation with function response
+        # Step 4: send the info for each function call and function response to the model
+        second_response = client.chat.completions.create(
+            model="gpt-3.5-turbo-0125",
+            messages=messages,
+            temperature=0
+        )  # get a new response from the model where it can see the function response
+        return second_response.choices[0].message.content
     else:
         return response_message.content

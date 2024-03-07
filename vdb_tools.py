@@ -1,7 +1,7 @@
 from milvusdb import qa, query, COLLECTIONS, SESSION_PDF
 from langchain.agents import Tool
 
-def vdb_qa_tool(tool: dict):
+def qa_tool(tool: dict):
     if tool["collection_name"] not in COLLECTIONS:
         raise ValueError(f"invalid collection_name {tool['collection_name']}")
     
@@ -23,7 +23,7 @@ def vdb_qa_tool(tool: dict):
         description = description
     )
 
-def vdb_query_tool(tool: dict):
+def query_tool(tool: dict):
     if tool["collection_name"] not in COLLECTIONS:
         raise ValueError(f"invalid collection_name {tool['collection_name']}")
     
@@ -61,38 +61,68 @@ def session_query_tool(session_id: str, source_summaries: dict):
         description = f"Tool used to query a vector database including information about the San Diego Volunteer Lawyer Program and return the most relevant text chunks. You can use this tool to query for legal and procedural information as well." #this temporary change for testings
     )
 
-def vdb_openai_query_tool(tool: dict):
+def openai_qa_tool(tool: dict):
     return {
         "type": "function",
         "function": {
-            "name": f"query-{tool['collection_name']}",
-            "description": f"Runs a vector similarity search over a database named {tool['collection_name']} and returns the top {tool['k']} chunks",
+            "name": f"qa_{tool['collection_name']}",
+            "description": f"This tool answers questions using a database named {tool['collection_name']}.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "the user query"},
+                    "question": {"type": "string", "description": "the question to answer"},
+                },
+                "required": ["question"],
+            },
+        },
+    }
+
+def openai_query_tool(tool: dict):
+    return {
+        "type": "function",
+        "function": {
+            "name": f"query_{tool['collection_name']}",
+            "description": f"This tool queries a database named {tool['collection_name']} and returns the top {tool['k']} results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "the query text"},
                 },
                 "required": ["query"],
             },
         },
     }
 
-def vdb_openai_query_mapping(tool: dict):
-    return {"func": query, "args": {"collection_name": tool["collection_name"], "k": tool["k"]}}
+def vdb_openai_tool(tool: dict, function_args):
+    function_response = None
+    if 'query' in tool["name"]:
+        tool_query = function_args.get("query")
+        collection_name = tool["collection_name"]
+        k = tool["k"]
+        function_response = query(collection_name, tool_query, k)
+    elif 'qa' in tool["name"]:
+        tool_question = function_args.get("question")
+        collection_name = tool["collection_name"]
+        k = tool["k"]
+        function_response = qa(collection_name, tool_question, k)
+    if function_response:
+        return str(function_response)
+    return "error: unable to run tool"
 
 def vdb_toolset_creator(tools: list[dict]):
     toolset = []
     for t in tools:
         if "qa" in t["name"]:
-            toolset.append(vdb_qa_tool(t))
+            toolset.append(qa_tool(t))
         elif "query" in t["name"]:
-            toolset.append(vdb_query_tool(t))
+            toolset.append(query_tool(t))
     return toolset
 
 def vdb_openai_toolset_creator(tools: list[dict]):
-    definitions, mappings = [], {}
+    toolset = []
     for t in tools:
-        if "query" in t["name"]:
-            definitions.append(vdb_openai_query_tool(t))
-            mappings[f"{t['name']}-{t['collection_name']}"] = vdb_openai_query_mapping(t)
-    return definitions, mappings
+        if "qa" in t["name"]:
+            toolset.append(openai_qa_tool(t))
+        elif "query" in t["name"]:
+            toolset.append(openai_query_tool(t))
+    return toolset

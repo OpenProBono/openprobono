@@ -62,6 +62,9 @@ def serpapi_tool_creator(name, txt, prompt):
                 description = prompt
             )
 
+def search_openai_tool(tool: dict, function_args):
+    return ""
+
 def search_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.search_tools:
