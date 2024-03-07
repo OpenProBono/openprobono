@@ -37,12 +37,10 @@ tools_template = """GENERAL INSTRUCTIONS
     ANSWER FORMAT
     {{"tools":["<FILL>"]}}"""
 
+max_num_tools = 8
+multiple_tools_template = f"""You are a legal expert, tasked with answering a question about law using only the provided tools. You can call tools up to {max_num_tools} times. If the tools cannot provide you with the information needed to answer this question then simply write: "Insufficient information."
 
-multiple_tools_template = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
-
-Combine tool results into a coherent answer. ALWAYS return a "SOURCES" part in your answer.
-
-If you used a web source, include the URL in the citation. If you used a database source, include relevant metadata in the citation.
+If an answer to the question is provided, it must be annotated with citations to any tools used. Cite each tool in a format that is based on the tools output.
 """
 
 answer_template = """GENERAL INSTRUCTIONS
@@ -132,6 +130,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         if tup[1]:
             messages.append({"role": "assistant", "content": tup[1]})
 
+    messages.append({"role": "system", "content": multiple_tools_template})
+
     toolset = []
     if(bot.search_tool_method == "google_search"):
         toolset += search_toolset_creator(bot)
@@ -152,34 +152,42 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = next((t for t in bot.vdb_tools if function_name == f"{t['name']}_{t['collection_name']}"), None)
-            search_tool = next((t for t in bot.search_tools if function_name == t['name']), None)
-            # Step 3: call the function
-            # Note: the JSON response may not always be valid; be sure to handle errors
-            if vdb_tool:
-                tool_response = vdb_openai_tool(vdb_tool, function_args)
-            elif search_tool:
-                tool_response = search_openai_tool(search_tool, function_args, bot.search_tool_method)
-            else:
-                tool_response = "error: unable to run tool"
-            print(f"tool_response = {tool_response}")
-            messages.append(
-                {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": tool_response,
-                }
-            )  # extend conversation with function response
-        # Step 4: send the info for each function call and function response to the model
-        second_response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0
-        )  # get a new response from the model where it can see the function response
-        return second_response.choices[0].message.content
+        tools_used = 0
+        while tool_calls and tools_used < max_num_tools:
+            for tool_call in tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+                vdb_tool = next((t for t in bot.vdb_tools if function_name == f"{t['name']}_{t['collection_name']}"), None)
+                search_tool = next((t for t in bot.search_tools if function_name == t['name']), None)
+                # Step 3: call the function
+                # Note: the JSON response may not always be valid; be sure to handle errors
+                if vdb_tool:
+                    tool_response = vdb_openai_tool(vdb_tool, function_args)
+                elif search_tool:
+                    tool_response = search_openai_tool(search_tool, function_args, bot.search_tool_method)
+                else:
+                    tool_response = "error: unable to run tool"
+                print(tool_response)
+                messages.append(
+                    {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": tool_response,
+                    }
+                )  # extend conversation with function response
+                tools_used += 1
+            # Step 4: send the info for each function call and function response to the model
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=toolset,
+                temperature=0
+            )  # get a new response from the model where it can see the function response
+            response_message = response.choices[0].message
+            messages.append(response_message)
+            tool_calls = response_message.tool_calls
+        return response_message.content
     else:
+        print('no tool used')
         return response_message.content
