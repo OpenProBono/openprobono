@@ -15,7 +15,7 @@ from matplotlib.backend_tools import ToolSetCursor
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest
 from search_tools import search_toolset_creator, serpapi_toolset_creator, search_openai_tool
-from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_toolset_creator, vdb_openai_tool
+from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_tool
 
 from openai import OpenAI
 import json
@@ -124,17 +124,24 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     if(r.history[-1][0].strip() == ""):
         return "Hi, how can I assist you today?"
     client = OpenAI()
-    # Step 1: send the conversation and available functions to the model
+    model = "gpt-3.5-turbo-0125"
     messages = []
     for tup in r.history:
         if tup[0]:
             messages.append({"role": "user", "content": tup[0]})
         if tup[1]:
             messages.append({"role": "assistant", "content": tup[1]})
-    # [openai tool definitions, tool name -> actual function to call on response mappings]
-    toolset = vdb_openai_toolset_creator(bot.vdb_tools)
+
+    toolset = []
+    if(bot.search_tool_method == "google_search"):
+        toolset += search_toolset_creator(bot)
+    else:
+        toolset += serpapi_toolset_creator(bot)
+    toolset += vdb_toolset_creator(bot)
+
+    # Step 1: send the conversation and available functions to the model
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo-0125",
+        model=model,
         messages=messages,
         tools=toolset,
         tool_choice="auto",  # auto is default, but we'll be explicit
@@ -147,17 +154,15 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     if tool_calls:
         for tool_call in tool_calls:
             function_name = tool_call.function.name
-            print(f"function_name = {function_name}")
             function_args = json.loads(tool_call.function.arguments)
             vdb_tool = next((t for t in bot.vdb_tools if function_name == f"{t['name']}_{t['collection_name']}"), None)
-            print(f"vdb_tool = {vdb_tool}")
-            search_tool = None # TODO: openai search tools
+            search_tool = next((t for t in bot.search_tools if function_name == t['name']), None)
             # Step 3: call the function
             # Note: the JSON response may not always be valid; be sure to handle errors
             if vdb_tool:
                 tool_response = vdb_openai_tool(vdb_tool, function_args)
             elif search_tool:
-                tool_response = search_openai_tool(search_tool, function_args)
+                tool_response = search_openai_tool(search_tool, function_args, bot.search_tool_method)
             else:
                 tool_response = "error: unable to run tool"
             print(f"tool_response = {tool_response}")
@@ -171,7 +176,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             )  # extend conversation with function response
         # Step 4: send the info for each function call and function response to the model
         second_response = client.chat.completions.create(
-            model="gpt-3.5-turbo-0125",
+            model=model,
             messages=messages,
             temperature=0
         )  # get a new response from the model where it can see the function response

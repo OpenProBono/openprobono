@@ -1,6 +1,8 @@
 from milvusdb import qa, query, COLLECTIONS, SESSION_PDF
 from langchain.agents import Tool
 
+from models import BotRequest
+
 def qa_tool(tool: dict):
     if tool["collection_name"] not in COLLECTIONS:
         raise ValueError(f"invalid collection_name {tool['collection_name']}")
@@ -95,34 +97,27 @@ def openai_query_tool(tool: dict):
 
 def vdb_openai_tool(tool: dict, function_args):
     function_response = None
+    collection_name = tool["collection_name"]
+    k = tool["k"]
     if 'query' in tool["name"]:
         tool_query = function_args.get("query")
-        collection_name = tool["collection_name"]
-        k = tool["k"]
         function_response = query(collection_name, tool_query, k)
     elif 'qa' in tool["name"]:
         tool_question = function_args.get("question")
-        collection_name = tool["collection_name"]
-        k = tool["k"]
         function_response = qa(collection_name, tool_question, k)
-    if function_response:
-        return str(function_response)
-    return "error: unable to run tool"
+    return str(function_response)
 
-def vdb_toolset_creator(tools: list[dict]):
+def vdb_toolset_creator(bot: BotRequest):
     toolset = []
-    for t in tools:
+    for t in bot.vdb_tools:
         if "qa" in t["name"]:
-            toolset.append(qa_tool(t))
+            if bot.engine == 'langchain':
+                toolset.append(qa_tool(t))
+            elif bot.engine == 'openai':
+                toolset.append(openai_qa_tool(t))
         elif "query" in t["name"]:
-            toolset.append(query_tool(t))
-    return toolset
-
-def vdb_openai_toolset_creator(tools: list[dict]):
-    toolset = []
-    for t in tools:
-        if "qa" in t["name"]:
-            toolset.append(openai_qa_tool(t))
-        elif "query" in t["name"]:
-            toolset.append(openai_query_tool(t))
+            if bot.engine == 'langchain':
+                toolset.append(query_tool(t))
+            elif bot.engine == 'openai':
+                toolset.append(openai_query_tool(t))
     return toolset

@@ -335,7 +335,7 @@ def create_bot(request: Annotated[
                         }],
                         "vdb_tools": [{
                             "name": "name for tool, must be one of: qa, query",
-                            "collection_name": f"name of database to query, must be one of: {', '.join(list(COLLECTIONS)[:-1])} {list(COLLECTIONS)[-1]}",
+                            "collection_name": f"name of database to query, must be one of: {', '.join(list(COLLECTIONS))}",
                             "k": "the number of text chunks to return when querying the database"
                         }],
                         "beta": "whether to use beta features or not, if they are available",
