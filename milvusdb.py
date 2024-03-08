@@ -12,10 +12,8 @@ from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from langchain import hub
-from langchain.chains import create_retrieval_chain, load_summarize_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.prompts import ChatPromptTemplate
-from langchain.docstore.document import Document
+from langchain.chains import load_summarize_chain
+from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
 from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain_openai import OpenAIEmbeddings
@@ -32,6 +30,16 @@ from sqlalchemy import desc
 from openai import OpenAI
 import tiktoken
 import time
+
+from langchain_openai import ChatOpenAI
+from operator import itemgetter
+from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
+from langchain_core.runnables import (
+    RunnableLambda,
+    RunnableParallel,
+    RunnablePassthrough,
+)
+import prompts
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
@@ -89,7 +97,6 @@ def collection_upload_str(reader: str, collection: str, site: str, max_chunk_siz
     if num_docs != len(ids):
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {site} but got {len(ids)}"}
     return {"message": f"Success: uploaded {site} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
-
 
 def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False): 
     print("site: ", site)
@@ -344,19 +351,42 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
         return check_params(collection_name, query, k, session_id)
     
     db = load_db(collection_name)
-    retrieval_qa_chat_prompt: ChatPromptTemplate = hub.pull("langchain-ai/retrieval-qa-chat")
-    llm = LangChainOpenAI(temperature=0)
+    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+    llm_with_tool = llm.bind_tools(
+        [prompts.CitedAnswer],
+        tool_choice="CitedAnswer",
+    )
+    output_parser = JsonOutputKeyToolsParser(key_name="CitedAnswer", return_single=True)
+    output_fields = OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
+
+    def format_docs_with_id(docs: List[Document]) -> str:
+        formatted = [
+            f"Source ID: {i}\n" + "\n".join([f"Source {field.capitalize()}: {doc.metadata[field]}" for field in output_fields]) + "\nSource Text: " + doc.page_content
+            for i, doc in enumerate(docs)
+        ]
+        return "\n\n" + "\n\n".join(formatted)
+
+    format_1 = itemgetter("docs") | RunnableLambda(format_docs_with_id)
+    answer_1 = prompts.QA_PROMPT | llm_with_tool | output_parser
     if session_id:
-        retriever = FilteredRetriever(vectorstore=db, session_filter=session_id, search_kwargs={"k": k})
+        docs = FilteredRetriever(vectorstore=db, session_filter=session_id, search_kwargs={"k": k})
     else:
-        retriever = db.as_retriever(search_kwargs={"k": k})
-    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
-    retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
-    result = retrieval_chain.invoke({"input": query})
-    cited_sources = []
-    for doc in result["context"]:
-        cited_sources.append({"source": doc.metadata["source"], "page": doc.metadata["page"]})
-    return {"message": "Success", "result": {"answer": result["answer"].strip(), "sources": cited_sources}}
+        docs = db.as_retriever(search_kwargs={"k": k})
+    chain = (
+        RunnableParallel(question=RunnablePassthrough(), docs=docs)
+        .assign(context=format_1)
+        .assign(cited_answer=answer_1)
+        .pick(["cited_answer", "docs"])
+    )
+    result = chain.invoke(query)
+    cited_sources = [
+        {
+            field: result["docs"][i].metadata[field]
+            for field in output_fields
+        }
+        for i in result["cited_answer"]["citations"]
+    ]
+    return {"message": "Success", "result": {"answer": result["cited_answer"]["answer"], "sources": cited_sources}}
 
 def delete_expr(collection_name: str, expr: str):
     """

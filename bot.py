@@ -38,9 +38,9 @@ tools_template = """GENERAL INSTRUCTIONS
     {{"tools":["<FILL>"]}}"""
 
 max_num_tools = 8
-multiple_tools_template = f"""You are a legal expert, tasked with answering a question about law using only the provided tools. You can call tools up to {max_num_tools} times. If the tools cannot provide you with the information needed to answer this question then simply write: "Insufficient information."
+multiple_tools_template = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
 
-If an answer to the question is provided, it must be annotated with citations to any tools used. Cite each tool in a format that is based on the tools output.
+Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
 """
 
 answer_template = """GENERAL INSTRUCTIONS
@@ -89,7 +89,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
             toolset += search_toolset_creator(bot)
         else:
             toolset += serpapi_toolset_creator(bot)
-        toolset += vdb_toolset_creator(bot.vdb_tools)
+        toolset += vdb_toolset_creator(bot)
         # sesssion tool
         source_summaries = session_source_summaries(r.session_id)
         if source_summaries:
@@ -187,7 +187,6 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             response_message = response.choices[0].message
             messages.append(response_message)
             tool_calls = response_message.tool_calls
-        return response_message.content
     else:
         print('no tool used')
-        return response_message.content
+    return response_message.content
