@@ -1,4 +1,4 @@
-from milvusdb import qa, query, COLLECTIONS, SESSION_PDF
+from milvusdb import qa, query, COLLECTIONS, SESSION_PDF, Collection
 from langchain.agents import Tool
 
 from models import BotRequest
@@ -16,7 +16,8 @@ def qa_tool(tool: dict):
     if "description" in tool:
         description = tool["description"]
     else:
-        description = f"""Tool used to answer questions using the {tool["k"]} most relevant text chunks from a vector database named {tool["collection_name"]}."""
+        description = f"""This tool answers questions by searching for the top {tool["k"]} results from a database named {tool["collection_name"]}."""
+        description += f" The database description is: {Collection(tool['collection_name']).description}."
     
     return Tool(
         name = f"{tool['name']}-{tool['collection_name']}",
@@ -38,7 +39,8 @@ def query_tool(tool: dict):
     if 'description' in tool:
         description = tool["description"]
     else:
-        description = f"Tool used to query a vector database named {tool['collection_name']} and return the {tool['k']} most relevant text chunks."
+        description = f"This tool queries a database named {tool['collection_name']} and returns the top {tool['k']} results."
+        description += f" The database description is: {Collection(tool['collection_name']).description}."
 
     return Tool(
         name = f"{tool['name']}-{tool['collection_name']}",
