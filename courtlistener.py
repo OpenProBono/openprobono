@@ -56,9 +56,9 @@ def get_docket(result):
 #         e_text += el + "\n\n"
 #     return e_text
 
-def courtlistener_search(query):
+def courtlistener_search(q):
     create_collection(courlistener_collection, "Database of courtlistener opinions and related information.")
-    for result in search(query)["results"][:3]:
+    for result in search(q)["results"][:3]:
 
         # print(result)
         # print("-")
@@ -76,7 +76,7 @@ def courtlistener_search(query):
         collection_upload_str(oo["text"], courlistener_collection, oo["absolute_url"])
         # print("----")
 
-    return query(courlistener_collection, query)
+    return query(courlistener_collection, q)
 
 def courlistener_query_tool(name, txt, prompt):
     def query_tool(q: str):
