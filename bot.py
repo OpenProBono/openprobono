@@ -14,7 +14,7 @@ from matplotlib.backend_tools import ToolSetCursor
 
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest
-from search_tools import search_toolset_creator, serpapi_toolset_creator
+from search_tools import search_toolset_creator
 from vdb_tools import session_query_tool, vdb_toolset_creator
 
 langchain.debug = True
