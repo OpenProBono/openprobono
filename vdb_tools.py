@@ -56,7 +56,7 @@ def session_query_tool(session_id: str, source_summaries: dict):
             name = "session_query_tool",
             func = tool_func,
             coroutine = co_func,
-            description = f"Tool used to query a vector database including information about the San Diego Volunteer Lawyer Program and return the most relevant text chunks. You can use this tool to query for legal and procedural information as well." #this temporary change for testings
+            description = f"Tool used to query a vector database including information uploaded by the user and return the most relevant text chunks." 
         )
 
 def vdb_toolset_creator(tools: list[dict]):

@@ -1,6 +1,7 @@
-from email.mime import base
 import re
 import requests
+from langchain.agents import Tool
+from milvusdb import collection_upload_str, create_collection, qa
 from unstructured.partition.auto import partition
 
 
@@ -11,6 +12,8 @@ search_url = base_url + "/api/rest/v3/search/?q="
 opinion_url = base_url + "/api/rest/v3/opinions/?id="
 cluster_url = base_url + "/api/rest/v3/clusters/?id="
 docket_url = base_url + "/api/rest/v3/dockets/?id="
+
+courlistener_collection = "courtlistener"
     
 def search(query):
     response = requests.get(search_url + query, headers=courtlistener_header)
@@ -54,18 +57,39 @@ def get_docket(result):
 #     return e_text
 
 def courtlistener_search(query):
-    for result in [search(query)["results"][0]]:
-        print(result)
-        print("-")
-        oo = get_opinion(result)
-        cc = get_cluster(result)
-        dd = get_docket(result)
-        print(oo)
-        print("^^ opinion")
-        print(cc)
-        print("^^ cluster")
-        print(dd)
-        print("^^ docket")
-        print("----")
+    create_collection(courlistener_collection, "Database of courtlistener opinions and related information.")
+    for result in search(query)["results"]:
 
-courtlistener_search("marijuana")
+        # print(result)
+        # print("-")
+        oo = get_opinion(result)
+        # cc = get_cluster(result)
+        # dd = get_docket(result)
+        
+        # print(oo["text"])
+        # print("^^ opinion")
+        # print(cc)
+        # print("^^ cluster")
+        # print(dd)
+        # print("^^ docket")
+        
+        collection_upload_str(oo["text"], courlistener_collection, oo["absolute_url"])
+        # print("----")
+
+    return qa(courlistener_collection, query)
+
+def courlistener_query_tool(name, txt, prompt):
+    def query_tool(q: str):
+        return courtlistener_search(q)
+    
+    async def async_query_tool(q: str):
+        return courtlistener_search(q)
+    
+    tool_func = lambda q: query_tool(q)
+    co_func = lambda q: async_query_tool(q)
+    return Tool(
+            name = name,
+            func = tool_func,
+            coroutine = co_func,
+            description = prompt
+        )

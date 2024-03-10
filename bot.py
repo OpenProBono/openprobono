@@ -8,6 +8,7 @@ from langchain.agents import AgentType, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.prompts import MessagesPlaceholder
+from courtlistener import courtlistener_search
 from langchain_openai import ChatOpenAI
 from matplotlib.backend_tools import ToolSetCursor
 
@@ -47,10 +48,9 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
             "extra_prompt_messages": [MessagesPlaceholder(variable_name="memory")],
         }
         toolset = []
-        if(bot.search_tool_method == "google_search"):
-            toolset += search_toolset_creator(bot)
-        else:
-            toolset += serpapi_toolset_creator(bot)
+
+        toolset += search_toolset_creator(bot)
+
         toolset += vdb_toolset_creator(bot.vdb_tools)
         source_summaries = session_source_summaries(r.session_id)
         if source_summaries:

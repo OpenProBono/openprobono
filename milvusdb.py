@@ -64,11 +64,11 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
     return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def collection_upload_str(reader: str, collection: str, site: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
     documents = [
         Document(
             page_content=page,
-            metadata={"source": site},
+            metadata={"source": source},
         )
         for page_number, page in enumerate([reader], start=1)
     ]
@@ -85,8 +85,8 @@ def collection_upload_str(reader: str, collection: str, site: str, max_chunk_siz
     ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {site} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {site} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {source} but got {len(ids)}"}
+    return {"message": f"Success: uploaded {source} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
 
 def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False): 

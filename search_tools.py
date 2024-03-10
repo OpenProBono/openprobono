@@ -3,6 +3,8 @@ import os
 import requests
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
+from courtlistener import courlistener_query_tool
+
 from models import BotRequest
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
@@ -65,11 +67,10 @@ def serpapi_tool_creator(name, txt, prompt):
 def search_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.search_tools:
-        toolset.append(search_tool_creator(t['name'], t['txt'], t['prompt']))
-    return toolset
-
-def serpapi_toolset_creator(bot: BotRequest):
-    toolset = []
-    for t in bot.search_tools:
-        toolset.append(serpapi_tool_creator(t['name'], t['txt'], t['prompt']))
+        if "serpapi" in t["name"]:
+            toolset.append(serpapi_tool_creator(t['name'], t['txt'], t['prompt']))
+        elif("court" in t["name"]):
+            toolset.append(courlistener_query_tool(t['name'], t['txt'], t['prompt']))
+        else:
+            toolset.append(search_tool_creator(t['name'], t['txt'], t['prompt']))
     return toolset
