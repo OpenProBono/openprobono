@@ -274,7 +274,7 @@ def create_collection(collection_name: str, description: str, embedding_dim: int
     # define schema, create collection, create index on vectors
     pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
     # unstructured chunk lengths are sketchy
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=64 * embedding_dim)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
     source_field = FieldSchema(name="source", dtype=DataType.VARCHAR, description="The source file", max_length=max_src_length)
     schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, source_field],
