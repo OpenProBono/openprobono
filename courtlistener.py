@@ -1,7 +1,7 @@
 import re
 import requests
 from langchain.agents import Tool
-from milvusdb import collection_upload_str, create_collection, qa
+from milvusdb import collection_upload_str, query
 from unstructured.partition.auto import partition
 
 
@@ -75,7 +75,7 @@ def courtlistener_search(query):
         collection_upload_str(oo["text"], courlistener_collection, oo["absolute_url"])
         # print("----")
 
-    return qa(courlistener_collection, query)
+    return query(courlistener_collection, query)
 
 def courlistener_query_tool(name, txt, prompt):
     def query_tool(q: str):
