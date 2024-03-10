@@ -1,7 +1,7 @@
 import re
 import requests
 from langchain.agents import Tool
-from milvusdb import collection_upload_str, query
+from milvusdb import collection_upload_str, create_collection, query
 from unstructured.partition.auto import partition
 
 
@@ -57,6 +57,7 @@ def get_docket(result):
 #     return e_text
 
 def courtlistener_search(query):
+    create_collection(courlistener_collection, "Database of courtlistener opinions and related information.")
     for result in search(query)["results"][:3]:
 
         # print(result)

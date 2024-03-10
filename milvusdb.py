@@ -64,7 +64,7 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
     return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 10000, chunk_overlap: int = 1500):
     documents = [
         Document(
             page_content=page,
