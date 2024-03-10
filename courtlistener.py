@@ -57,7 +57,6 @@ def get_docket(result):
 #     return e_text
 
 def courtlistener_search(q):
-    create_collection(courlistener_collection, "Database of courtlistener opinions and related information.")
     for result in search(q)["results"][:3]:
 
         # print(result)
