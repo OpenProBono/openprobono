@@ -99,7 +99,6 @@ def serpapi_tool_creator(name, txt, prompt):
             )
 
 def search_toolset_creator(bot: BotRequest):
-    create_collection(search_collection, "Database of search results from the search tools.") #temp
     toolset = []
     for t in bot.search_tools:
         if "serpapi" in t["name"]:
