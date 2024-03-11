@@ -28,7 +28,7 @@ def dynamic_serpapi_tool_creator(name, txt, prompt):
             'num': 5
             }).get_dict())
         for result in response["organic_results"]:
-            scrape(response["link"], [], [], search_collection)
+            scrape(result["link"], [], [], search_collection)
         return query(search_collection, qr)
     
     async def async_search_tool(qr, txt, prompt):
