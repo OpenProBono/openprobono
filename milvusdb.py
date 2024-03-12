@@ -18,19 +18,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
 from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai.llms import OpenAI as LangChainOpenAI
-from pypdf import PdfReader
-from unstructured.chunking.base import Element
-from unstructured.chunking.basic import chunk_elements
-from unstructured.partition.auto import partition
-from langchain_community.vectorstores.milvus import Milvus
-from networkx import circular_layout
-from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
-from sqlalchemy import desc
-
-from openai import OpenAI
-import tiktoken
-import time
-
 from langchain_openai import ChatOpenAI
 from operator import itemgetter
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
@@ -39,7 +26,14 @@ from langchain_core.runnables import (
     RunnableParallel,
     RunnablePassthrough,
 )
+from unstructured.partition.auto import partition
+from langchain_community.vectorstores.milvus import Milvus
+from networkx import circular_layout
+from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
+from sqlalchemy import desc
+
 import prompts
+import encoder
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
@@ -205,11 +199,16 @@ US = "USCode"
 NC = "NCGeneralStatutes"
 CAP = "CAP"
 SESSION_PDF = "SessionPDF"
-COLLECTIONS = {US, NC, CAP}
-
-PYPDF = "pypdf"
-UNSTRUCTURED = "unstructured"
-PDF_LOADERS = {PYPDF, UNSTRUCTURED}
+COURTLISTENER = "courtlistener"
+COLLECTIONS = {US, NC, CAP, COURTLISTENER}
+# collection -> encoder mapping
+COLLECTION_ENCODER = {
+    US: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    NC: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    CAP: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, 1536),
+    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, 1536)
+}
 
 PDF = "PDF"
 HTML = "HTML"
@@ -220,7 +219,11 @@ COLLECTION_TYPES = {
     CAP: CAP
 }
 
-OUTPUT_FIELDS = {PDF: ["source", "page"], HTML: [], CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"]}
+OUTPUT_FIELDS = {
+    PDF: ["source", "page"],
+    HTML: [],
+    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"]
+}
 SEARCH_PARAMS = {
     "anns_field": "vector",
     "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
@@ -251,50 +254,11 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
     return Milvus(
-        embedding_function=OpenAIEmbeddings(model="text-embedding-3-small", dimensions=768),
+        embedding_function=encoder.get_langchain_embedding_function(collection_name),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True
     )
-
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
-    # For third-generation embedding models like text-embedding-3-small, use the cl100k_base encoding.
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
-
-def embed_strs(text: list[str], openai_engine: str = "text-embedding-3-small", dimensions: int = 768):
-    if openai_engine != "text-embedding-3-small":
-        print(f"error: openai_engine {openai_engine} is not yet implemented. Need to know the encoding name, max input length, and dimensions.")
-        return
-    i = 0
-    data = []
-    client = OpenAI()
-    checkpoint = 1000
-    while i < len(text):
-        if i > checkpoint:
-            print(f"  {len(text) - i} chunks remaining")
-            checkpoint += 1000
-        batch_tokens = 0
-        j = i
-        while j < len(text) and (batch_tokens := batch_tokens + num_tokens_from_string(text[j], "cl100k_base")) < 8191:
-            j += 1
-        attempt = 1
-        while attempt < 75:
-            try:
-                response = client.embeddings.create(
-                    input=text[i:j],
-                    model=openai_engine,
-                    dimensions=dimensions
-                )
-                data += [data.embedding for data in response.data]
-                i = j
-                break
-            except:
-                time.sleep(1)
-                attempt += 1
-    return data
 
 def check_params(collection_name: str, query: str, k: int, session_id: str = None):
     if not utility.has_collection(collection_name):
@@ -305,6 +269,8 @@ def check_params(collection_name: str, query: str, k: int, session_id: str = Non
         return {"message": f"Failure: k = {k} out of range [1, 16384]"}
     if session_id is None and collection_name == SESSION_PDF:
         return {"message": "Failure: session_id not found"}
+    if collection_name not in COLLECTION_ENCODER:
+        return {"message": f"Failure: encoder for collection {collection_name} not found"}
 
 def query(collection_name: str, query: str, k: int = 4, expr: str = None, session_id: str = None):
     if check_params(collection_name, query, k, session_id):
@@ -313,7 +279,7 @@ def query(collection_name: str, query: str, k: int = 4, expr: str = None, sessio
     coll = Collection(collection_name)
     coll.load()
     search_params = SEARCH_PARAMS
-    search_params["data"] = embed_strs([query])
+    search_params["data"] = encoder.embed_strs([query], COLLECTION_ENCODER[collection_name])
     search_params["limit"] = k
     search_params["output_fields"] += OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
 
@@ -388,6 +354,15 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
     ]
     return {"message": "Success", "result": {"answer": result["cited_answer"]["answer"], "sources": cited_sources}}
 
+def upload_documents(collection_name: str, documents: list[Document]):
+    ids = load_db(collection_name).add_documents(documents=documents,
+                                                 embedding=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
+                                                 connection_args=connection_args)
+    num_docs = len(documents)
+    if num_docs != len(ids):
+        return {"message": f"Failure: expected to upload {num_docs} chunks but got {len(ids)}"}
+    return {"message": f"Success: uploaded {num_docs} chunks"}
+
 def delete_expr(collection_name: str, expr: str):
     """
     Deletes database entries according to expr.
@@ -402,115 +377,6 @@ def delete_expr(collection_name: str, expr: str):
         coll.load()
         ids = coll.delete(expr=expr)
         return {"message": f"Success: deleted {ids.delete_count} chunks"}
-
-def upload_pdfs(collection: Collection, directory: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int,
-                session_id: str = None, batch_size: int = 1000, pdf_loader: str = UNSTRUCTURED):
-    files = sorted(os.listdir(directory))
-    print(f"found {len(files)} files")
-    for i, fname in enumerate(files, start=1):
-        print(f'{i}: {fname}')
-        if not fname.endswith(".pdf"):
-            print(" skipping")
-            continue
-        if pdf_loader == UNSTRUCTURED:
-            data = embed_pdf_unstructured(directory, fname, embedding_dim, max_chunk_size, chunk_overlap)
-        else: # pypdf
-            data = embed_pdf_pypdf(directory, fname, embedding_dim, max_chunk_size, chunk_overlap)
-        upload_pdf_chunks(collection, data, session_id, batch_size)
-
-def embed_pdf_pypdf(directory: str, fname: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int):
-    reader = PdfReader(directory + fname)
-    elements = []
-    print(' extracting text')
-    for page in reader.pages:
-        element = Element()
-        element.text = page.extract_text()
-        element.metadata.page_number = page.page_number + 1
-        elements.append(element)
-    print(f' chunking {len(elements)} extracted elements')
-    chunks = chunk_elements(elements, max_characters=max_chunk_size, overlap=chunk_overlap)
-    num_chunks = len(chunks)
-    text, page_numbers = [], []
-    for chunk in chunks:
-        text.append(chunk.text)
-        page_numbers.append(chunk.metadata.page_number)
-    print(f' embedding {num_chunks} chunks')
-    # vector, text, source, page
-    data = [
-        embed_strs(text, dimensions=embedding_dim),
-        text,
-        [fname] * num_chunks,
-        page_numbers
-    ]
-    return data
-
-def embed_pdf_unstructured(directory: str, fname: str, embedding_dim: int, max_chunk_size: int, chunk_overlap: int):
-    print(' partitioning')
-    elements = partition(filename=directory + fname)
-    print(f' chunking {len(elements)} partitioned elements')
-    chunks = chunk_elements(elements, max_characters=max_chunk_size, overlap=chunk_overlap)
-    num_chunks = len(chunks)
-    text, page_numbers = [], []
-    for chunk in chunks:
-        text.append(chunk.text)
-        page_numbers.append(chunk.metadata.page_number)
-    print(f' embedding {num_chunks} chunks')
-    # vector, text, source, page
-    data = [
-        embed_strs(text, dimensions=embedding_dim),
-        text,
-        [fname] * num_chunks,
-        page_numbers
-    ]
-    return data
-
-def upload_pdf_chunks(collection: Collection, data: list, session_id: str, batch_size: int):
-    num_chunks = len(data[0])
-    num_batches = num_chunks / batch_size if num_chunks % batch_size == 0 else num_chunks // batch_size + 1
-    print(f' inserting batches')
-    for i in range(0, num_chunks, batch_size):
-        if i % (10 * batch_size) == 0:
-            print(f'  {num_batches - (i // batch_size)} batches remaining')
-        batch_vector = data[0][i: i + batch_size]
-        batch_text = data[1][i: i + batch_size]
-        batch_source = data[2][i: i + batch_size]
-        batch_page = data[3][i: i + batch_size]
-        batch = [batch_vector, batch_text, batch_source, batch_page]
-        if session_id:
-            batch.append([session_id] * batch_size)
-        current_batch_size = len(batch[0])
-        res = collection.insert(batch)
-        if res.insert_count != current_batch_size:
-            print(f'  error: expected {current_batch_size} insertions but got {res.insert_count} for pages {batch_page[0]}...{batch_page[-1]}')
-
-def session_upload_pdf(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
-    if not file.filename.endswith(".pdf"):
-        return {"message": f"Failure: {file.filename} is not a PDF file"}
-    
-    # parse
-    reader = PdfReader(file.file)
-    documents = [
-        Document(
-            page_content=page.extract_text(),
-            metadata={"source": file.filename, "page": page_number, "session_id": session_id, "user_summary": summary},
-        )
-        for page_number, page in enumerate(reader.pages, start=1)
-    ]
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
-    documents = text_splitter.split_documents(documents)
-
-    # summarize
-    chain = load_summarize_chain(LangChainOpenAI(temperature=0), chain_type="map_reduce")
-    result = chain.invoke({"input_documents": documents[:200]})
-    for doc in documents:
-        doc.metadata["ai_summary"] = result["output_text"].strip()
-
-    # upload
-    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
-    num_docs = len(documents)
-    if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunks for {file.filename} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunks"}
 
 def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
     reader = quickstart_ocr(file)
@@ -531,11 +397,7 @@ def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chun
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
-    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
-    num_docs = len(documents)
-    if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {file.filename} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {file.filename} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+    return upload_documents(SESSION_PDF, documents)
 
 def session_source_summaries(session_id: str, batch_size: int = 1000):
     coll = Collection(SESSION_PDF)

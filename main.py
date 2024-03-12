@@ -11,7 +11,8 @@ from firebase_admin import auth, credentials, firestore
 from requests import session
 
 from bot import BotRequest, ChatRequest, opb_bot, openai_bot
-from milvusdb import session_upload_pdf, session_source_summaries, delete_expr, crawl_and_scrape, session_upload_ocr, US, COLLECTIONS, SESSION_PDF
+from milvusdb import session_source_summaries, delete_expr, crawl_and_scrape, upload_documents, session_upload_ocr, US, COLLECTIONS, SESSION_PDF
+from pdfs import summarized_chunks_pdf
 from models import ChatBySession, FetchSession, InitializeSession
 from new_bot import flow
 
@@ -357,7 +358,8 @@ def create_bot(request: Annotated[
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str = None):
-    return session_upload_pdf(file, session_id, summary if summary else file.filename)
+    docs = summarized_chunks_pdf(file, session_id, summary if summary else file.filename)
+    return upload_documents(SESSION_PDF, docs)
 
 @api.post("/upload_files", tags=["User Upload"])
 def upload_files(files: list[UploadFile], session_id: str, summaries: list[str] = None):
@@ -367,7 +369,8 @@ def upload_files(files: list[UploadFile], session_id: str, summaries: list[str] 
         return {"message": f"Failure: did not find equal numbers of files and summaries, instead found {len(files)} files and {len(summaries)} summaries."}
     failures = []
     for i, file in enumerate(files):
-        result = session_upload_pdf(file, session_id, summaries[i])
+        docs = summarized_chunks_pdf(file, session_id, summaries[i])
+        result = upload_documents(SESSION_PDF, docs)
         if result["message"].startswith("Failure"):
             failures.append(f"Upload #{i + 1} of {len(files)} failed. Internal message: {result['message']}")
             
