@@ -202,6 +202,7 @@ SESSION_PDF = "SessionPDF"
 COURTLISTENER = "courtlistener"
 COLLECTIONS = {US, NC, CAP, COURTLISTENER}
 # collection -> encoder mapping
+# TODO: make this a file or use firebase?
 COLLECTION_ENCODER = {
     US: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
     NC: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
@@ -231,7 +232,7 @@ SEARCH_PARAMS = {
 }
 INDEX_PARAMS = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
 
-def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [], embedding_dim: int = 768):
+def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [], params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
     if utility.has_collection(name):
         print(f"error: collection {name} already exists")
         return
@@ -241,8 +242,8 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
     # define schema, create collection, create index on vectors
     pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
     # unstructured chunk lengths are sketchy
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * embedding_dim)
-    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="The embedded text")
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=2 * params.dim)
+    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=params.dim, description="The embedded text")
     schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=name, schema=schema)

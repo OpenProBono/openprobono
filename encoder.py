@@ -27,6 +27,8 @@ MINILM = "sentence-transformers/all-MiniLM-L6-v2"
 LEGALBERT = "nlpaueb/legal-bert-base-uncased"
 BERT = "bert-base-uncased"
 
+DEFAULT_PARAMS = EncoderParams(OPENAI_3_SMALL, 768)
+
 def get_huggingface_model(model_name: str):
     return AutoModel.from_pretrained(model_name).to(device)
 
