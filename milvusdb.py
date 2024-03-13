@@ -11,10 +11,9 @@ from bs4 import BeautifulSoup
 from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
-from langchain import hub
 from langchain.chains import load_summarize_chain
 from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai.llms import OpenAI as LangChainOpenAI
@@ -207,8 +206,8 @@ COLLECTION_ENCODER = {
     US: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
     NC: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
     CAP: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
-    COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, 1536),
-    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, 1536)
+    COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
+    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None)
 }
 
 PDF = "PDF"
@@ -217,20 +216,27 @@ COLLECTION_TYPES = {
     US: PDF,
     NC: PDF,
     SESSION_PDF: PDF,
-    CAP: CAP
+    CAP: CAP,
+    COURTLISTENER: COURTLISTENER
 }
 
 OUTPUT_FIELDS = {
     PDF: ["source", "page"],
     HTML: [],
-    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"]
+    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"],
+    COURTLISTENER: ["source"]
 }
+# can customize index params with param field assuming you know index type
 SEARCH_PARAMS = {
     "anns_field": "vector",
-    "param": {"metric_type": "L2", "M": 8, "efConstruction": 64},
+    "param": {},
     "output_fields": ["text"]
 }
-INDEX_PARAMS = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 8, "efConstruction": 64}}
+# AUTOINDEX is only supported through Zilliz, not standalone Milvus
+AUTO_INDEX = {
+    "index_type": "AUTOINDEX", 
+    "metric_type": "IP"
+}
 
 def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [], params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
     if utility.has_collection(name):
@@ -247,7 +253,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
     schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=name, schema=schema)
-    coll.create_index("vector", index_params=INDEX_PARAMS, index_name="HnswL2M8eFCons64Index")
+    coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
 
     # must call coll.load() before query/search
     return coll
@@ -255,7 +261,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
     return Milvus(
-        embedding_function=encoder.get_langchain_embedding_function(collection_name),
+        embedding_function=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True

@@ -21,7 +21,7 @@ device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is
 # models
 OPENAI_3_LARGE = "text-embedding-3-large"
 OPENAI_3_SMALL = "text-embedding-3-small"
-OPENAI_ADA_2 = "text-embedding-ada-002"
+OPENAI_ADA_2 = "text-embedding-ada-002" # uses 1536 dimensions, cant be changed
 MPNET = "sentence-transformers/all-mpnet-base-v2"
 MINILM = "sentence-transformers/all-MiniLM-L6-v2"
 LEGALBERT = "nlpaueb/legal-bert-base-uncased"
@@ -50,7 +50,7 @@ def embed_strs(text: list[str], params: EncoderParams):
         params: EncoderParams to describe an embedding model    
     """
     if params.name == OPENAI_3_SMALL or params.name == OPENAI_ADA_2 or params.name == OPENAI_3_LARGE:
-        return [embed_strs_openai(text, params)]
+        return embed_strs_openai(text, params)
     # TODO: do this (and tokenize_embed_chunks) in batches?
     model = get_huggingface_model(params.name)
     tokenizer = get_huggingface_tokenizer(params.name)
@@ -89,7 +89,6 @@ def embed_strs_openai(text: list[str], params: EncoderParams):
     checkpoint = 1000
     while i < len(text):
         if i > checkpoint:
-            print(f"  {len(text) - i} chunks remaining")
             checkpoint += 1000
         batch_tokens = 0
         j = i
@@ -99,11 +98,10 @@ def embed_strs_openai(text: list[str], params: EncoderParams):
         num_attempts = 75
         while attempt < num_attempts:
             try:
-                response = client.embeddings.create(
-                    input=text[i:j],
-                    model=params.name,
-                    dimensions=params.dim
-                )
+                args = {"input": text[i:j], "model": params.name}
+                if params.dim:
+                    args["dimensions"] = params.dim
+                response = client.embeddings.create(**args)
                 data += [data.embedding for data in response.data]
                 i = j
                 break
