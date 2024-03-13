@@ -6,6 +6,7 @@ from anyio.from_thread import start_blocking_portal
 from langchain import hub
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain.callbacks.base import BaseCallbackHandler
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain_openai import ChatOpenAI
@@ -75,11 +76,17 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         job_done = object()
 
         bot_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview', request_timeout=60*5, streaming=True, callbacks=[MyCallbackHandler(q)])
-        memory_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview')
         # TODO: fix opb bot memory index
-        memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="chat_history", return_messages=True)
-        for i in range(1, len(r.history)-1):
-            memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
+        chat_history = []
+        for tup in r.history[1:len(r.history) - 1]:
+            if tup[0]:
+                chat_history.append(HumanMessage(content=tup[0]))
+            if tup[1]:
+                chat_history.append(AIMessage(content=tup[1]))
+        #memory_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview')
+        # memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="chat_history", return_messages=True)
+        # for i in range(1, len(r.history)-1):
+        #     memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
 
         #------- agent definition -------#
         toolset = []
@@ -100,7 +107,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
             # Create an agent executor by passing in the agent and tools
             agent_executor = AgentExecutor(agent=agent, tools=toolset, verbose=False, return_intermediate_steps=False)
             # TODO: make sure opb bot works
-            ret = await agent_executor.ainvoke({"input" :prompt, "chat_history": memory})
+            ret = await agent_executor.ainvoke({"input" :prompt, "chat_history": chat_history})
             q.put(job_done)
             return ret
 
