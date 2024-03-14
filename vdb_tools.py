@@ -59,11 +59,11 @@ def session_query_tool(session_id: str, source_summaries: dict):
     tool_func = lambda q: query_tool(q)
     co_func = lambda q: async_query_tool(q)
     return Tool(
-            name = "session_query_tool",
-            func = tool_func,
-            coroutine = co_func,
-            description = f"Tool used to query a vector database including information uploaded by the user and return the most relevant text chunks." 
-        )
+        name = "session_query_tool",
+        func = tool_func,
+        coroutine = co_func,
+        description = f"Tool used to query a vector database including information uploaded by the user and return the most relevant text chunks." 
+    )
 
 def openai_qa_tool(tool: dict):
     return {

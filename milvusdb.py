@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
-from langchain.chains import load_summarize_chain
+from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
@@ -194,6 +194,7 @@ def quickstart_ocr(
     return document.text
 
 # collections by jurisdiction?
+# TODO: get collection names from Milvus
 US = "USCode"
 NC = "NCGeneralStatutes"
 CAP = "CAP"
@@ -203,16 +204,16 @@ COLLECTIONS = {US, NC, CAP, COURTLISTENER}
 # collection -> encoder mapping
 # TODO: make this a file or use firebase?
 COLLECTION_ENCODER = {
-    US: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
-    NC: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
-    CAP: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    US: encoder.DEFAULT_PARAMS,
+    NC: encoder.DEFAULT_PARAMS,
+    CAP: encoder.DEFAULT_PARAMS,
     COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
     SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None)
 }
 
 PDF = "PDF"
 HTML = "HTML"
-COLLECTION_TYPES = {
+COLLECTION_FORMAT = {
     US: PDF,
     NC: PDF,
     SESSION_PDF: PDF,
@@ -220,7 +221,7 @@ COLLECTION_TYPES = {
     COURTLISTENER: COURTLISTENER
 }
 
-OUTPUT_FIELDS = {
+FORMAT_OUTPUTFIELDS = {
     PDF: ["source", "page"],
     HTML: [],
     CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"],
@@ -255,6 +256,9 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
     coll = Collection(name=name, schema=schema)
     coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
 
+    # save collection->encoder, collection->format
+    COLLECTION_ENCODER[name] = params
+    COLLECTION_FORMAT[name] = PDF
     # must call coll.load() before query/search
     return coll
 
@@ -288,7 +292,7 @@ def query(collection_name: str, query: str, k: int = 4, expr: str = None, sessio
     search_params = SEARCH_PARAMS
     search_params["data"] = encoder.embed_strs([query], COLLECTION_ENCODER[collection_name])
     search_params["limit"] = k
-    search_params["output_fields"] += OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
+    search_params["output_fields"] += FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
 
     if expr:
         search_params["expr"] = expr
@@ -330,7 +334,7 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
         tool_choice="CitedAnswer",
     )
     output_parser = JsonOutputKeyToolsParser(key_name="CitedAnswer", return_single=True)
-    output_fields = OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
+    output_fields = FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
 
     def format_docs_with_id(docs: List[Document]) -> str:
         formatted = [

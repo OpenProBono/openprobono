@@ -2,7 +2,8 @@ from fastapi import UploadFile
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai.llms import OpenAI as LangChainOpenAI
-from langchain.chains import load_summarize_chain
+from langchain.chains.summarize import load_summarize_chain
+from langchain_experimental.text_splitter import SemanticChunker
 from os import listdir
 from pymilvus import Collection
 from pypdf import PdfReader
@@ -10,7 +11,7 @@ from unstructured.chunking.base import Element
 from unstructured.chunking.basic import chunk_elements
 from unstructured.partition.pdf import partition_pdf
 
-from encoder import embed_strs, EncoderParams
+from encoder import embed_strs, EncoderParams, get_langchain_embedding_function, DEFAULT_PARAMS
 from milvusdb import COLLECTION_ENCODER
 
 PYPDF = "pypdf"
@@ -50,7 +51,7 @@ def upload_pdfs(collection: Collection, directory: str, max_chunk_size: int, chu
             data = chunk_pdf_pypdf(directory, fname, COLLECTION_ENCODER[collection.name], max_chunk_size, chunk_overlap)
         upload_pdf(collection, data, session_id, batch_size)
 
-def chunk_pdf_pypdf(directory: str | None, file: str | UploadFile, params: EncoderParams, max_chunk_size: int, chunk_overlap: int):
+def chunk_pdf_pypdf(directory, file, params: EncoderParams, max_chunk_size: int, chunk_overlap: int):
     if isinstance(file, str):
         reader = PdfReader(directory + file)
         fname = file
@@ -81,7 +82,7 @@ def chunk_pdf_pypdf(directory: str | None, file: str | UploadFile, params: Encod
     ]
     return data
 
-def chunk_pdf_unstructured(directory: str | None, file: str | UploadFile, params: EncoderParams, max_chunk_size: int, chunk_overlap: int):
+def chunk_pdf_unstructured(directory, file, params: EncoderParams, max_chunk_size: int, chunk_overlap: int):
     print(' partitioning')
     if isinstance(file, str):
         fname = file
@@ -130,3 +131,27 @@ def summarized_chunks_pdf(file: UploadFile, session_id: str, summary: str, max_c
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     return documents
+
+def semantic_chunks_pdf(directory: str, file: str, params: EncoderParams):
+    embeddings = get_langchain_embedding_function(params)
+    text_splitter = SemanticChunker(embeddings, breakpoint_threshold_type="standard_deviation")
+    elements = partition_pdf(filename=directory + file)
+    docs = text_splitter.create_documents([element.text for element in elements])
+    return docs
+
+def get_docs_pdf(directory, file, pdf_loader=UNSTRUCTURED):
+    if pdf_loader == UNSTRUCTURED:
+        data = chunk_pdf_unstructured(directory, file, DEFAULT_PARAMS, 10000, 1000)
+    else:
+        data = chunk_pdf_pypdf(directory, file, DEFAULT_PARAMS, 10000, 1000)
+    docs = []
+    for i in range(len(data[0])):
+        doc = Document(data[1][i])
+        doc.metadata["page"] = data[2][i]
+        doc.metadata["filename"] = data[3][i]
+        docs.append(doc)
+    return docs
+
+#coll = create_collection("semantic")
+#docs = semantic_chunks_pdf(getcwd() + "/data/US/", "usc04@118-30.pdf", COLLECTION_ENCODER[coll.name])
+#print(upload_documents(coll.name, docs))
