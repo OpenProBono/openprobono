@@ -1,8 +1,8 @@
-from pdfs import get_docs
+from pdfs import get_docs_pdf
 from encoder import OPENAI_3_SMALL
 from os import getcwd
 
-documents = get_docs(getcwd() + "/data/US/", "usc04@118-30.pdf")
+documents = get_docs_pdf(getcwd() + "/data/US/", "usc04@118-30.pdf")
 
 from ragas.testset.generator import TestsetGenerator
 from ragas.testset.evolutions import simple, reasoning, multi_context
@@ -21,7 +21,7 @@ generator = TestsetGenerator.from_langchain(
 
 # generate testset
 testset = generator.generate_with_langchain_docs(documents, test_size=10, distributions={simple: 0.5, reasoning: 0.25, multi_context: 0.25})
-testset.to_pandas().to_csv("synthetic-data.csv", sep='\t')
+testset.to_pandas().to_csv("synthetic-data.csv")
 
 # OPENAI EXAMPLE from 
 
