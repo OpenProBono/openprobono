@@ -1,3 +1,4 @@
+import os
 import re
 import requests
 from langchain.agents import Tool
@@ -5,7 +6,7 @@ from milvusdb import collection_upload_str, create_collection, query
 from unstructured.partition.auto import partition
 
 
-courtlistener_token = "fb5c522b46cece6589209b97c395a3bc75623039"
+courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
 base_url = "https://www.courtlistener.com"
 search_url = base_url + "/api/rest/v3/search/?q="
