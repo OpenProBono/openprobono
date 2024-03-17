@@ -2,7 +2,7 @@ from fastapi import UploadFile
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai.llms import OpenAI as LangChainOpenAI
-from langchain.chains import load_summarize_chain
+from langchain.chains.summarize import load_summarize_chain
 from os import listdir
 from pymilvus import Collection
 from pypdf import PdfReader

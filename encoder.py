@@ -37,7 +37,10 @@ def get_huggingface_tokenizer(model_name: str):
 
 def get_langchain_embedding_function(params: EncoderParams):
     if params.name == OPENAI_ADA_2 or params.name == OPENAI_3_SMALL:
-        return OpenAIEmbeddings(model=params.name, dimensions=params.dim)
+        args = {"model": params.name}
+        if params.dim:
+            args["dimensions"] = params.dim
+        return OpenAIEmbeddings(**args)
     if params.name == MPNET or params.name == MINILM:
         return HuggingFaceEmbeddings(model_name=params.name, model_kwargs={"device": device})
     return HuggingFaceHubEmbeddings(model=params.name)
@@ -86,10 +89,7 @@ def embed_strs_openai(text: list[str], params: EncoderParams):
     i = 0
     data = []
     client = OpenAI()
-    checkpoint = 1000
     while i < len(text):
-        if i > checkpoint:
-            checkpoint += 1000
         batch_tokens = 0
         j = i
         while j < len(text) and (batch_tokens := batch_tokens + num_tokens_from_string(text[j], "cl100k_base")) < 8191:
