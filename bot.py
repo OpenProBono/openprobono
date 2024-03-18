@@ -150,7 +150,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         trace_id=trace_id,
     )
     response_message = response.choices[0].message
-    messages.append(response_message)  # extend conversation with assistant's reply
+    #messages.append(response_message).  # extend conversation with assistant's reply
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
