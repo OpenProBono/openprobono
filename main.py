@@ -1,7 +1,6 @@
 #fastapi implementation
 import os
 import re
-import uuid
 from contextlib import asynccontextmanager
 from json import loads
 from typing import Annotated
@@ -14,7 +13,7 @@ from requests import session
 from bot import BotRequest, ChatRequest, opb_bot, openai_bot
 from milvusdb import session_source_summaries, delete_expr, crawl_and_scrape, upload_documents, session_upload_ocr, US, COLLECTIONS, SESSION_PDF
 from pdfs import summarized_chunks_pdf
-from models import ChatBySession, FetchSession, InitializeSession
+from models import ChatBySession, FetchSession, InitializeSession, get_uuid_id
 from new_bot import flow
 
 
@@ -34,9 +33,6 @@ firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
-
-def get_uuid_id():
-    return str(uuid.uuid4())
  
 #make this a real api key check
 def admin_check(api_key):

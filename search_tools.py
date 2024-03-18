@@ -1,11 +1,10 @@
 import os
-from urllib import response
 
 import requests
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 from courtlistener import courtlistener_search, courlistener_query_tool
-from milvusdb import create_collection, query, scrape
+from milvusdb import query, scrape
 
 from models import BotRequest
 

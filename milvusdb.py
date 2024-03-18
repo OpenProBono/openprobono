@@ -1,7 +1,5 @@
 import mimetypes
 import os
-from csv import reader
-from hmac import new
 from json import loads
 from signal import SIGTERM
 from typing import List
@@ -11,6 +9,7 @@ from bs4 import BeautifulSoup
 from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
+from operator import itemgetter
 from langchain.chains import load_summarize_chain
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -18,21 +17,21 @@ from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai.llms import OpenAI as LangChainOpenAI
 from langchain_openai import ChatOpenAI
-from operator import itemgetter
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
 from langchain_core.runnables import (
     RunnableLambda,
     RunnableParallel,
     RunnablePassthrough,
 )
+from langfuse.callback import CallbackHandler
 from unstructured.partition.auto import partition
 from langchain_community.vectorstores.milvus import Milvus
-from networkx import circular_layout
 from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
-from sqlalchemy import desc
 
 import prompts
 import encoder
+
+langfuse_handler = CallbackHandler()
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions

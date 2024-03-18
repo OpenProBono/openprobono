@@ -1,5 +1,8 @@
 from pydantic import BaseModel
+import uuid
 
+def get_uuid_id():
+    return str(uuid.uuid4())
 
 class ChatRequest(BaseModel):
     history: list

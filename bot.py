@@ -12,7 +12,7 @@ from langchain.memory import ConversationSummaryBufferMemory
 from langchain_openai import ChatOpenAI
 
 from milvusdb import session_source_summaries
-from models import BotRequest, ChatRequest
+from models import BotRequest, ChatRequest, get_uuid_id
 from search_tools import search_toolset_creator, search_openai_tool
 from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_tool
 
@@ -135,7 +135,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             messages.append({"role": "assistant", "content": tup[1]})
 
     messages.append({"role": "system", "content": multiple_tools_template})
-
+    trace_id = get_uuid_id()
     toolset = []
     toolset += search_toolset_creator(bot)
     toolset += vdb_toolset_creator(bot)
@@ -146,7 +146,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         messages=messages,
         tools=toolset,
         tool_choice="auto",  # auto is default, but we'll be explicit
-        temperature=0
+        temperature=0,
+        trace_id=trace_id,
     )
     response_message = response.choices[0].message
     messages.append(response_message)  # extend conversation with assistant's reply
@@ -177,15 +178,21 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                         "content": tool_response,
                     }
                 )  # extend conversation with function response
+                print(messages)
+                print("Messages")
                 tools_used += 1
             # Step 4: send the info for each function call and function response to the model
+            print("debug: sending tool responses to model")
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=toolset,
-                temperature=0
+                temperature=0,
+                trace_id=trace_id,
             )  # get a new response from the model where it can see the function response
+            print("debug: get tool responses to model")
             response_message = response.choices[0].message
+            print("debug: fea tool responses to model")
             messages.append(response_message)
             tool_calls = response_message.tool_calls
     else:
