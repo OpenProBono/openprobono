@@ -11,6 +11,7 @@ langchainhub
 langchain-openai>0.0.4
 langchain-community
 langchainhub
+langfuse
 openai<2.0.0
 pip>=23.3
 pydantic>2.0.0

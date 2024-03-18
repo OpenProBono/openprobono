@@ -16,7 +16,7 @@ from models import BotRequest, ChatRequest
 from search_tools import search_toolset_creator, search_openai_tool
 from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_tool
 
-from openai import OpenAI
+from langfuse.openai import OpenAI
 import json
 
 langchain.debug = True

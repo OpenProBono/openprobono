@@ -4,8 +4,7 @@ from transformers.modeling_outputs import BaseModelOutput
 from langchain_community.embeddings import HuggingFaceEmbeddings, HuggingFaceHubEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from unstructured.chunking.base import Element
-
-from openai import OpenAI
+from langfuse.openai import OpenAI
 import tiktoken
 import time
 
