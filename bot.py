@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain_openai import ChatOpenAI
+from langfuse.callback import CallbackHandler
 
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest, get_uuid_id
@@ -18,8 +19,11 @@ from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_tool
 
 from langfuse.openai import OpenAI
 import json
+import jsons
 
 langchain.debug = True
+
+langfuse_handler = CallbackHandler()
 
 tools_template = """GENERAL INSTRUCTIONS
     You are a legal expert. Your task is to decide which tools to use to answer a user's question. You can use up to X tools, and you can use tools multiple times with different inputs as well.
@@ -109,7 +113,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
             # Create an agent executor by passing in the agent and tools
             agent_executor = AgentExecutor(agent=agent, tools=toolset, verbose=False, return_intermediate_steps=False)
             # TODO: make sure opb bot works
-            ret = await agent_executor.ainvoke({"input" :prompt, "chat_history": chat_history})
+            ret = await agent_executor.ainvoke({"input" :prompt, "chat_history": chat_history}, config={"callbacks":[langfuse_handler]})
             q.put(job_done)
             return ret
 
@@ -150,7 +154,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         trace_id=trace_id,
     )
     response_message = response.choices[0].message
-    #messages.append(response_message).  # extend conversation with assistant's reply
+    messages.append(jsons.dump(response_message))  # extend conversation with assistant's reply
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
