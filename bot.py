@@ -16,7 +16,7 @@ from models import BotRequest, ChatRequest
 from search_tools import search_toolset_creator, search_openai_tool
 from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_tool
 
-from langfuse.openai import openai
+from langfuse.openai import OpenAI
 import json
 
 langchain.debug = True
@@ -125,7 +125,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
 def openai_bot(r: ChatRequest, bot: BotRequest):
     if(r.history[-1][0].strip() == ""):
         return "Hi, how can I assist you today?"
-    client = openai.ChatClient()
+    client = OpenAI()
     model = "gpt-3.5-turbo-0125"
     messages = []
     for tup in r.history:

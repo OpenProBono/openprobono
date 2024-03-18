@@ -2,11 +2,12 @@
 import os
 import re
 import uuid
+from contextlib import asynccontextmanager
 from json import loads
 from typing import Annotated
 
 import firebase_admin
-from fastapi import Body, FastAPI, UploadFile
+from fastapi import Body, FastAPI, UploadFile, Query, BackgroundTasks
 from firebase_admin import auth, credentials, firestore
 from requests import session
 
@@ -15,6 +16,11 @@ from milvusdb import session_source_summaries, delete_expr, crawl_and_scrape, up
 from pdfs import summarized_chunks_pdf
 from models import ChatBySession, FetchSession, InitializeSession
 from new_bot import flow
+
+
+from langfuse import Langfuse
+ 
+langfuse = Langfuse()
 
 #sdvlp session
 #1076cca8-a1fa-415a-b5f8-c11da178d224
@@ -136,7 +142,17 @@ def process_flow(r: ChatRequest):
         
 
 # FastAPI 
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Operation on startup
+ 
+    yield  # wait until shutdown
+ 
+    # Flush all events to be sent to Langfuse on shutdown and terminate all Threads gracefully. This operation is blocking.
+    langfuse.flush()
+ 
+ 
+app = FastAPI(lifespan=lifespan)
 api = FastAPI()
 
 @api.get("/", tags=["General"])
