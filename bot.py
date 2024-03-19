@@ -19,7 +19,6 @@ from vdb_tools import session_query_tool, vdb_toolset_creator, vdb_openai_tool
 
 from langfuse.openai import OpenAI
 import json
-import jsons
 
 langchain.debug = True
 
@@ -54,16 +53,6 @@ answer_template = """GENERAL INSTRUCTIONS
 
     USER QUESTION
     {input}"""
-
-# 1 subquestion
-
-# decide x tools to use and their inputs
-# out of these tools and their descriptions, choose up to x ToolS
-
-# -> run all the tools and returns ResultSet
-
-
-# -> here are the results from the tools, create your answer
 
 # OPB bot main function
 def opb_bot(r: ChatRequest, bot: BotRequest):
@@ -158,8 +147,6 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     # Step 2: check if the model wanted to call a function
     if tool_calls:
         messages.append(response_message.dict(exclude={"function_call"}))
-        print(messages)
-        print("this message asdfa")
         tools_used = 0
         while tool_calls and tools_used < max_num_tools:
             for tool_call in tool_calls:
@@ -175,7 +162,6 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                     tool_response = search_openai_tool(search_tool, function_args)
                 else:
                     tool_response = "error: unable to run tool"
-                print(tool_response)
                 messages.append(
                     {
                         "tool_call_id": tool_call.id,
@@ -184,11 +170,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                         "content": tool_response,
                     }
                 )  # extend conversation with function response
-                print(messages)
-                print("Messages")
                 tools_used += 1
             # Step 4: send the info for each function call and function response to the model
-            print("debug: sending tool responses to model")
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -196,9 +179,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                 temperature=0,
                 trace_id=trace_id,
             )  # get a new response from the model where it can see the function response
-            print("debug: get tool responses to model")
             response_message = response.choices[0].message
-            print("debug: fea tool responses to model")
             messages.append(response_message)
             tool_calls = response_message.tool_calls
     else:
