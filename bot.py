@@ -158,6 +158,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     # Step 2: check if the model wanted to call a function
     if tool_calls:
         messages.append(response_message.dict())
+        print(messages)
+        print("this message asdfa")
         tools_used = 0
         while tool_calls and tools_used < max_num_tools:
             for tool_call in tool_calls:
