@@ -157,7 +157,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
-        messages.append(response_message.dict())
+        messages.append(response_message.dict(exclude={"function_call"}))
         print(messages)
         print("this message asdfa")
         tools_used = 0
