@@ -1,7 +1,6 @@
 import mimetypes
 import os
 from json import loads
-from signal import SIGTERM
 from typing import List
 
 import requests
@@ -55,7 +54,7 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
 
     # summarize
     chain = load_summarize_chain(LangChainOpenAI(temperature=0), chain_type="map_reduce")
-    result = chain.invoke({"input_documents": documents[:200]})
+    result = chain.invoke({"input_documents": documents[:200]}, config={"callbacks": [langfuse_handler]})
     for doc in documents:
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
@@ -79,7 +78,7 @@ def collection_upload_str(reader: str, collection: str, source: str, max_chunk_s
 
     # summarize
     chain = load_summarize_chain(LangChainOpenAI(temperature=0), chain_type="map_reduce")
-    result = chain.invoke({"input_documents": documents[:200]})
+    result = chain.invoke({"input_documents": documents[:200]}, config={"callbacks": [langfuse_handler]})
     for doc in documents:
         doc.metadata["ai_summary"] = result["output_text"].strip()
 

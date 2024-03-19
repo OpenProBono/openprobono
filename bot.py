@@ -141,6 +141,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         tool_choice="auto",  # auto is default, but we'll be explicit
         temperature=0,
         trace_id=trace_id,
+        session_id=r.session_id,
     )
     response_message = response.choices[0].message
     tool_calls = response_message.tool_calls
@@ -149,6 +150,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         messages.append(response_message.dict(exclude={"function_call"}))
         tools_used = 0
         while tool_calls and tools_used < max_num_tools:
+            #TODO: run tool calls in parallel
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
@@ -178,6 +180,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                 tools=toolset,
                 temperature=0,
                 trace_id=trace_id,
+                session_id=r.session_id,
             )  # get a new response from the model where it can see the function response
             response_message = response.choices[0].message
             messages.append(response_message)
