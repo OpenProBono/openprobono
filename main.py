@@ -25,7 +25,7 @@ langfuse = Langfuse()
 #1076cca8-a1fa-415a-b5f8-c11da178d224
 
 #which version of db we are using
-version= "vf23_db"
+version= "vm12_lang"
 bot_collection = "bots"
 conversation_collection = "conversations"
 
@@ -117,27 +117,10 @@ def process_chat(r: ChatRequest):
         return {"message": "Success", "output": output, "bot_id": r.bot_id}
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
-        
-def process_flow(r: ChatRequest):
-    if(api_key_check(r.api_key) == False):
-        return {"message": "Invalid API Key"}
-    try:
-        bot = load_bot(r.bot_id)
-        if(bot is None):
-            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
-
-        output = flow(r, bot)
-
-        #store conversation (and also log the api_key)
-        store_conversation(r, output)
-
-        #return the chat and the bot_id
-        return {"message": "Success", "output": output, "bot_id": r.bot_id}
-    except Exception as error:
-        return {"message": "Failure: Internal Error: " + str(error)}
-        
 
 # FastAPI 
+
+# this is to ensure tracing with langfuse
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Operation on startup
@@ -147,17 +130,11 @@ async def lifespan(app: FastAPI):
     # Flush all events to be sent to Langfuse on shutdown and terminate all Threads gracefully. This operation is blocking.
     langfuse.flush()
  
- 
-app = FastAPI(lifespan=lifespan)
-api = FastAPI()
+api = FastAPI(lifespan=lifespan)
 
 @api.get("/", tags=["General"])
 def read_root():
     return {"message": "API is alive"}
-
-# @api.post("/flow", tags=["History Chat (new agent flow)"])
-# def new_flow(request: ChatRequest):
-#     return process_flow(request)
 
 @api.post("/invoke_bot", tags=["History Chat"])
 def chat(request: Annotated[
@@ -220,30 +197,6 @@ def init_session(request: Annotated[
         return {"message": "Success", "output": response["output"], "bot_id": request.bot_id, "session_id": session_id}
     except:
         return response
-    
-# @api.post("/initialize_session_site", tags=["Init Session"])
-# def init_session_site(request: Annotated[
-#         InitializeSessionScrapeSite,
-#         Body(
-#             openapi_examples={
-#                 "init session": {
-#                     "summary": "initialize a session",
-#                     "description": "Returns: {message: 'Success', urls: every url which was scraped, bot_id: the bot_id which was used, session_id: the session_id which was created",
-#                     "value": {
-#                         "site": "https://sdvlp.org/",
-#                         "bot_id": "83f74a4e-0f8f-4142-b4e7-92a20f688a0b",
-#                         "api_key":"xyz",
-#                     },
-#                 },
-#             },
-#         )]):
-#     session_id = get_uuid_id()
-#     set_session_to_bot(session_id, request.bot_id)
-#     response = crawl_and_scrape(request.site, session_id)
-#     try:
-#         return {"message": "Success", "urls": response, "bot_id": request.bot_id, "session_id": session_id}
-#     except:
-#         return response
 
 @api.post("/chat_session", tags=["Session Chat"])
 def chat_session(request: Annotated[
@@ -292,47 +245,29 @@ def create_bot(request: Annotated[
         BotRequest,
         Body(
             openapi_examples={
-                "create new bot": {
-                    "summary": "create new bot",
-                    "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",
-                    "value": {
-                        "search_tools": [{
-                            "name": "google_search",
-                            "txt": "",
-                            "prompt": "Tool used to search the web, useful for current events or facts"
-                        }, {
-                            "name": "wikipedia",
-                            "txt": "site:*wikipedia.com",
-                            "prompt": "Tool used to search the wikipedia, useful for facts and biographies"
-                        }],
-                        "vdb_tools": [{
-                            "name": "query",
-                            "collection_name": US,
-                            "k": 4
-                        }],
-                        "engine": "langchain",
-                        "api_key":"xyz",
-                    },
-                },
-                "create opb bot": {
+                "create bot": {
                     "summary": "create opb bot",
                     "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",
                     "value": {
                         "search_tools": [{
                             "name": "government-search",
-                            "txt": "site:*.gov | site:*.edu | site:*scholar.google.com",
-                            "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources."
+                            "method": "serpapi",
+                            "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com",
+                            "prompt": "Useful for when you need to answer questions or find resources about government and laws."
                         }, {
                             "name": "case-search",
-                            "txt": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com",
-                            "prompt": "Use for finding case law. Always cite your sources."
+                            "method": "courtlistener",
+                            "prompt": "Use for finding case law."
                         }],
                         "vdb_tools": [{
-                            "name": "query",
+                            "name": "USCode_query",
+                            "method": "query",
                             "collection_name": US,
-                            "k": 4
+                            "k": 4,
+                            "prompt": "Useful for finding information about US Code"
                         }],
-                        "api_key":"xyz"
+                        "engine": "langchain",
+                        "api_key": "xyz"
                     },
                 },
                 "full descriptions of every parameter": {
@@ -341,18 +276,21 @@ def create_bot(request: Annotated[
                     "value": {
                         "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",
                         "message_prompt": "prompt to use for the bot, this is appended each message",
+                        "model": "model to be used, curretly only openai models, default is gpt-3.5-turbo-0125",
                         "search_tools": [{
                             "name": "name for tool",
-                            "txt": "where to put google search syntax to filter or whitelist results",
+                            "method": "which search method to use, must be one of: serpapi, dynamic_serpapi, google, courtlistener",
+                            "prefix": "where to put google search syntax to filter or whitelist results, but is also just generally a prefix to add to query passed to tool by llm",
                             "prompt": "description for agent to know when to use the tool"
                         }],
                         "vdb_tools": [{
-                            "name": "name for tool, must be one of: qa, query",
+                            "name": "name for tool",
+                            "method": "which search method to use, must be one of: qa, query",
                             "collection_name": f"name of database to query, must be one of: {', '.join(list(COLLECTIONS))}",
-                            "k": "the number of text chunks to return when querying the database"
+                            "k": "the number of text chunks to return when querying the database",
+                            "prompt": "description for agent to know when to use the tool",
+                            "prefix": "a prefix to add to query passed to tool by llm"
                         }],
-                        "beta": "whether to use beta features or not, if they are available",
-                        "search_tool_method": "which search tool to use, between google_search and serpapi: default is serpapi",
                         "engine": "which library to use for model calls, must be one of: langchain, openai. Default is langchain.",
                         "api_key": "api key necessary for auth",
                     },

@@ -62,7 +62,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
             self.q.put(token)
 
-    if(r.history[-1][0].strip() == ""):
+    if(r.history[-1][0].strip() == ""): #TODO: make this a more full check to ensure that the query is relevant
         return "Hi, how can I assist you today?"
     else:
         q = Queue()
@@ -76,7 +76,8 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
                 chat_history.append(HumanMessage(content=tup[0]))
             if tup[1]:
                 chat_history.append(AIMessage(content=tup[1]))
-        #memory_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview')
+
+        # memory_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview')
         # memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="chat_history", return_messages=True)
         # for i in range(1, len(r.history)-1):
         #     memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
@@ -154,7 +155,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
-                vdb_tool = next((t for t in bot.vdb_tools if function_name == f"{t['name']}_{t['collection_name']}"), None)
+                vdb_tool = next((t for t in bot.vdb_tools if function_name == t['name']), None)
                 search_tool = next((t for t in bot.search_tools if function_name == t['name']), None)
                 # Step 3: call the function
                 # Note: the JSON response may not always be valid; be sure to handle errors

@@ -6,7 +6,7 @@ from serpapi.google_search import GoogleSearch
 from courtlistener import courtlistener_search, courlistener_query_tool
 from milvusdb import query, scrape
 
-from models import BotRequest
+from models import BotRequest, EngineEnum, SearchTool, SearchMethodEnum
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
@@ -48,7 +48,10 @@ def serpapi_tool(qr, txt, prompt):
         'num': 5
         }).get_dict())
 
-def dynamic_serpapi_tool_creator(name, txt, prompt):
+def dynamic_serpapi_tool_creator(t: SearchTool):
+    name = t.name
+    prompt = t.prompt
+    txt = t.prefix
     async def async_search_tool(qr, txt, prompt):
         return dynamic_serpapi_tool(qr, txt, prompt)
 
@@ -61,7 +64,10 @@ def dynamic_serpapi_tool_creator(name, txt, prompt):
                 description = prompt
             )
 
-def search_tool_creator(name, txt, prompt):
+def search_tool_creator(t: SearchTool):
+    name = t.name
+    prompt = t.prompt
+    txt = t.prefix
     async def async_search_tool(qr, txt, prompt):
         return google_search_tool(qr, txt, prompt)
 
@@ -75,7 +81,10 @@ def search_tool_creator(name, txt, prompt):
                 description = prompt
             )
 
-def serpapi_tool_creator(name, txt, prompt):
+def serpapi_tool_creator(t: SearchTool):
+    name = t.name
+    prompt = t.prompt
+    txt = t.prefix
     async def async_search_tool(qr, txt, prompt):
         return serpapi_tool(qr, txt, prompt)
 
@@ -88,7 +97,9 @@ def serpapi_tool_creator(name, txt, prompt):
                 description = prompt
             )
 
-def openai_tool(name: str, prompt: str):
+def openai_tool(t: SearchTool):
+    name = t.name
+    prompt = t.prompt
     return {
         "type": "function",
         "function": {
@@ -104,29 +115,33 @@ def openai_tool(name: str, prompt: str):
         },
     }
 
-def search_openai_tool(tool: dict, function_args):
+def search_openai_tool(tool: SearchTool, function_args):
     function_response = None
-    prompt = tool["prompt"]
-    txt = tool["txt"]
+    prompt = tool.prompt
+    prf = tool.prefix
     qr = function_args.get("qr")
-    if "serpapi" in tool["name"]:
-        function_response = dynamic_serpapi_tool(qr, txt, prompt)
-    elif("court" in tool["name"]):
+    if(tool.method == SearchMethodEnum.serpapi):
+        function_response = serpapi_tool(qr, prf, prompt)
+    elif(tool.method == SearchMethodEnum.dynamic_serpapi):
+        function_response = dynamic_serpapi_tool(qr, prf, prompt)
+    elif(tool.method == SearchMethodEnum.google):
+        function_response = google_search_tool(qr, prf, prompt)
+    elif(tool.method == SearchMethodEnum.courtlistener):
         function_response = courtlistener_search(qr)
-    else:
-        function_response = google_search_tool(qr, txt, prompt)
     return str(function_response)
 
 def search_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.search_tools:
-        if bot.engine == 'langchain':
-            if "serpapi" in t["name"]:
-                toolset.append(dynamic_serpapi_tool_creator(t['name'], t['txt'], t['prompt']))
-            elif("court" in t["name"]):
-                toolset.append(courlistener_query_tool(t['name'], t['txt'], t['prompt']))
-            else:
-                toolset.append(search_tool_creator(t['name'], t['txt'], t['prompt']))
-        elif bot.engine == 'openai':
-            toolset.append(openai_tool(t['name'], t['prompt']))
+        if(bot.engine == EngineEnum.langchain):
+            if t.method == SearchMethodEnum.serpapi:
+                toolset.append(serpapi_tool_creator(t))
+            elif t.method == SearchMethodEnum.dynamic_serpapi:
+                toolset.append(dynamic_serpapi_tool_creator(t))
+            elif t.method == SearchMethodEnum.google:
+                toolset.append(search_tool_creator(t))
+            elif t.method == SearchMethodEnum.courtlistener:
+                toolset.append(courlistener_query_tool(t))
+        elif bot.engine == EngineEnum.openai:
+            toolset.append(openai_tool(t))
     return toolset

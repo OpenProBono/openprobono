@@ -4,6 +4,7 @@ import requests
 from langchain.agents import Tool
 from milvusdb import collection_upload_str, create_collection, query
 from unstructured.partition.auto import partition
+from models import SearchTool
 
 
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
@@ -60,31 +61,21 @@ def get_docket(result):
 def courtlistener_search(q):
     for result in search(q)["results"][:3]:
 
-        # print(result)
-        # print("-")
         oo = get_opinion(result)
-        # cc = get_cluster(result)
-        # dd = get_docket(result)
-        
-        # print(oo["text"])
-        # print("^^ opinion")
-        # print(cc)
-        # print("^^ cluster")
-        # print(dd)
-        # print("^^ docket")
         
         collection_upload_str(oo["text"], courlistener_collection, oo["absolute_url"])
-        # print("----")
 
     return query(courlistener_collection, q)
 
-def courlistener_query_tool(name, txt, prompt):
+def courlistener_query_tool(t: SearchTool):
     def query_tool(q: str):
         return courtlistener_search(q)
     
     async def async_query_tool(q: str):
         return courtlistener_search(q)
-    
+    name = t.name
+    prompt = t.prompt
+
     tool_func = lambda q: query_tool(q)
     co_func = lambda q: async_query_tool(q)
     return Tool(
