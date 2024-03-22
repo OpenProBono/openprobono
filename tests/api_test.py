@@ -1,9 +1,10 @@
 import unittest
+from fastapi.testclient import TestClient
+import api
 
-import main
 
 class UUIDTests(unittest.TestCase):
-    uuid = main.get_uuid_id()
+    uuid = api.get_uuid_id()
 
     def test_uuid_type(self):
         self.assertTrue(isinstance(self.uuid, str))
@@ -11,20 +12,29 @@ class UUIDTests(unittest.TestCase):
     def test_uuid_length(self):
         self.assertEqual(len(self.uuid), 36)
 
-class ApiKeyTests(unittest.TestCase):
-    def test_validkey(self):
-        key = 'xyz'
-        self.assertTrue(main.admin_check(key))
-        self.assertTrue(main.api_key_check(key))
 
-    def test_invalidkey(self):
+class ApiKeyTests(unittest.TestCase):
+    def test_validAdminKey(self):
+        key = 'xyz'
+        self.assertTrue(api.admin_check(key))
+        self.assertTrue(api.api_key_check(key))
+
+    def test_validKey(self):
+        key = 'gradio'
+        self.assertFalse(api.admin_check(key))
+        self.assertTrue(api.api_key_check(key))
+
+    def test_invalidKey(self):
         key = 'abc'
-        self.assertFalse(main.admin_check(key))
-        self.assertFalse(main.api_key_check(key))
+        self.assertFalse(api.admin_check(key))
+        self.assertFalse(api.api_key_check(key))
+
 
 # api methods
-from fastapi.testclient import TestClient
-client = TestClient(main.api)
+
+
+client = TestClient(api.api)
+
 
 class ApiTests(unittest.TestCase):
     # in botsvf23_db
@@ -40,7 +50,7 @@ class ApiTests(unittest.TestCase):
 
     def test_create_bot_vdb(self):
         from models import BotRequest
-        from milvusdb import US
+        from tools.milvusdb import US
         vdb_tool = {
             "name": "query",
             "collection_name": US,
@@ -87,7 +97,7 @@ class ApiTests(unittest.TestCase):
         self.assertTrue("session_id" in response_json)
         self.assertTrue(isinstance(response_json["session_id"], str))
         self.assertEqual(len(response_json["session_id"]), 36)
-    
+
     def test_chat_session(self):
         from models import ChatBySession
         test_chat_session = ChatBySession(api_key='xyz', session_id=self.test_session_vdb_id, message='test')

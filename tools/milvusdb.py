@@ -2,7 +2,6 @@ import mimetypes
 import os
 from json import loads
 from typing import List
-
 import requests
 from bs4 import BeautifulSoup
 from fastapi import UploadFile
@@ -39,9 +38,12 @@ connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 project_id = "h2o-gpt"
 location = "us"  # Format is "us" or "eu"
 processor_id = "c99e554bb49cf45d"
-#processor_display_name = "my" # Must be unique per project, e.g.: "My Processor"
 
-def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+
+# processor_display_name = "my" # Must be unique per project, e.g.: "My Processor"
+
+def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_size: int = 1000,
+                       chunk_overlap: int = 150):
     documents = [
         Document(
             page_content=page,
@@ -59,13 +61,18 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
-    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
+                                             connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but got {len(ids)}"}
+        return {
+            "message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but "
+                       f"got {len(ids)}"}
     return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 10000, chunk_overlap: int = 1500):
+
+def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 10000,
+                          chunk_overlap: int = 1500):
     documents = [
         Document(
             page_content=page,
@@ -83,34 +90,37 @@ def collection_upload_str(reader: str, collection: str, source: str, max_chunk_s
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
-    ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(), connection_args=connection_args)
+    ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
+                                            connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {source} but got {len(ids)}"}
+        return {
+            "message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {source} but got {len(ids)}"}
     return {"message": f"Success: uploaded {source} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
 
-def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False): 
+
+def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False):
     print("site: ", site)
     r = requests.get(site)
     site_base = "//".join(site.split("//")[:-1])
     # converting the text 
-    s = BeautifulSoup(r.content,"html.parser") 
+    s = BeautifulSoup(r.content, "html.parser")
     urls = []
 
-    if(get_links):
-        for i in s.find_all("a"): 
-            if("href" in i.attrs):
-                href = i.attrs['href'] 
-                
-                if href.startswith("/"): 
-                    link = site_base+href 
+    if get_links:
+        for i in s.find_all("a"):
+            if "href" in i.attrs:
+                href = i.attrs['href']
+
+                if href.startswith("/"):
+                    link = site_base + href
                 elif href.startswith("http"):
                     link = href
                 else:
                     link = old_urls[0]
-                    #skip this link
+                    # skip this link
 
-                if link not in old_urls: 
+                if link not in old_urls:
                     old_urls.append(link)
                     urls.append(link)
 
@@ -121,12 +131,13 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], collectio
     e_text = ""
     for el in elements:
         el = str(el)
-        if(el not in common_elements):
+        if el not in common_elements:
             e_text += el + "\n\n"
     print("elements: ", e_text)
     print("site: ", site)
     collection_upload_str(e_text, collection, site)
     return [urls, elements]
+
 
 def crawl_and_scrape(site: str, collection: str, description: str):
     create_collection(collection, description)
@@ -141,9 +152,10 @@ def crawl_and_scrape(site: str, collection: str, description: str):
             new_urls += add_urls
     print(urls)
     return urls
-                
+
+
 def quickstart_ocr(
-    file: UploadFile,
+        file: UploadFile,
 ):
     if not file.filename.endswith(".pdf"):
         process_options = documentai.ProcessOptions(
@@ -160,8 +172,8 @@ def quickstart_ocr(
         )
 
     # You must set the `api_endpoint`if you use a location other than "us".
-    opts = ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com" )
-    
+    opts = ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com")
+
     client = documentai.DocumentProcessorServiceClient(client_options=opts)
 
     processor_name = client.processor_path(project_id, location, processor_id)
@@ -172,7 +184,8 @@ def quickstart_ocr(
     # Load binary data
     raw_document = documentai.RawDocument(
         content=file.file.read(),
-        mime_type=mimetypes.guess_type(file.filename)[0], # Refer to https://cloud.google.com/document-ai/docs/file-types for supported file types
+        mime_type=mimetypes.guess_type(file.filename)[0],
+        # Refer to https://cloud.google.com/document-ai/docs/file-types for supported file types
     )
 
     # Configure the process request
@@ -190,6 +203,7 @@ def quickstart_ocr(
     print("The document contains the following text:")
     print(document.text)
     return document.text
+
 
 # collections by jurisdiction?
 US = "USCode"
@@ -221,7 +235,8 @@ COLLECTION_TYPES = {
 OUTPUT_FIELDS = {
     PDF: ["source", "page"],
     HTML: [],
-    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"],
+    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name",
+          "jurisdiction_name"],
     COURTLISTENER: ["source"]
 }
 # can customize index params with param field assuming you know index type
@@ -232,22 +247,26 @@ SEARCH_PARAMS = {
 }
 # AUTOINDEX is only supported through Zilliz, not standalone Milvus
 AUTO_INDEX = {
-    "index_type": "AUTOINDEX", 
+    "index_type": "AUTOINDEX",
     "metric_type": "IP"
 }
 
-def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [], params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
+
+def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [],
+                      params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
     if utility.has_collection(name):
         print(f"error: collection {name} already exists")
         return
-    
+
     # TODO: if possible, support custom embedding size for huggingface models
     # TODO: support other OpenAI models
     # define schema, create collection, create index on vectors
-    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key", auto_id=True)
+    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key",
+                           auto_id=True)
     # unstructured chunk lengths are sketchy
     text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=65535)
-    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=params.dim, description="The embedded text")
+    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=params.dim,
+                                  description="The embedded text")
     schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=name, schema=schema)
@@ -255,6 +274,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
 
     # must call coll.load() before query/search
     return coll
+
 
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
@@ -264,6 +284,7 @@ def load_db(collection_name: str):
         connection_args=connection_args,
         auto_id=True
     )
+
 
 def check_params(collection_name: str, query: str, k: int, session_id: str = None):
     if not utility.has_collection(collection_name):
@@ -277,14 +298,27 @@ def check_params(collection_name: str, query: str, k: int, session_id: str = Non
     if collection_name not in COLLECTION_ENCODER:
         return {"message": f"Failure: encoder for collection {collection_name} not found"}
 
-def query(collection_name: str, query: str, k: int = 4, expr: str = None, session_id: str = None):
-    if check_params(collection_name, query, k, session_id):
-        return check_params(collection_name, query, k, session_id)
-    
+
+def query(collection_name: str, q: str, k: int = 4, expr: str = None, session_id: str = None) -> dict:
+    """
+    This queries the given collection
+    Args:
+        collection_name: the collection to query
+        q: the query itself
+        k: how many chunks to return
+        expr: a boolean expression to specify conditions for ANN search
+        session_id:
+
+    Returns:
+
+    """
+    if check_params(collection_name, q, k, session_id):
+        return check_params(collection_name, q, k, session_id)
+
     coll = Collection(collection_name)
     coll.load()
     search_params = SEARCH_PARAMS
-    search_params["data"] = encoder.embed_strs([query], COLLECTION_ENCODER[collection_name])
+    search_params["data"] = encoder.embed_strs([q], COLLECTION_ENCODER[collection_name])
     search_params["limit"] = k
     search_params["output_fields"] += OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
 
@@ -306,6 +340,7 @@ def query(collection_name: str, query: str, k: int = 4, expr: str = None, sessio
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
+
 def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
     """
     Runs query on collection_name and returns an answer along with the top k source chunks
@@ -320,7 +355,7 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
     """
     if check_params(collection_name, query, k, session_id):
         return check_params(collection_name, query, k, session_id)
-    
+
     db = load_db(collection_name)
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
     llm_with_tool = llm.bind_tools(
@@ -332,7 +367,8 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
 
     def format_docs_with_id(docs: List[Document]) -> str:
         formatted = [
-            f"Source ID: {i}\n" + "\n".join([f"Source {field.capitalize()}: {doc.metadata[field]}" for field in output_fields]) + "\nSource Text: " + doc.page_content
+            f"Source ID: {i}\n" + "\n".join([f"Source {field.capitalize()}: {doc.metadata[field]}" for field in
+                                             output_fields]) + "\nSource Text: " + doc.page_content
             for i, doc in enumerate(docs)
         ]
         return "\n\n" + "\n\n".join(formatted)
@@ -359,14 +395,17 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
     ]
     return {"message": "Success", "result": {"answer": result["cited_answer"]["answer"], "sources": cited_sources}}
 
+
 def upload_documents(collection_name: str, documents: list[Document]):
     ids = load_db(collection_name).add_documents(documents=documents,
-                                                 embedding=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
+                                                 embedding=encoder.get_langchain_embedding_function(
+                                                     COLLECTION_ENCODER[collection_name]),
                                                  connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
         return {"message": f"Failure: expected to upload {num_docs} chunks but got {len(ids)}"}
     return {"message": f"Success: uploaded {num_docs} chunks"}
+
 
 def delete_expr(collection_name: str, expr: str):
     """
@@ -383,7 +422,9 @@ def delete_expr(collection_name: str, expr: str):
         ids = coll.delete(expr=expr)
         return {"message": f"Success: deleted {ids.delete_count} chunks"}
 
-def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
+
+def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000,
+                       chunk_overlap: int = 150):
     reader = quickstart_ocr(file)
     documents = [
         Document(
@@ -404,10 +445,12 @@ def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chun
     # upload
     return upload_documents(SESSION_PDF, documents)
 
+
 def session_source_summaries(session_id: str, batch_size: int = 1000):
     coll = Collection(SESSION_PDF)
     coll.load()
-    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'", output_fields= ["source", "ai_summary", "user_summary"], batch_size=batch_size)
+    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'",
+                                 output_fields=["source", "ai_summary", "user_summary"], batch_size=batch_size)
     source_summaries = {}
     res = q_iter.next()
     while len(res) > 0:
@@ -420,12 +463,13 @@ def session_source_summaries(session_id: str, batch_size: int = 1000):
     q_iter.close()
     return source_summaries
 
+
 class FilteredRetriever(VectorStoreRetriever):
     vectorstore: VectorStore
     search_type: str = "similarity"
     search_kwargs: dict = Field(default_factory=dict)
     session_filter: str
-    
+
     def get_relevant_documents(self, query: str) -> List[Document]:
         docs = []
         k = self.search_kwargs["k"]
