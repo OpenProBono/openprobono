@@ -1,33 +1,40 @@
 import mimetypes
 import os
 from json import loads
+from operator import itemgetter
 from typing import List
+
+import encoder
 import requests
 from bs4 import BeautifulSoup
 from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
-from operator import itemgetter
 from langchain.chains import load_summarize_chain
-from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
-from langchain_openai import OpenAIEmbeddings
-from langchain_openai.llms import OpenAI as LangChainOpenAI
-from langchain_openai import ChatOpenAI
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores.milvus import Milvus
+from langchain_core.documents import Document
 from langchain_core.runnables import (
     RunnableLambda,
     RunnableParallel,
     RunnablePassthrough,
 )
+from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai.llms import OpenAI as LangChainOpenAI
 from langfuse.callback import CallbackHandler
+from pymilvus import (
+    Collection,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+    connections,
+    utility,
+)
 from unstructured.partition.auto import partition
-from langchain_community.vectorstores.milvus import Milvus
-from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
 
 import prompts
-import encoder
 
 langfuse_handler = CallbackHandler()
 
