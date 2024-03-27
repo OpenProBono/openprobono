@@ -1,10 +1,10 @@
 import unittest
 from fastapi.testclient import TestClient
-import api
+import main
 
 
 class UUIDTests(unittest.TestCase):
-    uuid = api.get_uuid_id()
+    uuid = main.get_uuid_id()
 
     def test_uuid_type(self):
         self.assertTrue(isinstance(self.uuid, str))
@@ -16,24 +16,24 @@ class UUIDTests(unittest.TestCase):
 class ApiKeyTests(unittest.TestCase):
     def test_validAdminKey(self):
         key = 'xyz'
-        self.assertTrue(api.admin_check(key))
-        self.assertTrue(api.api_key_check(key))
+        self.assertTrue(main.admin_check(key))
+        self.assertTrue(main.api_key_check(key))
 
     def test_validKey(self):
         key = 'gradio'
-        self.assertFalse(api.admin_check(key))
-        self.assertTrue(api.api_key_check(key))
+        self.assertFalse(main.admin_check(key))
+        self.assertTrue(main.api_key_check(key))
 
     def test_invalidKey(self):
         key = 'abc'
-        self.assertFalse(api.admin_check(key))
-        self.assertFalse(api.api_key_check(key))
+        self.assertFalse(main.admin_check(key))
+        self.assertFalse(main.api_key_check(key))
 
 
 # api methods
 
 
-client = TestClient(api.api)
+client = TestClient(main.api)
 
 
 class ApiTests(unittest.TestCase):

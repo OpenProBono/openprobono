@@ -4,7 +4,7 @@ from json import loads
 from operator import itemgetter
 from typing import List
 
-import tools.encoder
+import encoder
 import requests
 from bs4 import BeautifulSoup
 from fastapi import UploadFile
