@@ -6,6 +6,8 @@ import langfuse
 from fastapi import Body, FastAPI, UploadFile
 
 from db import (
+    admin_check,
+    api_key_check,
     fetch_session,
     load_session,
     process_chat,
@@ -31,41 +33,6 @@ from models import (
     get_uuid_id,
 )
 from pdfs import summarized_chunks_pdf
-
-
-# Checks if api key is valid (TODO: change this to a real api key check)
-def api_key_check(api_key: str) -> bool:
-    """Check if api key is valid.
-
-    Parameters
-    ----------
-    api_key : str
-        the api key
-
-    Returns
-    -------
-    bool
-        true if valid
-
-    """
-    return api_key in ["xyz", "gradio", "deniz_key"]
-
-
-def admin_check(api_key: str) -> bool:
-    """Check if api key is valid admin key.
-
-    Parameters
-    ----------
-    api_key : str
-        the api key
-
-    Returns
-    -------
-    bool
-        true if valid admin key
-
-    """
-    return api_key in ["xyz"]
 
 
 # this is to ensure tracing with langfuse

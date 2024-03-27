@@ -13,8 +13,8 @@ from langchain_openai import ChatOpenAI
 from langfuse.callback import CallbackHandler
 from langfuse.openai import OpenAI
 
-from models import BotRequest, ChatRequest, get_uuid_id
 from milvusdb import session_source_summaries
+from models import BotRequest, ChatRequest, get_uuid_id
 from search_tools import search_openai_tool, search_toolset_creator
 from vdb_tools import session_query_tool, vdb_openai_tool, vdb_toolset_creator
 
@@ -44,7 +44,7 @@ Combine tool results into a coherent answer. If you used a tool, ALWAYS return a
 """
 
 answer_template = """GENERAL INSTRUCTIONS
-    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context. 
+    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context.
 
     CONTEXT:
     {context}
@@ -68,7 +68,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     q = Queue()
     job_done = object()
 
-    bot_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview', request_timeout=60 * 5, streaming=True,
+    bot_llm = ChatOpenAI(temperature=0.0, model="gpt-4-turbo-preview", request_timeout=60 * 5, streaming=True,
                             callbacks=[MyCallbackHandler(q)])
     # TODO: fix opb bot memory index
     chat_history = []
@@ -158,8 +158,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
-                vdb_tool = next((t for t in bot.vdb_tools if function_name == t['name']), None)
-                search_tool = next((t for t in bot.search_tools if function_name == t['name']), None)
+                vdb_tool = next((t for t in bot.vdb_tools if function_name == t["name"]), None)
+                search_tool = next((t for t in bot.search_tools if function_name == t["name"]), None)
                 # Step 3: call the function
                 # Note: the JSON response may not always be valid; be sure to handle errors
                 if vdb_tool:
@@ -174,7 +174,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                         "role": "tool",
                         "name": function_name,
                         "content": tool_response,
-                    }
+                    },
                 )  # extend conversation with function response
                 tools_used += 1
             # Step 4: send the info for each function call and function response to the model
@@ -190,5 +190,5 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             messages.append(response_message)
             tool_calls = response_message.tool_calls
     else:
-        print('no tool used')
+        print("no tool used")
     return response_message.content

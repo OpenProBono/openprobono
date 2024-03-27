@@ -24,6 +24,39 @@ cred = credentials.Certificate(firebase_config)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+def api_key_check(api_key: str) -> bool:
+    """Check if api key is valid.
+
+    Parameters
+    ----------
+    api_key : str
+        the api key
+
+    Returns
+    -------
+    bool
+        true if valid
+
+    """
+    return db.collection("api_keys").document(api_key).get().exists
+
+
+def admin_check(api_key: str) -> bool:
+    """Check if api key is valid admin key.
+
+    Parameters
+    ----------
+    api_key : str
+        the api key
+
+    Returns
+    -------
+    bool
+        true if valid admin key
+
+    """
+    return db.collection("api_keys").document(api_key).get()["admin"]
+
 def store_conversation(r: ChatRequest, output: str) -> bool:
     """Store the conversation in the database.
 

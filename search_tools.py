@@ -57,17 +57,17 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
         prf: the prefix given by the tool (used for whitelists)
         max_len: maximum length of response text
 
-    Returns:
+    Returns
         the search results
     """
     headers = {
-        'accept': 'application/json',
-        'Content-Type': 'application/json',
+        "accept": "application/json",
+        "Content-Type": "application/json",
     }
     params = {
-        'key': os.environ["GOOGLE_SEARCH_API_KEY"],
-        'cx': os.environ["GOOGLE_SEARCH_API_CX"],
-        'q': prf + " " + qr,
+        "key": os.environ["GOOGLE_SEARCH_API_KEY"],
+        "cx": os.environ["GOOGLE_SEARCH_API_CX"],
+        "q": prf + " " + qr,
     }
     return str(
         requests.get('https://www.googleapis.com/customsearch/v1',
@@ -88,8 +88,8 @@ def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """
     return filtered_search(
         GoogleSearch({
-            'q': prf + " " + qr,
-            'num': num_results
+            "q": prf + " " + qr,
+            "num": num_results,
         }).get_dict())
 
 
