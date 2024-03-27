@@ -1,9 +1,8 @@
+"""Functions for managing and searching vectors and collections in Milvus."""
 import mimetypes
 import os
-from csv import reader
-from hmac import new
 from json import loads
-from signal import SIGTERM
+from operator import itemgetter
 from typing import List
 
 import requests
@@ -12,27 +11,31 @@ from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from langchain.chains.summarize import load_summarize_chain
-from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.vectorstores import VectorStoreRetriever, VectorStore, Field
-from langchain_openai import OpenAIEmbeddings
-from langchain_openai.llms import OpenAI as LangChainOpenAI
-from langchain_openai import ChatOpenAI
-from operator import itemgetter
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores.milvus import Milvus
+from langchain_core.documents import Document
 from langchain_core.runnables import (
     RunnableLambda,
     RunnableParallel,
     RunnablePassthrough,
+    RunnableSerializable,
+)
+from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai.llms import OpenAI as LangChainOpenAI
+from pymilvus import (
+    Collection,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+    connections,
+    utility,
 )
 from unstructured.partition.auto import partition
-from langchain_community.vectorstores.milvus import Milvus
-from networkx import circular_layout
-from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType
-from sqlalchemy import desc
 
-import prompts
 import encoder
+import prompts
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
@@ -194,7 +197,7 @@ def quickstart_ocr(
     return document.text
 
 # collections by jurisdiction?
-# TODO: get collection names from Milvus
+# TODO(Nick): get collection names from Milvus
 US = "USCode"
 NC = "NCGeneralStatutes"
 CAP = "CAP"
@@ -202,13 +205,13 @@ SESSION_PDF = "SessionPDF"
 COURTLISTENER = "courtlistener"
 COLLECTIONS = {US, NC, CAP, COURTLISTENER}
 # collection -> encoder mapping
-# TODO: make this a file or use firebase?
+# TODO(Nick): make this a file or use firebase?
 COLLECTION_ENCODER = {
     US: encoder.DEFAULT_PARAMS,
     NC: encoder.DEFAULT_PARAMS,
     CAP: encoder.DEFAULT_PARAMS,
     COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
-    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None)
+    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
 }
 
 PDF = "PDF"
@@ -218,32 +221,34 @@ COLLECTION_FORMAT = {
     NC: PDF,
     SESSION_PDF: PDF,
     CAP: CAP,
-    COURTLISTENER: COURTLISTENER
+    COURTLISTENER: COURTLISTENER,
 }
 
 FORMAT_OUTPUTFIELDS = {
     PDF: ["source", "page"],
     HTML: [],
     CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name", "jurisdiction_name"],
-    COURTLISTENER: ["source"]
+    COURTLISTENER: ["source"],
 }
 # can customize index params with param field assuming you know index type
 SEARCH_PARAMS = {
     "anns_field": "vector",
     "param": {},
-    "output_fields": ["text"]
+    "output_fields": ["text"],
 }
 # AUTOINDEX is only supported through Zilliz, not standalone Milvus
 AUTO_INDEX = {
-    "index_type": "AUTOINDEX", 
-    "metric_type": "IP"
+    "index_type": "AUTOINDEX",
+    "metric_type": "IP",
 }
+
+MAX_K = 16384
 
 def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [], params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
     if utility.has_collection(name):
         print(f"error: collection {name} already exists")
-        return
-    
+        return None
+
     # TODO: if possible, support custom embedding size for huggingface models
     # TODO: support other OpenAI models
     # define schema, create collection, create index on vectors
@@ -251,7 +256,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
     # unstructured chunk lengths are sketchy
     text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=65535)
     embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=params.dim, description="The embedded text")
-    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field] + extra_fields,
+    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, *extra_fields],
                               auto_id=True, enable_dynamic_field=True, description=description)
     coll = Collection(name=name, schema=schema)
     coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
@@ -263,30 +268,33 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
     return coll
 
 # TODO: custom OpenAIEmbeddings embedding dimensions
-def load_db(collection_name: str):
+def load_db(collection_name: str) -> Milvus:
     return Milvus(
         embedding_function=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
         collection_name=collection_name,
         connection_args=connection_args,
-        auto_id=True
+        auto_id=True,
     )
 
-def check_params(collection_name: str, query: str, k: int, session_id: str = None):
+def check_params(collection_name: str, query: str, k: int, session_id: str = ""):
     if not utility.has_collection(collection_name):
         return {"message": f"Failure: collection {collection_name} not found"}
     if not query or query == "":
         return {"message": "Failure: query not found"}
-    if k < 1 or k > 16384:
-        return {"message": f"Failure: k = {k} out of range [1, 16384]"}
-    if session_id is None and collection_name == SESSION_PDF:
+    if k < 1 or k > MAX_K:
+        return {"message": f"Failure: k = {k} out of range [1, {MAX_K}]"}
+    if not session_id and collection_name == SESSION_PDF:
         return {"message": "Failure: session_id not found"}
     if collection_name not in COLLECTION_ENCODER:
         return {"message": f"Failure: encoder for collection {collection_name} not found"}
+    if collection_name not in COLLECTION_FORMAT:
+        return {"message": f"Failure: format for collection {collection_name} not found"}
+    return None
 
-def query(collection_name: str, query: str, k: int = 4, expr: str = None, session_id: str = None):
+def query(collection_name: str, query: str, k: int = 4, expr: str = "", session_id: str = ""):
     if check_params(collection_name, query, k, session_id):
         return check_params(collection_name, query, k, session_id)
-    
+
     coll = Collection(collection_name)
     coll.load()
     search_params = SEARCH_PARAMS
@@ -312,21 +320,25 @@ def query(collection_name: str, query: str, k: int = 4, expr: str = None, sessio
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
-def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
-    """
-    Runs query on collection_name and returns an answer along with the top k source chunks
+def qa_chain(collection_name: str, k: int = 4,
+             session_id: str = "") -> RunnableSerializable:
+    """Create a QA chain.
 
-    Args
-        collection_name: the name of a pymilvus.Collection
-        query: the user query
-        k: return the top k chunks
-        session_id: the session id for filtering session data
+    Parameters
+    ----------
+    collection_name : str
+        The name of a Milvus Collection
+    k : int, optional
+        Return the top k chunks, by default 4
+    session_id : str, optional
+        The session id for filtering session data, by default ""
 
-    Returns dict with success message, result, and sources or else failure message
+    Returns
+    -------
+    RunnableSerializable
+        A LangChain Runnable QA chain
+
     """
-    if check_params(collection_name, query, k, session_id):
-        return check_params(collection_name, query, k, session_id)
-    
     db = load_db(collection_name)
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
     llm_with_tool = llm.bind_tools(
@@ -338,56 +350,136 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
 
     def format_docs_with_id(docs: List[Document]) -> str:
         formatted = [
-            f"Source ID: {i}\n" + "\n".join([f"Source {field.capitalize()}: {doc.metadata[field]}" for field in output_fields]) + "\nSource Text: " + doc.page_content
-            for i, doc in enumerate(docs)
+            f"Chunk ID: {i}\n" + "\n".join(
+            [f"Chunk {f.capitalize()}: {doc.metadata[f]}" for f in output_fields]) +
+            "\nChunk Text: " + doc.page_content
+            # start=1 because the LLM will switch to 1-indexed IDs if chunks are large
+            # TODO(Nick): format QA chain docs differently based on chunk size
+            for i, doc in enumerate(docs, start=1)
         ]
         return "\n\n" + "\n\n".join(formatted)
 
-    format_1 = itemgetter("docs") | RunnableLambda(format_docs_with_id)
-    answer_1 = prompts.QA_PROMPT | llm_with_tool | output_parser
+    doc_format_chain = itemgetter("docs") | RunnableLambda(format_docs_with_id)
+    output_chain = prompts.QA_PROMPT | llm_with_tool | output_parser
     if session_id:
-        docs = FilteredRetriever(vectorstore=db, session_filter=session_id, search_kwargs={"k": k})
+        docs = FilteredRetriever(vectorstore=db,
+                                 session_filter=session_id,
+                                 search_kwargs={"k": k})
     else:
         docs = db.as_retriever(search_kwargs={"k": k})
-    chain = (
+    return (
         RunnableParallel(question=RunnablePassthrough(), docs=docs)
-        .assign(context=format_1)
-        .assign(cited_answer=answer_1)
+        .assign(context=doc_format_chain)
+        .assign(cited_answer=output_chain)
         .pick(["cited_answer", "docs"])
     )
+
+def qa(collection_name: str, query: str,
+       k: int = 4, session_id: str = "") -> dict:
+    """Run a QA chain to answer the query and return the top k source chunks.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of a Milvus Collection
+    query : str
+        The users query
+    k : int, optional
+        Return the top k chunks, by default 4
+    session_id : str, optional
+        The session id for filtering session data, by default ""
+
+    Returns
+    -------
+    dict
+        With success message, result, and sources or else failure message
+
+    """
+    if check_params(collection_name, query, k, session_id):
+        return check_params(collection_name, query, k, session_id)
+
+    chain = qa_chain(collection_name, k, session_id)
     result = chain.invoke(query)
     cited_sources = [
         {
-            field: result["docs"][i].metadata[field]
-            for field in output_fields
+            # i - 1 because start=1 in format_docs_with_id (see above)
+            field: result["docs"][i - 1].metadata[field]
+            for field in FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
         }
-        for i in result["cited_answer"]["citations"]
+        for i in set(result["cited_answer"][0]["citations"])
     ]
-    return {"message": "Success", "result": {"answer": result["cited_answer"]["answer"], "sources": cited_sources}}
+    return {
+        "message": "Success",
+        "result": {
+            "answer": result["cited_answer"][0]["answer"],
+            "sources": cited_sources,
+        },
+    }
 
 def upload_documents(collection_name: str, documents: list[Document]):
-    ids = load_db(collection_name).add_documents(documents=documents,
-                                                 embedding=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
-                                                 connection_args=connection_args)
+    ids = load_db(collection_name).add_documents(
+        documents=documents,
+        embedding=encoder.get_langchain_embedding_model(COLLECTION_ENCODER[collection_name]),
+        connection_args=connection_args,
+    )
     num_docs = len(documents)
     if num_docs != len(ids):
         return {"message": f"Failure: expected to upload {num_docs} chunks but got {len(ids)}"}
     return {"message": f"Success: uploaded {num_docs} chunks"}
 
-def delete_expr(collection_name: str, expr: str):
+def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
+    """Get database entries according to expr.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of a pymilvus.Collection
+    expr : str
+        A boolean expression to filter database entries
+    batch_size: int, optional
+        The batch size used to fetch entries from Milvus, defaults to 1000
+
+    Returns
+    -------
+    dict
+        Contains `message`, `result` list if successful
+
     """
-    Deletes database entries according to expr.
-    Not atomic, i.e. may only delete some then fail: https://milvus.io/docs/delete_data.md#Delete-Entities.
-    
-    Args
-        collection_name: the name of a pymilvus.Collection
-        expr: a boolean expression to specify conditions for ANN search
+    if not utility.has_collection(collection_name):
+        return {"message": f"Failure: collection {collection_name} does not exist"}
+    coll = Collection(collection_name)
+    coll.load()
+    output_fields = ["text"] + FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
+    q_iter = coll.query_iterator(
+        expr=expr,
+        output_fields=output_fields,
+        batch_size=batch_size,
+    )
+    hits = []
+    res = q_iter.next()
+    while len(res) > 0:
+        hits += res
+        res = q_iter.next()
+    q_iter.close()
+    return {"message": "Success", "result": hits}
+
+def delete_expr(collection_name: str, expr: str) -> dict:
+    """Delete database entries according to expr.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of a pymilvus.Collection
+    expr : str
+        A boolean expression to filter database entries
+
     """
-    if utility.has_collection(collection_name):
-        coll = Collection(collection_name)
-        coll.load()
-        ids = coll.delete(expr=expr)
-        return {"message": f"Success: deleted {ids.delete_count} chunks"}
+    if not utility.has_collection(collection_name):
+        return {"message": f"Failure: collection {collection_name} does not exist"}
+    coll = Collection(collection_name)
+    coll.load()
+    ids = coll.delete(expr=expr)
+    return {"message": f"Success: deleted {ids.delete_count} chunks"}
 
 def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000, chunk_overlap: int = 150):
     reader = quickstart_ocr(file)
@@ -431,7 +523,7 @@ class FilteredRetriever(VectorStoreRetriever):
     search_type: str = "similarity"
     search_kwargs: dict = Field(default_factory=dict)
     session_filter: str
-    
+
     def get_relevant_documents(self, query: str) -> List[Document]:
         docs = []
         k = self.search_kwargs["k"]

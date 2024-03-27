@@ -1,91 +1,123 @@
-from pdfs import get_docs_pdf
-from encoder import OPENAI_3_SMALL
-from os import getcwd
+"""Run evaluation methods on agents and chains."""
+from __future__ import annotations
 
-documents = get_docs_pdf(getcwd() + "/data/US/", "usc04@118-30.pdf")
+from typing import TYPE_CHECKING
 
-from ragas.testset.generator import TestsetGenerator
-from ragas.testset.evolutions import simple, reasoning, multi_context
+from datasets import Dataset
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-
-# generator with openai models
-generator_llm = ChatOpenAI(model="gpt-3.5-turbo-16k")
-critic_llm = ChatOpenAI(model="gpt-4")
-embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL)
-
-generator = TestsetGenerator.from_langchain(
-    generator_llm,
-    critic_llm,
-    embeddings
+from ragas import evaluate
+from ragas.metrics import (
+    answer_correctness,
+    answer_relevancy,
+    context_precision,
+    context_recall,
+    faithfulness,
 )
+from ragas.testset.evolutions import multi_context, reasoning, simple
+from ragas.testset.generator import TestDataset, TestsetGenerator
 
-# generate testset
-testset = generator.generate_with_langchain_docs(documents, test_size=10, distributions={simple: 0.5, reasoning: 0.25, multi_context: 0.25})
-testset.to_pandas().to_csv("synthetic-data.csv")
+import milvusdb
+from encoder import OPENAI_3_SMALL
+from pdfs import get_documents_pdf
 
-# OPENAI EXAMPLE from 
+if TYPE_CHECKING:
+    from langchain_core.runnables import Runnable
 
-# import pandas as pd
-# import os
-# import yaml
 
-# data_path = "/data/MMLU/"
+def synthetic_testset_uscode(source: str) -> TestDataset:
+    """Generate a set of synthetic data from a hardcoded path.
 
-# # Build the prompts using Chat format. We support converting Chat conversations to text for non-Chat models
+    Parameters
+    ----------
+    source : str
+        the US Code source file to look up
 
-# choices = ["A", "B", "C", "D"]
-# sys_msg = "The following are multiple choice questions (with answers) about {}."
-# def create_chat_prompt(sys_msg, question, answers, subject):
-#     user_prompt = f"{question}\n" + "\n".join([f"{choice}. {answer}" for choice, answer in zip(choices, answers)]) + "\nAnswer:"
-#     return [
-#         {"role": "system", "content": sys_msg.format(subject)}, 
-#         {"role": "user", "content": user_prompt}
-#     ]
+    Returns
+    -------
+    TestDataset
+        columns are: question, contexts, ground_truth, evolution_type, episode_done
 
-# def create_chat_example(question, answers, correct_answer):
-#     """
-#     Form few-shot prompts in the recommended format: https://github.com/openai/openai-python/blob/main/chatml.md#few-shot-prompting
-#     """
-#     user_prompt = f"{question}\n" + "\n".join([f"{choice}. {answer}" for choice, answer in zip(choices, answers)]) + "\nAnswer:"
-#     return [
-#         {"role": "system", "content": user_prompt, "name": "example_user"},
-#         {"role": "system", "content": correct_answer, "name": "example_assistant"},
-#     ]
+    """
+    documents = get_documents_pdf(milvusdb.US, source)
+    # generator with openai models
+    generator_llm = ChatOpenAI(model="gpt-3.5-turbo-16k")
+    critic_llm = ChatOpenAI(model="gpt-4")
+    embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL)
 
-# subjects = sorted([f.split("_test.csv")[0] for f in os.listdir(os.path.join(data_path, "test")) if "_test.csv" in f])
-# registry_yaml = {}
+    generator = TestsetGenerator.from_langchain(
+        generator_llm,
+        critic_llm,
+        embeddings,
+    )
 
-# for subject in subjects:
-#     subject_path = os.path.join(registry_path, "data", "mmlu", subject)
-#     os.makedirs(subject_path, exist_ok=True)
+    # generate testset
+    return generator.generate_with_langchain_docs(
+        documents,
+        test_size=6,
+        distributions={
+            simple: 0.34,
+            reasoning: 0.33,
+            multi_context: 0.33,
+        },
+    )
 
-#     # Create few-shot prompts
-#     dev_df = pd.read_csv(os.path.join(data_path, "dev", subject + "_dev.csv"), names=("Question", "A", "B", "C", "D", "Answer"))
-#     dev_df["sample"] = dev_df.apply(lambda x: create_chat_example(x["Question"], x[["A", "B", "C", "D"]], x["Answer"]), axis=1)
-#     few_shot_path = os.path.join(subject_path, "few_shot.jsonl")     
-#     dev_df[["sample"]].to_json(few_shot_path, lines=True, orient="records")
+def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
+    """Get a chains answers and used contexts for a list of questions.
 
-#     # Create test prompts and ideal completions
-#     test_df = pd.read_csv(os.path.join(data_path, "test", subject + "_test.csv"), names=("Question", "A", "B", "C", "D", "Answer"))
-#     test_df["input"] = test_df.apply(lambda x: create_chat_prompt(sys_msg, x["Question"], x[["A", "B", "C", "D"]], subject), axis=1)
-#     test_df["ideal"] = test_df.Answer
-#     samples_path = os.path.join(subject_path, "samples.jsonl")     
-#     test_df[["input", "ideal"]].to_json(samples_path, lines=True, orient="records")
+    Parameters
+    ----------
+    questions : list
+        The (possibly synthetic) questions
+    chain : Runnable
+        The chain used to answer the questions
 
-#     eval_id = f"match_mmlu_{subject}"
+    Returns
+    -------
+    tuple[list, list]
+        answers, contexts used for each answer
 
-#     registry_yaml[eval_id] = {
-#         "id": f"{eval_id}.test.v1",
-#         "metrics": ["accuracy"]
-#     }
-#     registry_yaml[f"{eval_id}.test.v1"] = {
-#         "class": "evals.elsuite.basic.match:Match",
-#         "args": {
-#             "samples_jsonl": samples_path,
-#             "few_shot_jsonl": few_shot_path,
-#             "num_few_shot": 4,
-#         }
-#     }
+    """
+    answers = []
+    contexts = []
+    for question in questions:
+        res = chain.invoke(question)
+        # set() because the QA chain can cite the same chunk multiple times,
+        # if chunk size is large enough
+        source_indices = set(res["cited_answer"][0]["citations"])
+        contexts.append([res["docs"][i].page_content for i in source_indices])
+        answers.append(res["cited_answer"][0]["answer"])
+    return answers, contexts
 
-# with open(os.path.join(registry_path, "evals", "mmlu.yaml"), "w") as f:
-#     yaml.dump(registry_yaml, f)
+testset = synthetic_testset_uscode("")
+test_df = testset.to_pandas()
+test_df.to_json("data/evals/test/synthetic_testset.json")
+test_questions = test_df["question"].to_numpy().tolist()
+test_groundtruths = test_df["ground_truth"].to_numpy().tolist()
+chain = milvusdb.qa_chain(milvusdb.US)
+answers, contexts = testset_responses(test_questions, chain)
+response_dataset = Dataset.from_dict({
+    "question" : test_questions,
+    "answer" : answers,
+    "contexts" : contexts,
+    "ground_truth" : test_groundtruths,
+})
+response_dataset.to_json("data/evals/test/response_dataset.json")
+
+def evaluate_ragas(response_dataset: Dataset) -> None:
+    """Evaluate a chains answers based on ground truths.
+
+    Parameters
+    ----------
+    response_dataset : Dataset
+        its columns should be: [question, answer, contexts, ground_truth]
+
+    """
+    metrics = [
+        faithfulness,
+        answer_relevancy,
+        context_recall,
+        context_precision,
+        answer_correctness,
+    ]
+    results = evaluate(response_dataset, metrics)
+    results.to_pandas().to_json("data/evals/test/results.json")
