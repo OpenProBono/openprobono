@@ -4,7 +4,6 @@ from json import loads
 from operator import itemgetter
 from typing import List
 
-from encoder import DEFAULT_PARAMS, OPENAI_3_SMALL, OPENAI_ADA_2, EncoderParams, embed_strs, get_langchain_embedding_function
 import requests
 from bs4 import BeautifulSoup
 from fastapi import UploadFile
@@ -34,6 +33,7 @@ from pymilvus import (
 )
 from unstructured.partition.auto import partition
 
+import encoder
 import prompts
 
 langfuse_handler = CallbackHandler()
@@ -222,11 +222,11 @@ COLLECTIONS = {US, NC, CAP, COURTLISTENER}
 # collection -> encoder mapping
 # TODO: make this a file or use firebase?
 COLLECTION_ENCODER = {
-    US: EncoderParams(OPENAI_3_SMALL, 768),
-    NC: EncoderParams(OPENAI_3_SMALL, 768),
-    CAP: EncoderParams(OPENAI_3_SMALL, 768),
-    COURTLISTENER: EncoderParams(OPENAI_ADA_2, None),
-    SESSION_PDF: EncoderParams(OPENAI_ADA_2, None)
+    US: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    NC: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    CAP: encoder.EncoderParams(encoder.OPENAI_3_SMALL, 768),
+    COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
+    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None)
 }
 
 PDF = "PDF"
@@ -260,7 +260,7 @@ AUTO_INDEX = {
 
 
 def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [],
-                      params: EncoderParams = DEFAULT_PARAMS):
+                      params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
     if utility.has_collection(name):
         print(f"error: collection {name} already exists")
         return
@@ -286,7 +286,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str):
     return Milvus(
-        embedding_function=get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
+        embedding_function=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True
@@ -325,7 +325,7 @@ def query(collection_name: str, q: str, k: int = 4, expr: str = None, session_id
     coll = Collection(collection_name)
     coll.load()
     search_params = SEARCH_PARAMS
-    search_params["data"] = embed_strs([q], COLLECTION_ENCODER[collection_name])
+    search_params["data"] = encoder.embed_strs([q], COLLECTION_ENCODER[collection_name])
     search_params["limit"] = k
     search_params["output_fields"] += OUTPUT_FIELDS[COLLECTION_TYPES[collection_name]]
 
@@ -405,7 +405,7 @@ def qa(collection_name: str, query: str, k: int = 4, session_id: str = None):
 
 def upload_documents(collection_name: str, documents: list[Document]):
     ids = load_db(collection_name).add_documents(documents=documents,
-                                                 embedding=get_langchain_embedding_function(
+                                                 embedding=encoder.get_langchain_embedding_function(
                                                      COLLECTION_ENCODER[collection_name]),
                                                  connection_args=connection_args)
     num_docs = len(documents)

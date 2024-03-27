@@ -14,9 +14,9 @@ from langfuse.callback import CallbackHandler
 from langfuse.openai import OpenAI
 
 from models import BotRequest, ChatRequest, get_uuid_id
-from tools.milvusdb import session_source_summaries
-from tools.search_tools import search_openai_tool, search_toolset_creator
-from tools.vdb_tools import session_query_tool, vdb_openai_tool, vdb_toolset_creator
+from milvusdb import session_source_summaries
+from search_tools import search_openai_tool, search_toolset_creator
+from vdb_tools import session_query_tool, vdb_openai_tool, vdb_toolset_creator
 
 langchain.debug = True
 

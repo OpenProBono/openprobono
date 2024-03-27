@@ -12,15 +12,7 @@ from db import (
     set_session_to_bot,
     store_bot,
 )
-from models import (
-    BotRequest,
-    ChatBySession,
-    ChatRequest,
-    FetchSession,
-    InitializeSession,
-    get_uuid_id,
-)
-from tools.milvusdb import (
+from milvusdb import (
     COLLECTIONS,
     SESSION_PDF,
     US,
@@ -30,7 +22,15 @@ from tools.milvusdb import (
     session_upload_ocr,
     upload_documents,
 )
-from tools.pdfs import summarized_chunks_pdf
+from models import (
+    BotRequest,
+    ChatBySession,
+    ChatRequest,
+    FetchSession,
+    InitializeSession,
+    get_uuid_id,
+)
+from pdfs import summarized_chunks_pdf
 
 
 # Checks if api key is valid (TODO: change this to a real api key check)

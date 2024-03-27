@@ -1,4 +1,4 @@
-# fastapi implementation
+"""Written by Arman Aydemir. Used to access and store data in the Firestore database."""
 import os
 from json import loads
 
