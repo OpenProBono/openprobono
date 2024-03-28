@@ -270,7 +270,7 @@ def create_collection(name: str, description: str = "", extra_fields: list[Field
 # TODO: custom OpenAIEmbeddings embedding dimensions
 def load_db(collection_name: str) -> Milvus:
     return Milvus(
-        embedding_function=encoder.get_langchain_embedding_function(COLLECTION_ENCODER[collection_name]),
+        embedding_function=encoder.get_langchain_embedding_model(COLLECTION_ENCODER[collection_name]),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True,

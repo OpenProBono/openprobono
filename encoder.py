@@ -6,10 +6,8 @@ from typing import TYPE_CHECKING
 
 import tiktoken
 import torch
-from langchain_community.embeddings import (
-    HuggingFaceEmbeddings,
-    HuggingFaceHubEmbeddings,
-)
+from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.huggingface_hub import HuggingFaceHubEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from openai import APITimeoutError, OpenAI
 from transformers import (

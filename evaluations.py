@@ -84,11 +84,11 @@ def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
         # set() because the QA chain can cite the same chunk multiple times,
         # if chunk size is large enough
         source_indices = set(res["cited_answer"][0]["citations"])
-        contexts.append([res["docs"][i].page_content for i in source_indices])
+        contexts.append([res["docs"][i - 1].page_content for i in source_indices])
         answers.append(res["cited_answer"][0]["answer"])
     return answers, contexts
 
-testset = synthetic_testset_uscode("")
+testset = synthetic_testset_uscode("usc04@118-30.pdf")
 test_df = testset.to_pandas()
 test_df.to_json("data/evals/test/synthetic_testset.json")
 test_questions = test_df["question"].to_numpy().tolist()
@@ -121,3 +121,5 @@ def evaluate_ragas(response_dataset: Dataset) -> None:
     ]
     results = evaluate(response_dataset, metrics)
     results.to_pandas().to_json("data/evals/test/results.json")
+
+evaluate_ragas(response_dataset)
