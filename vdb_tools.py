@@ -1,6 +1,6 @@
 from langchain.agents import Tool
-from milvusdb import COLLECTIONS, SESSION_PDF, Collection, qa, query
 
+from milvusdb import COLLECTIONS, SESSION_PDF, Collection, qa, query
 from models import BotRequest, EngineEnum, VDBMethodEnum, VDBTool
 
 
@@ -14,8 +14,8 @@ def qa_tool(tool: VDBTool):
     tool_func = lambda q: qa(tool.collection_name, q, tool.k)
     tool_co = lambda q: async_qa(tool, q)
 
-    if tool.description != "":
-        description = tool.description
+    if tool.prompt != "":
+        description = tool.prompt
     else:
         description = f"""This tool answers questions by searching for the top {tool.k} results from a database named {tool.collection_name}."""
         description += f" The database description is: {Collection(tool.collection_name).description}."
@@ -36,8 +36,8 @@ def query_tool(tool: VDBTool):
     tool_func = lambda q: query(tool.collection_name, q, tool.k)
     tool_co = lambda q: async_query(tool, q)
 
-    if tool.description != "":
-        description = tool.description
+    if tool.prompt != "":
+        description = tool.prompt
     else:
         description = f"This tool queries a database named {tool.collection_name} and returns the top {tool['k']} results."
         description += f" The database description is: {Collection(tool.collection_name).description}."
@@ -59,7 +59,7 @@ def openai_qa_tool(tool: VDBTool):
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "the question to answer"
+                        "description": "the question to answer",
                     },
                 },
                 "required": ["question"],
