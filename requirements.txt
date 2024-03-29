@@ -2,7 +2,6 @@ fastapi>0.105.0
 uvicorn[standard]==0.20.0
 anyio==3.7.1
 bs4
-unstructured[all-docs]
 firebase-admin==6.2.0
 google-cloud-documentai
 google-search-results==2.4.2
@@ -10,12 +9,14 @@ langchain>0.1.0
 langchainhub
 langchain-openai>0.0.4
 langchain-community
+langchain-experimental
 langchainhub
 langfuse
 openai<2.0.0
 pip>=23.3
 pydantic>2.0.0
 python-multipart==0.0.9
+ragas
 requests==2.31.0
 pymilvus==2.3.6
 serpapi

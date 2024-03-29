@@ -47,7 +47,6 @@ def query_tool(tool: VDBTool):
                 coroutine=tool_co,
                 description=description)
 
-
 def openai_qa_tool(tool: VDBTool):
     return {
         "type": "function",
