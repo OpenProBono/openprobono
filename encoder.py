@@ -51,6 +51,7 @@ else:
 OPENAI_3_LARGE = "text-embedding-3-large" # 3072 dimensions, can project down
 OPENAI_3_SMALL = "text-embedding-3-small" # 1536 dimensions, can project down
 OPENAI_ADA_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
+
 MPNET = "sentence-transformers/all-mpnet-base-v2"
 MINILM = "sentence-transformers/all-MiniLM-L6-v2"
 LEGALBERT = "nlpaueb/legal-bert-base-uncased"
