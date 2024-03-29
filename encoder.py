@@ -105,8 +105,11 @@ def get_langchain_embedding_model(params: EncoderParams) -> Embeddings:
         The class representing the embedding model for use in LangChain
 
     """
-    if params.name in (OPENAI_ADA_2, OPENAI_3_SMALL):
-        return OpenAIEmbeddings(model=params.name, dimensions=params.dim)
+    if params.name in (OPENAI_ADA_2, OPENAI_3_SMALL, OPENAI_3_LARGE):
+        args = {"model": params.name}
+        if params.dim:
+            args["dimensions"] = params.dim
+        return OpenAIEmbeddings(**args)
     if params.name in (MPNET, MINILM):
         return HuggingFaceEmbeddings(model_name=params.name,
                                      model_kwargs={"device": device})

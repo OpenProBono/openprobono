@@ -9,6 +9,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_openai.llms import OpenAI as LangChainOpenAI
+from pymilvus import Collection
 from pypdf import PdfReader
 from unstructured.chunking.base import Element
 from unstructured.chunking.basic import chunk_elements

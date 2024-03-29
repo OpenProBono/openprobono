@@ -96,6 +96,8 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         if source_summaries:
             toolset.append(session_query_tool(r.session_id, source_summaries))
             # system_message += f'The session_query_tool sources have these summaries: {source_summaries}.' #this temporary change for testings
+        if len(toolset) == 0:
+            raise ValueError("toolset cannot be empty")
 
         prompt: ChatPromptTemplate = hub.pull("hwchase17/openai-tools-agent")
         prompt.messages[0].prompt.template = multiple_tools_template
