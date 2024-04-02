@@ -9,7 +9,6 @@ class UUIDTests(unittest.TestCase):
     import models
 
     uuid = models.get_uuid_id()
-
     def test_uuid_type(self):
         self.assertTrue(isinstance(self.uuid, str))
 
@@ -19,12 +18,10 @@ class UUIDTests(unittest.TestCase):
 
 client = TestClient(main.api)
 
-
 class ApiTests(unittest.TestCase):
-    test_bot_vdb_id = "16322f79-abb0-40da-82d9-54a506514a74"
-    #test_bot_search_id = "15060a2d-fd2b-4f4a-9bc9-d354b6bcb9b4" botsvm12_lang/aa644d04-9292-4a1b-8026-98c65008c7ef
-    # in conversationsvf23_db
-    test_session_vdb_id = "d8e03899-a586-4365-b860-6b406070a781"
+    #m12_db
+    test_bot_vdb_id = "f273054b-2831-45b1-a2ba-af683fe9a102"
+    test_session_vdb_id = "42e31a0c-450d-4210-8af1-4ac19ccc6180"
 
     def test_read_root(self):
         response = client.get("/")
@@ -68,6 +65,51 @@ class ApiTests(unittest.TestCase):
         from models import InitializeSession
 
         test_initialize_session = InitializeSession(
+            api_key="xyz", bot_id=self.test_bot_vdb_id, message="test",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+    def test_empty_init(self):
+        from models import InitializeSession
+
+        test_initialize_session = InitializeSession(
+            api_key="xyz", bot_id=self.test_bot_vdb_id, message="",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue(response_json["output"] == "Hi, how can I assist you today?")
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+    def test_init_and_continue_session(self):
+        from models import ChatBySession, InitializeSession
+
+        test_initialize_session = InitializeSession(
             api_key="xyz", bot_id=self.test_bot_vdb_id, message="test"
         )
         response = client.post(
@@ -83,6 +125,22 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(isinstance(response_json["output"], str))
         self.assertTrue("session_id" in response_json)
         print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+        test_cont_session = ChatBySession(
+            api_key="xyz", session_id=response_json["session_id"], message="test2",
+        )
+        response = client.post("/chat_session", json=test_cont_session.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
         self.assertTrue(isinstance(response_json["session_id"], str))
         self.assertEqual(len(response_json["session_id"]), 36)
 

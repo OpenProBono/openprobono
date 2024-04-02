@@ -175,7 +175,7 @@ def chat_session(
         return response
 
 
-@api.get("/fetch_session", tags=["Session Chat"])
+@api.post("/fetch_session", tags=["Session Chat"])
 def get_session(
         request: Annotated[
             FetchSession,
@@ -363,7 +363,7 @@ def vectordb_upload_ocr(file: UploadFile,
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str):
+def delete_file(filename: str, session_id: str) -> dict:
     """Delete a file from the database.
 
     Parameters
