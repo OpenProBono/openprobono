@@ -222,6 +222,21 @@ def load_bot(bot_id: str) -> BotRequest:
 
 
 def process_chat(r: ChatRequest) -> dict:
+    """Process the chat request.
+
+    Load bot, send request to correct engine, and store conversation updates.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        The chat request object.
+
+    Returns
+    -------
+    dict
+        Success or failure message with output and bot_id.
+
+    """
     try:
         bot = load_bot(r.bot_id)
         if bot is None:
