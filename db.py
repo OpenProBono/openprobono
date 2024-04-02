@@ -38,7 +38,8 @@ def api_key_check(api_key: str) -> bool:
         true if valid
 
     """
-    return db.collection("api_keys").document(api_key).get().exists
+    doc = db.collection("api_keys").document(api_key).get()
+    return doc.exists #just check if key exists in DB
 
 
 def admin_check(api_key: str) -> bool:
@@ -55,7 +56,11 @@ def admin_check(api_key: str) -> bool:
         true if valid admin key
 
     """
-    return db.collection("api_keys").document(api_key).get()["admin"]
+    doc = db.collection("api_keys").document(api_key).get()
+    if doc.exists: #if api key exists, check if it is an admin key
+        return doc.to_dict()["admin"]
+
+    return False
 
 def store_conversation(r: ChatRequest, output: str) -> bool:
     """Store the conversation in the database.
