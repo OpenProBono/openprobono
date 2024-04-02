@@ -59,6 +59,44 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(isinstance(response_json["bot_id"], str))
         self.assertEqual(len(response_json["bot_id"]), 36)
 
+    def test_courtlistener_bot(self):
+        from models import BotRequest, InitializeSession
+
+        search_tool = {
+            "name": "courtlistener",
+            "method": "courtlistener",
+            "txt": "",
+            "prompt": "Tool used to search courtlistener for legal cases and opinions",
+        }
+        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key="xyz", bot_id=bot_id, message="find me cases related to covid",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+
     # TODO: determine if session tests should be replicated using 
     # a bot with search tool only, or both
     def test_init_session(self):

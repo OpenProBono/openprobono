@@ -325,19 +325,7 @@ def check_params(collection_name: str, query: str, k: int, session_id: str = "")
     return None
 
 
-def query(collection_name: str, query: str, k: int = 4, expr: str = "", session_id: str = "") -> dict:
-    """
-    This queries the given collection
-    Args:
-        collection_name: the collection to query
-        q: the query itself
-        k: how many chunks to return
-        expr: a boolean expression to specify conditions for ANN search
-        session_id:
-
-    Returns:
-
-    """
+def query(collection_name: str, q: str, k: int = 4, expr: str = "", session_id: str = "") -> dict:
     if check_params(collection_name, q, k, session_id):
         return check_params(collection_name, q, k, session_id)
 

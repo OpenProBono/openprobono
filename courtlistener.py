@@ -170,5 +170,5 @@ def courtlistener_query_tool(t: SearchTool) -> Tool:
         name=name,
         func=tool_func,
         coroutine=co_func,
-        description=prompt
+        description=prompt,
     )
