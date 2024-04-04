@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import bs4
 import requests
+from langchain.text_splitter import TokenTextSplitter
+from langchain_community.chat_message_histories.in_memory import ChatMessageHistory
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from ragas import evaluate
 from ragas.metrics import (
@@ -16,8 +18,20 @@ from ragas.metrics import (
     faithfulness,
 )
 from ragas.testset.evolutions import multi_context, reasoning, simple
-from ragas.testset.generator import TestDataset, TestsetGenerator
+from ragas.testset.extractor import KeyphraseExtractor
+from ragas.testset.generator import (
+    InMemoryDocumentStore,
+    LangchainEmbeddingsWrapper,
+    LangchainLLMWrapper,
+    TestDataset,
+    TestsetGenerator,
+)
 from unstructured.partition.auto import partition
+from langfuse.callback import CallbackHandler
+
+import langchain
+import gc
+#langchain.debug = True
 
 import milvusdb
 from encoders import OPENAI_3_SMALL
@@ -27,7 +41,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import Runnable
 
 
-def synthetic_testset(collection_name: str, expr: str, generator: TestsetGenerator) -> TestDataset:
+def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
     """Generate a set of synthetic data from a hardcoded path.
 
     Parameters
@@ -48,27 +62,62 @@ def synthetic_testset(collection_name: str, expr: str, generator: TestsetGenerat
         del documents[i].metadata["metadata"]["emphasized_text_contents"]
         del documents[i].metadata["metadata"]["emphasized_text_tags"]
         del documents[i].metadata["metadata"]["page_number"]
+        documents[i].metadata["filename"] = url
     # assume ~2500 characters per page so 1 question per page
-    question_count = min([32, max([1, char_count // 2500])])
+    question_count = 3 # min([32, max([1, char_count // 2500])])
     print(' ', question_count, ' questions')
     if question_count == 1:
         distributions = {simple: 1.0}
     elif question_count == 2:
         distributions = {simple: 0.5, reasoning: 0.5}
     elif question_count == 3:
-        distributions = {simple: 0.34, reasoning: 0.33, multi_context: 0.33}
+        distributions = {simple:1}
     else:
         distributions = {
             simple: 0.5,
             reasoning: 0.25,
             multi_context: 0.25,
         }
-    return generator.generate_with_langchain_docs(
-        documents,
+    generator_llm = ChatOpenAI()
+    critic_llm = ChatOpenAI()
+    print(generator_llm.client)
+    embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
+    ragas_embeddings = LangchainEmbeddingsWrapper(embeddings)
+    splitter = TokenTextSplitter(chunk_size=1024, chunk_overlap=0)
+    generator_llm_model = LangchainLLMWrapper(generator_llm)
+    keyphrase_extractor = KeyphraseExtractor(llm=generator_llm_model)
+    docstore = InMemoryDocumentStore(
+        splitter=splitter,
+        extractor=keyphrase_extractor,
+        embeddings=ragas_embeddings,
+    )
+    docstore.add_documents(documents)
+    for node in docstore.nodes:
+        if node.metadata["metadata"]["url"] != url:
+            print('bad node')
+    generator = TestsetGenerator.from_langchain(
+        generator_llm,
+        critic_llm,
+        embeddings,
+        docstore,
+    )
+    return generator.generate(
         test_size=question_count,
         distributions=distributions,
         raise_exceptions=False,
+        with_debugging_logs=False,
     )
+
+with Path("urls").open() as f:
+    urls = [line.strip() for line in f.readlines()]
+for url in [urls[0], urls[5]]:
+    urlsplit = url.split("/")
+    fname = urlsplit[-1].split(".")[0]
+    print(fname)
+    testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'", url)
+    test_df = testset.to_pandas()
+    test_df.to_json(f"data/evals/urls/{fname}_gpt35_bulk.json")
+    gc.collect()
 
 def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
     """Get a chains answers and used contexts for a list of questions.
@@ -161,21 +210,4 @@ def crawl_and_scrape(site: str, collection: str, description: str):
     #     i += 1
     return new_urls
 
-with Path("urls").open() as f:
-    urls = [line.strip() for line in f.readlines()]
-for url in urls[44:46]:
-    urlsplit = url.split("/")
-    fname = urlsplit[-1].split(".")[0]
-    print(fname)
-    generator_llm = ChatOpenAI()
-    critic_llm = ChatOpenAI()
-    embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
-    generator = TestsetGenerator.from_langchain(
-        generator_llm,
-        critic_llm,
-        embeddings,
-    )
-    generator.docstore.documents = {}
-    testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'", generator)
-    test_df = testset.to_pandas()
-    test_df.to_json(f"data/evals/urls/{fname}_gpt35_bulk.json")
+
