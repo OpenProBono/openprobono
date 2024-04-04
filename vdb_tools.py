@@ -1,6 +1,6 @@
 from langchain.agents import Tool
 
-from milvusdb import COLLECTIONS, SESSION_PDF, Collection, qa, query
+from milvusdb import COLLECTIONS, SESSION_DATA, Collection, qa, query
 from models import BotRequest, EngineEnum, VDBMethodEnum, VDBTool
 
 
@@ -121,7 +121,7 @@ def vdb_toolset_creator(bot: BotRequest):
 def session_query_tool(session_id: str, source_summaries: dict):
 
     def query_tool(q: str):
-        return query(SESSION_PDF, q, session_id=session_id)
+        return query(SESSION_DATA, q, session_id=session_id)
 
     async def async_query_tool(q: str):
         return query_tool(q)

@@ -1,9 +1,11 @@
 """Run evaluation methods on agents and chains."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from datasets import Dataset
+import bs4
+import requests
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from ragas import evaluate
 from ragas.metrics import (
@@ -15,16 +17,17 @@ from ragas.metrics import (
 )
 from ragas.testset.evolutions import multi_context, reasoning, simple
 from ragas.testset.generator import TestDataset, TestsetGenerator
+from unstructured.partition.auto import partition
 
 import milvusdb
-from encoder import OPENAI_3_SMALL
-from pdfs import get_documents_pdf
+from encoders import OPENAI_3_SMALL
 
 if TYPE_CHECKING:
+    from datasets import Dataset
     from langchain_core.runnables import Runnable
 
 
-def synthetic_testset_uscode(source: str) -> TestDataset:
+def synthetic_testset(collection_name: str, expr: str, generator: TestsetGenerator) -> TestDataset:
     """Generate a set of synthetic data from a hardcoded path.
 
     Parameters
@@ -38,27 +41,33 @@ def synthetic_testset_uscode(source: str) -> TestDataset:
         columns are: question, contexts, ground_truth, evolution_type, episode_done
 
     """
-    documents = get_documents_pdf(milvusdb.US, source)
-    # generator with openai models
-    generator_llm = ChatOpenAI(model="gpt-3.5-turbo-16k")
-    critic_llm = ChatOpenAI(model="gpt-4")
-    embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL)
-
-    generator = TestsetGenerator.from_langchain(
-        generator_llm,
-        critic_llm,
-        embeddings,
-    )
-
-    # generate testset
+    documents = milvusdb.get_documents(collection_name, expr)
+    char_count = 0
+    for i in range(len(documents)):
+        char_count += len(documents[i].page_content)
+        del documents[i].metadata["metadata"]["emphasized_text_contents"]
+        del documents[i].metadata["metadata"]["emphasized_text_tags"]
+        del documents[i].metadata["metadata"]["page_number"]
+    # assume ~2500 characters per page so 1 question per page
+    question_count = min([32, max([1, char_count // 2500])])
+    print(' ', question_count, ' questions')
+    if question_count == 1:
+        distributions = {simple: 1.0}
+    elif question_count == 2:
+        distributions = {simple: 0.5, reasoning: 0.5}
+    elif question_count == 3:
+        distributions = {simple: 0.34, reasoning: 0.33, multi_context: 0.33}
+    else:
+        distributions = {
+            simple: 0.5,
+            reasoning: 0.25,
+            multi_context: 0.25,
+        }
     return generator.generate_with_langchain_docs(
         documents,
-        test_size=6,
-        distributions={
-            simple: 0.34,
-            reasoning: 0.33,
-            multi_context: 0.33,
-        },
+        test_size=question_count,
+        distributions=distributions,
+        raise_exceptions=False,
     )
 
 def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
@@ -88,20 +97,6 @@ def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
         answers.append(res["cited_answer"][0]["answer"])
     return answers, contexts
 
-testset = synthetic_testset_uscode("usc04@118-30.pdf")
-test_df = testset.to_pandas()
-test_df.to_json("data/evals/test/synthetic_testset.json")
-test_questions = test_df["question"].to_numpy().tolist()
-test_groundtruths = test_df["ground_truth"].to_numpy().tolist()
-chain = milvusdb.qa_chain(milvusdb.US)
-answers, contexts = testset_responses(test_questions, chain)
-response_dataset = Dataset.from_dict({
-    "question" : test_questions,
-    "answer" : answers,
-    "contexts" : contexts,
-    "ground_truth" : test_groundtruths,
-})
-response_dataset.to_json("data/evals/test/response_dataset.json")
 
 def evaluate_ragas(response_dataset: Dataset) -> None:
     """Evaluate a chains answers based on ground truths.
@@ -122,4 +117,65 @@ def evaluate_ragas(response_dataset: Dataset) -> None:
     results = evaluate(response_dataset, metrics)
     results.to_pandas().to_json("data/evals/test/results.json")
 
-evaluate_ragas(response_dataset)
+
+def scrape(site: str, old_urls: list[str], get_links: bool = False):
+    print("site: ", site)
+    r = requests.get(site)
+    site_base = "//".join(site.split("//")[:-1])
+    # converting the text 
+    s = bs4.BeautifulSoup(r.content, "html.parser")
+    urls = []
+
+    if get_links:
+        for i in s.find_all("a"):
+            if "href" in i.attrs:
+                href: str = i.attrs['href']
+
+                if "/HTML/" in href and href not in old_urls:
+                    old_urls.append(href)
+                    urls.append("https://www.ncleg.gov" + href)
+
+    # try:
+    #     elements = partition(url=site)
+    # except:
+    #     elements = partition(url=site, content_type="text/html")
+    print(" uploading")
+    return urls
+
+
+def crawl_and_scrape(site: str, collection: str, description: str):
+    #metadataField = milvusdb.FieldSchema("metadata", milvusdb.DataType.JSON, "The associated metadata")
+    #coll = milvusdb.create_collection(collection, description, [metadataField])
+    urls = [site]
+    new_urls = scrape(site, urls, get_links=True)
+    print("new_urls: ", new_urls)
+    #resume_url = next(iter([url for url in new_urls if url.endswith("/Chapter_151.html")]), None)
+    #resume_idx = new_urls.index(resume_url)
+    i = 0 #resume_idx
+    # delete partially uploaded site
+    #print(milvusdb.delete_expr(collection, f"metadata['url']=='{new_urls[i]}'"))
+    # while i < len(new_urls):
+    #     cur_url = new_urls[i]
+    #     _, elements = scrape(cur_url, urls + new_urls)
+    #     milvusdb.upload_elements(elements, coll)
+    #     i += 1
+    return new_urls
+
+with Path("urls").open() as f:
+    urls = [line.strip() for line in f.readlines()]
+for url in urls[44:46]:
+    urlsplit = url.split("/")
+    fname = urlsplit[-1].split(".")[0]
+    print(fname)
+    generator_llm = ChatOpenAI()
+    critic_llm = ChatOpenAI()
+    embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
+    generator = TestsetGenerator.from_langchain(
+        generator_llm,
+        critic_llm,
+        embeddings,
+    )
+    generator.docstore.documents = {}
+    testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'", generator)
+    test_df = testset.to_pandas()
+    test_df.to_json(f"data/evals/urls/{fname}_gpt35_bulk.json")

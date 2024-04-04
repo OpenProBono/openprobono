@@ -17,6 +17,7 @@ from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest, get_uuid_id
 from search_tools import search_openai_tool, search_toolset_creator
 from vdb_tools import session_query_tool, vdb_openai_tool, vdb_toolset_creator
+import decoders
 
 langchain.debug = True
 
@@ -68,7 +69,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     q = Queue()
     job_done = object()
 
-    bot_llm = ChatOpenAI(temperature=0.0, model="gpt-4-turbo-preview", request_timeout=60 * 5, streaming=True,
+    bot_llm = ChatOpenAI(temperature=0.0, model=decoders.GPT_4, request_timeout=60 * 5, streaming=True,
                             callbacks=[MyCallbackHandler(q)])
     # TODO: fix opb bot memory index
     chat_history = []

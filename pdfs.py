@@ -15,7 +15,7 @@ from unstructured.chunking.base import Element
 from unstructured.chunking.basic import chunk_elements
 from unstructured.partition.pdf import partition_pdf
 
-from encoder import (
+from encoders import (
     EncoderParams,
     embed_strs,
     get_langchain_embedding_model,
@@ -183,30 +183,3 @@ def semantic_chunks_pdf(directory: str, file: str, params: EncoderParams):
     elements = partition_pdf(filename=directory + file)
     return text_splitter.create_documents([element.text for element in elements])
 
-def get_documents_pdf(collection_name: str, source: str) -> list[Document]:
-    """Get PDF chunks from a Milvus Collection as a list of LangChain Documents.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of a pymilvus.Collection
-    source : str
-        The source PDF filename to get documents for
-
-    Returns
-    -------
-    list[Document]
-        PDF chunks from the source PDF and collection
-
-    """
-    hits = get_expr(collection_name, f"source=='{source}'")["result"]
-    return [
-        Document(
-            page_content=hit["text"],
-            metadata={
-                field: hit[field]
-                for field in FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
-            },
-        )
-        for hit in hits
-    ]

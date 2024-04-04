@@ -16,10 +16,11 @@ from db import (
 )
 from milvusdb import (
     COLLECTIONS,
-    SESSION_PDF,
+    SESSION_DATA,
     US,
     crawl_and_scrape,
     delete_expr,
+    file_upload,
     session_source_summaries,
     session_upload_ocr,
     upload_documents,
@@ -287,8 +288,7 @@ def create_bot(
 
 
 @api.post("/upload_file", tags=["User Upload"])
-def upload_file(file: UploadFile,
-        session_id: str, summary: Optional[str] = None) -> dict:
+def upload_file(file: UploadFile, session_id: str) -> dict:
     """File upload by user.
 
     Parameters
@@ -297,8 +297,6 @@ def upload_file(file: UploadFile,
         file to upload.
     session_id : str
         the session to associate the file with.
-    summary : Optional[str], optional
-        summary given by the user, by default None
 
     Returns
     -------
@@ -306,15 +304,12 @@ def upload_file(file: UploadFile,
         Success or failure message.
 
     """
-    docs = summarized_chunks_pdf(
-        file, session_id, summary if summary else file.filename,
-    )
-    return upload_documents(SESSION_PDF, docs)
+    return file_upload(file, SESSION_DATA, session_id)
 
 
 @api.post("/upload_files", tags=["User Upload"])
 def upload_files(files: list[UploadFile],
-    session_id: str, summaries: Optional[list[str]] = None) -> dict:
+    session_id: str, summaries: list[str] | None = None) -> dict:
     """Upload multiple files by user.
 
     Parameters
@@ -323,7 +318,7 @@ def upload_files(files: list[UploadFile],
         files to upload.
     session_id : str
         the session to associate the file with.
-    summaries : Optional[list[str]], optional
+    summaries : list[str] | None, optional
         summaries given by the user, by default None
 
     Returns
@@ -343,7 +338,7 @@ def upload_files(files: list[UploadFile],
     failures = []
     for i, file in enumerate(files):
         docs = summarized_chunks_pdf(file, session_id, summaries[i])
-        result = upload_documents(SESSION_PDF, docs)
+        result = upload_documents(SESSION_DATA, docs)
         if result["message"].startswith("Failure"):
             failures.append(
                 f"Upload #{i + 1} of {len(files)} failed. "
@@ -364,7 +359,7 @@ def vectordb_upload_ocr(file: UploadFile,
 
 @api.post("/delete_file", tags=["Vector Database"])
 def delete_file(filename: str, session_id: str):
-    """Delete a file from the database.
+    """Delete a file from the sessions database.
 
     Parameters
     ----------
@@ -374,14 +369,16 @@ def delete_file(filename: str, session_id: str):
         session to delete the file from.
 
     """
-    return delete_expr(SESSION_PDF,
-            f"source=='{filename}' and session_id=='{session_id}'")
+    return delete_expr(
+        SESSION_DATA,
+        f"metadata['source']=='{filename}' and session_id=='{session_id}'",
+    )
 
 
 @api.post("/delete_files", tags=["Vector Database"])
 def delete_files(filenames: list[str], session_id: str):
     for filename in filenames:
-        delete_expr(SESSION_PDF, f"source=='{filename}' and session_id=='{session_id}'")
+        delete_file(filename, session_id)
     return {"message": f"Success: deleted {len(filenames)} files"}
 
 
@@ -394,7 +391,7 @@ def get_session_files(session_id: str) -> dict:
 
 @api.post("/delete_session_files", tags=["Vector Database"])
 def delete_session_files(session_id: str):
-    return delete_expr(SESSION_PDF, f"session_id=='{session_id}'")
+    return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
 
 
 @api.post("/upload_site", tags=["Admin Upload"])
