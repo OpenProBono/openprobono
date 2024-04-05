@@ -1,5 +1,6 @@
 import json
 from queue import Queue
+from tkinter import MULTIPLE
 from typing import Any
 
 import langchain
@@ -15,6 +16,7 @@ from langfuse.openai import OpenAI
 
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest, get_uuid_id
+from prompts import COMBINE_TOOL_OUTPUTS_TEMPLATE
 from search_tools import search_openai_tool, search_toolset_creator
 from vdb_tools import session_query_tool, vdb_openai_tool, vdb_toolset_creator
 
@@ -22,36 +24,7 @@ langchain.debug = True
 
 langfuse_handler = CallbackHandler()
 
-tools_template = """GENERAL INSTRUCTIONS
-    You are a legal expert. Your task is to decide which tools to use to answer a user's question. You can use up to X tools, and you can use tools multiple times with different inputs as well.
-
-    These are the tools which are at your disposal
-    {tools}
-
-    When choosing tools, use this template:
-    {{"tool": "name of the tool", "input": "input given to the tool"}}
-
-    USER QUESTION
-    {input}
-
-    ANSWER FORMAT
-    {{"tools":["<FILL>"]}}"""
-
 max_num_tools = 8
-multiple_tools_template = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
-
-Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
-"""
-
-answer_template = """GENERAL INSTRUCTIONS
-    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context.
-
-    CONTEXT:
-    {context}
-
-    USER QUESTION
-    {input}"""
-
 
 # OPB bot main function
 def opb_bot(r: ChatRequest, bot: BotRequest) -> str:
@@ -112,10 +85,11 @@ def opb_bot(r: ChatRequest, bot: BotRequest) -> str:
         toolset.append(session_query_tool(r.session_id, source_summaries))
         # system_message += f'The session_query_tool sources have these summaries: {source_summaries}.' #this temporary change for testings
     if len(toolset) == 0:
-        raise ValueError("toolset cannot be empty")
+        error_description = "toolset cannot be empty, needs at least one tool defined"
+        raise ValueError(error_description)
 
     prompt: ChatPromptTemplate = hub.pull("hwchase17/openai-tools-agent")
-    prompt.messages[0].prompt.template = multiple_tools_template
+    prompt.messages[0].prompt.template = COMBINE_TOOL_OUTPUTS_TEMPLATE
     agent = create_openai_tools_agent(bot_llm, toolset, prompt)
 
     async def task(p):
@@ -123,7 +97,6 @@ def opb_bot(r: ChatRequest, bot: BotRequest) -> str:
         p = bot.message_prompt + p
         # Create an agent executor by passing in the agent and tools
         agent_executor = AgentExecutor(agent=agent, tools=toolset, verbose=False, return_intermediate_steps=False)
-        # TODO: make sure opb bot works
         ret = await agent_executor.ainvoke({"input": p, "chat_history": chat_history},
                                             config={"callbacks": [langfuse_handler]})
         q.put(job_done)
@@ -166,7 +139,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         if tup[1]:
             messages.append({"role": "assistant", "content": tup[1]})
 
-    messages.append({"role": "system", "content": multiple_tools_template})
+    messages.append({"role": "system", "content": COMBINE_TOOL_OUTPUTS_TEMPLATE})
     trace_id = get_uuid_id()
     toolset = []
     toolset += search_toolset_creator(bot)
