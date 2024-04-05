@@ -1,4 +1,4 @@
-"""Functions for chunking and loading PDFs."""
+"""Functions for chunking and loading PDFs. Written by Nick Colvin."""
 from __future__ import annotations
 
 from os import listdir

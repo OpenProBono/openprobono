@@ -1,3 +1,4 @@
+"""Defines the bot engines. The meaty stuff."""
 import json
 from queue import Queue
 from tkinter import MULTIPLE
