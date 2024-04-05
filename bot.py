@@ -54,7 +54,27 @@ answer_template = """GENERAL INSTRUCTIONS
 
 
 # OPB bot main function
-def opb_bot(r: ChatRequest, bot: BotRequest):
+def opb_bot(r: ChatRequest, bot: BotRequest) -> str:
+    """Call bot using langchain engine.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        ChatRequest object, containing the conversation and session data
+    bot : BotRequest
+        BotRequest object, containing the bot data
+
+    Returns
+    -------
+    str
+        The response from the bot
+
+    Raises
+    ------
+    ValueError
+        toolset cannot be empty, needs at least one tool defined
+
+    """
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, query):
             self.q = query
@@ -119,7 +139,22 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
             content += next_token
 
 
-def openai_bot(r: ChatRequest, bot: BotRequest):
+def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
+    """Call bot using openai engine.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        ChatRequest object, containing the conversation and session data
+    bot : BotRequest
+        BotRequest object, containing the bot data
+
+    Returns
+    -------
+    str
+        The response from the bot
+
+    """
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
     client = OpenAI()
