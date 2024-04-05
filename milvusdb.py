@@ -24,17 +24,6 @@ from langchain_core.runnables import (
 from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_openai.llms import OpenAI as LangChainOpenAI
-from pymilvus import (
-    Collection,
-    CollectionSchema,
-    DataType,
-    FieldSchema,
-    connections,
-    utility,
-)
-from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_openai.llms import OpenAI as LangChainOpenAI
 from langfuse.callback import CallbackHandler
 from pymilvus import (
     Collection,
@@ -354,7 +343,7 @@ def query(collection_name: str, q: str, k: int = 4, expr: str = "", session_id: 
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
-  
+
 def qa_chain(collection_name: str, k: int = 4,
              session_id: str = "") -> RunnableSerializable:
     """Create a QA chain.
