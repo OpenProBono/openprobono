@@ -30,11 +30,15 @@ from unstructured.partition.auto import partition
 from langfuse.callback import CallbackHandler
 
 import langchain
-import gc
+
 #langchain.debug = True
 
 import milvusdb
 from encoders import OPENAI_3_SMALL
+
+import langfuse
+
+from models import get_uuid_id
 
 if TYPE_CHECKING:
     from datasets import Dataset
@@ -55,6 +59,7 @@ def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
         columns are: question, contexts, ground_truth, evolution_type, episode_done
 
     """
+    langfuse_handler = CallbackHandler(session_id=get_uuid_id())
     documents = milvusdb.get_documents(collection_name, expr)
     char_count = 0
     for i in range(len(documents)):
@@ -78,8 +83,8 @@ def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
             reasoning: 0.25,
             multi_context: 0.25,
         }
-    generator_llm = ChatOpenAI()
-    critic_llm = ChatOpenAI()
+    generator_llm = ChatOpenAI(callbacks=[langfuse_handler])
+    critic_llm = ChatOpenAI(callbacks=[langfuse_handler])
     print(generator_llm.client)
     embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
     ragas_embeddings = LangchainEmbeddingsWrapper(embeddings)
@@ -105,19 +110,19 @@ def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
         test_size=question_count,
         distributions=distributions,
         raise_exceptions=False,
-        with_debugging_logs=False,
+        with_debugging_logs=True,
+        is_async=False,
     )
 
 with Path("urls").open() as f:
     urls = [line.strip() for line in f.readlines()]
-for url in [urls[0], urls[5]]:
+for url in [urls[4], urls[5]]:
     urlsplit = url.split("/")
     fname = urlsplit[-1].split(".")[0]
     print(fname)
     testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'", url)
     test_df = testset.to_pandas()
     test_df.to_json(f"data/evals/urls/{fname}_gpt35_bulk.json")
-    gc.collect()
 
 def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
     """Get a chains answers and used contexts for a list of questions.
