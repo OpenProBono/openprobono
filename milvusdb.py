@@ -692,7 +692,7 @@ def get_documents(collection_name: str, expr: str) -> list[Document]:
     Returns
     -------
     list[Document]
-        PDF chunks from the source PDF and collection
+        Documents representing the filtered chunks from the collection
 
     """
     hits = get_expr(collection_name, expr)["result"]

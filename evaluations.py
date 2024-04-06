@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import bs4
 import requests
 from langchain.text_splitter import TokenTextSplitter
-from langchain_community.chat_message_histories.in_memory import ChatMessageHistory
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from ragas import evaluate
 from ragas.metrics import (
@@ -27,26 +26,18 @@ from ragas.testset.generator import (
     TestsetGenerator,
 )
 from unstructured.partition.auto import partition
-from langfuse.callback import CallbackHandler
-
-import langchain
-
-#langchain.debug = True
 
 import milvusdb
+from decoders import GPT_4
 from encoders import OPENAI_3_SMALL
-
-import langfuse
-
-from models import get_uuid_id
 
 if TYPE_CHECKING:
     from datasets import Dataset
     from langchain_core.runnables import Runnable
 
 
-def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
-    """Generate a set of synthetic data from a hardcoded path.
+def synthetic_testset(collection_name: str, expr: str) -> TestDataset | None:
+    """Generate a set of synthetic data from documents in Milvus.
 
     Parameters
     ----------
@@ -59,7 +50,6 @@ def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
         columns are: question, contexts, ground_truth, evolution_type, episode_done
 
     """
-    langfuse_handler = CallbackHandler(session_id=get_uuid_id())
     documents = milvusdb.get_documents(collection_name, expr)
     char_count = 0
     for i in range(len(documents)):
@@ -67,25 +57,21 @@ def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
         del documents[i].metadata["metadata"]["emphasized_text_contents"]
         del documents[i].metadata["metadata"]["emphasized_text_tags"]
         del documents[i].metadata["metadata"]["page_number"]
-        documents[i].metadata["filename"] = url
     # assume ~2500 characters per page so 1 question per page
-    question_count = 3 # min([32, max([1, char_count // 2500])])
-    print(' ', question_count, ' questions')
+    if char_count < 500:
+        return None
+    question_count = min([8, max([1, char_count // 2500])])
+    print(" ", question_count, " questions")
     if question_count == 1:
         distributions = {simple: 1.0}
     elif question_count == 2:
         distributions = {simple: 0.5, reasoning: 0.5}
     elif question_count == 3:
-        distributions = {simple:1}
+        distributions = {simple:0.34, reasoning: 0.33, multi_context: 0.33}
     else:
-        distributions = {
-            simple: 0.5,
-            reasoning: 0.25,
-            multi_context: 0.25,
-        }
-    generator_llm = ChatOpenAI(callbacks=[langfuse_handler])
-    critic_llm = ChatOpenAI(callbacks=[langfuse_handler])
-    print(generator_llm.client)
+        distributions = {simple: 0.5, reasoning: 0.25, multi_context: 0.25}
+    generator_llm = ChatOpenAI()
+    critic_llm = ChatOpenAI(model=GPT_4)
     embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
     ragas_embeddings = LangchainEmbeddingsWrapper(embeddings)
     splitter = TokenTextSplitter(chunk_size=1024, chunk_overlap=0)
@@ -97,32 +83,27 @@ def synthetic_testset(collection_name: str, expr: str, url: str) -> TestDataset:
         embeddings=ragas_embeddings,
     )
     docstore.add_documents(documents)
-    for node in docstore.nodes:
-        if node.metadata["metadata"]["url"] != url:
-            print('bad node')
     generator = TestsetGenerator.from_langchain(
         generator_llm,
         critic_llm,
         embeddings,
         docstore,
     )
-    return generator.generate(
+    testset = generator.generate(
         test_size=question_count,
         distributions=distributions,
         raise_exceptions=False,
-        with_debugging_logs=True,
-        is_async=False,
     )
+    return testset
 
-with Path("urls").open() as f:
-    urls = [line.strip() for line in f.readlines()]
-for url in [urls[4], urls[5]]:
+def make_questionset(url: str):
     urlsplit = url.split("/")
     fname = urlsplit[-1].split(".")[0]
     print(fname)
-    testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'", url)
-    test_df = testset.to_pandas()
-    test_df.to_json(f"data/evals/urls/{fname}_gpt35_bulk.json")
+    testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'")
+    if testset:
+        test_df = testset.to_pandas()
+        test_df.to_json(f"data/evals/courtroom5/{fname}.json")
 
 def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
     """Get a chains answers and used contexts for a list of questions.
