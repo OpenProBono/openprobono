@@ -91,6 +91,8 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
 
     db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
         {"last_message_timestamp": t}, merge=True)
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
+        {"api_key": r.api_key}, merge=True)
     return True
 
 
