@@ -38,6 +38,7 @@ from pymilvus import (
     utility,
 )
 from unstructured.chunking.basic import Element, chunk_elements
+from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.auto import partition
 
 import encoders
@@ -240,7 +241,7 @@ NC = "NCGeneralStatutes"
 CAP = "CAP"
 SESSION_DATA = "SessionData"
 COURTLISTENER = "courtlistener"
-COURTROOM5 = "Courtroom5_NCStatutes"
+COURTROOM5 = "Courtroom5_NCStatutesPDF"
 COLLECTIONS = {US, NC, CAP, COURTLISTENER, COURTROOM5}
 # collection -> encoder mapping
 # TODO(Nick): make this a file or use firebase?
@@ -357,8 +358,8 @@ def create_collection(
     coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
 
     # save collection->encoder, collection->format
-    COLLECTION_ENCODER[name] = params
-    COLLECTION_FORMAT[name] = PDF
+    #COLLECTION_ENCODER[name] = params
+    #COLLECTION_FORMAT[name] = PDF
     return coll
 
 def langchain_db(collection_name: str) -> Milvus:
@@ -615,10 +616,11 @@ def upload_elements(
         With a `message`, and `num_chunks` if success
 
     """
-    chunks = chunk_elements(
+    chunks = chunk_by_title(
         elements,
-        max_characters=5000,
-        overlap=750,
+        max_characters=2500,
+        new_after_n_chars=1000,
+        overlap=250,
     )
     batch_size = 1000
     texts, metadatas = [], []

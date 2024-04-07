@@ -54,9 +54,8 @@ def synthetic_testset(collection_name: str, expr: str) -> TestDataset | None:
     char_count = 0
     for i in range(len(documents)):
         char_count += len(documents[i].page_content)
-        del documents[i].metadata["metadata"]["emphasized_text_contents"]
-        del documents[i].metadata["metadata"]["emphasized_text_tags"]
-        del documents[i].metadata["metadata"]["page_number"]
+        del documents[i].metadata["metadata"]["filetype"]
+        del documents[i].metadata["metadata"]["languages"]
     # assume ~2500 characters per page so 1 question per page
     if char_count < 500:
         return None
@@ -103,7 +102,7 @@ def make_questionset(url: str):
     testset = synthetic_testset(milvusdb.COURTROOM5, f"metadata['url']=='{url}'")
     if testset:
         test_df = testset.to_pandas()
-        test_df.to_json(f"data/evals/courtroom5/{fname}.json")
+        test_df.to_json(f"data/evals/pdfs/{fname}.json")
 
 def testset_responses(questions: list, chain: Runnable) -> tuple[list, list]:
     """Get a chains answers and used contexts for a list of questions.
@@ -155,45 +154,44 @@ def evaluate_ragas(response_dataset: Dataset) -> None:
 
 def scrape(site: str, old_urls: list[str], get_links: bool = False):
     print("site: ", site)
-    r = requests.get(site)
-    site_base = "//".join(site.split("//")[:-1])
-    # converting the text 
-    s = bs4.BeautifulSoup(r.content, "html.parser")
     urls = []
-
+    elements = []
     if get_links:
+        r = requests.get(site)
+        site_base = "//".join(site.split("//")[:-1])
+        # converting the text 
+        s = bs4.BeautifulSoup(r.content, "html.parser")
+
         for i in s.find_all("a"):
             if "href" in i.attrs:
                 href: str = i.attrs['href']
 
-                if "/HTML/" in href and href not in old_urls:
+                if "/PDF/" in href and href not in old_urls:
                     old_urls.append(href)
                     urls.append("https://www.ncleg.gov" + href)
-
-    # try:
-    #     elements = partition(url=site)
-    # except:
-    #     elements = partition(url=site, content_type="text/html")
+    else:
+        elements = partition(url=site, content_type="application/pdf")
     print(" uploading")
-    return urls
+    return urls, elements
 
 
 def crawl_and_scrape(site: str, collection: str, description: str):
-    #metadataField = milvusdb.FieldSchema("metadata", milvusdb.DataType.JSON, "The associated metadata")
-    #coll = milvusdb.create_collection(collection, description, [metadataField])
+    metadataField = milvusdb.FieldSchema("metadata", milvusdb.DataType.JSON, "The associated metadata")
+    coll = milvusdb.create_collection(collection, description, [metadataField])
     urls = [site]
-    new_urls = scrape(site, urls, get_links=True)
+    new_urls, _ = scrape(site, urls, get_links=True)
     print("new_urls: ", new_urls)
     #resume_url = next(iter([url for url in new_urls if url.endswith("/Chapter_151.html")]), None)
     #resume_idx = new_urls.index(resume_url)
     i = 0 #resume_idx
     # delete partially uploaded site
     #print(milvusdb.delete_expr(collection, f"metadata['url']=='{new_urls[i]}'"))
-    # while i < len(new_urls):
-    #     cur_url = new_urls[i]
-    #     _, elements = scrape(cur_url, urls + new_urls)
-    #     milvusdb.upload_elements(elements, coll)
-    #     i += 1
+    while i < len(new_urls):
+        cur_url = new_urls[i]
+        _, elements = scrape(cur_url, urls + new_urls)
+        milvusdb.upload_elements(elements, coll.name)
+        i += 1
     return new_urls
 
 
+#urls = crawl_and_scrape("https://www.ncleg.gov/Laws/GeneralStatutesTOC", milvusdb.COURTROOM5, "NC General Statutes parsed from PDFs for Courtroom5")
