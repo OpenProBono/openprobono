@@ -18,6 +18,7 @@ class SearchMethodEnum(str, Enum):
     dynamic_serpapi = "dynamic_serpapi"
     google = "google"
     courtlistener = "courtlistener"
+    courtroom5 = "courtroom5"
 
 
 class SearchTool(BaseModel):

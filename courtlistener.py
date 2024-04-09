@@ -141,7 +141,7 @@ def courtlistener_search(q: str, k: int = 3) -> dict:
     return query(courtlistener_collection, q)
 
 
-def courtlistener_query_tool(t: SearchTool) -> Tool:
+def courtlistener_tool_creator(t: SearchTool) -> Tool:
     """Create the courtlistener tool for agents to call.
 
     Parameters

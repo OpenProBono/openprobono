@@ -42,10 +42,11 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(isinstance(response_json["bot_id"], str))
         self.assertEqual(len(response_json["bot_id"]), 36)
 
-    def test_create_bot_search(self):
+    def test_create_bot_serpapi_search(self):
         from models import BotRequest
 
         search_tool = {
+            "method": "serpapi",
             "name": "google_search",
             "txt": "",
             "prompt": "Tool used to search the web, useful for current events or facts",
@@ -58,6 +59,63 @@ class ApiTests(unittest.TestCase):
         self.assertTrue("bot_id" in response_json)
         self.assertTrue(isinstance(response_json["bot_id"], str))
         self.assertEqual(len(response_json["bot_id"]), 36)
+
+    def test_create_bot_google_search(self):
+        from models import BotRequest
+
+        search_tool = {
+            "method": "google",
+            "name": "google_search",
+            "txt": "",
+            "prompt": "Tool used to search the web, useful for current events or facts",
+        }
+        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+
+    def test_courtroom5_bot(self):
+        from models import BotRequest, InitializeSession
+
+        search_tool = {
+            "name": "courtroom5",
+            "method": "courtroom5",
+            "txt": "",
+            "prompt": "Tool used to search government and legal resources",
+        }
+        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key="xyz", bot_id=bot_id, 
+            message="What is the rule in Florida related to designating an "
+                    "email address for service in litigation?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_courtlistener_bot(self):
         from models import BotRequest, InitializeSession

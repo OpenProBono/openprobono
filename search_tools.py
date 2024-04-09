@@ -5,11 +5,13 @@ import requests
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
-from courtlistener import courtlistener_query_tool, courtlistener_search
+from courtlistener import courtlistener_tool_creator, courtlistener_search
 from milvusdb import query, scrape
 from models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
+
+COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
 search_collection = "search_collection"
 
@@ -87,6 +89,38 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
     params = {
         "key": os.environ["GOOGLE_SEARCH_API_KEY"],
         "cx": os.environ["GOOGLE_SEARCH_API_CX"],
+        "q": prf + " " + qr,
+    }
+    return str(
+        requests.get("https://www.googleapis.com/customsearch/v1",
+                     params=params,
+                     headers=headers, timeout=30).json())[0:max_len]
+
+def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
+    """Query the custom courtroom5 google search api.
+
+    Parameters
+    ----------
+    qr : str
+        the query itself
+    prf : str
+        the prefix given by the tool (used for whitelists)
+    max_len : int, optional
+        maximum length of response text, by default 6400
+
+    Returns
+    -------
+    str
+        the search results
+
+    """
+    headers = {
+        "accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    params = {
+        "key": os.environ["GOOGLE_SEARCH_API_KEY"],
+        "cx": COURTROOM5_SEARCH_CX_KEY,
         "q": prf + " " + qr,
     }
     return str(
@@ -177,6 +211,36 @@ def search_tool_creator(t: SearchTool) -> Tool:
                 coroutine=co_func,
                 description=prompt)
 
+def courtroom5_tool_creator(t: SearchTool) -> Tool:
+    """Create a custom courtroom5 search api tool for agents to use.
+
+    Parameters
+    ----------
+    t : SearchTool
+        The SearchTool object which describes the tool
+
+    Returns
+    -------
+    Tool
+        The tool created to be used by agents
+
+    """
+    name = t.name
+    prompt = t.prompt
+    txt = t.prefix
+
+    async def async_search_tool(qr: str, txt: str) -> str:
+        return courtroom5_search_tool(qr, txt)
+
+    tool_func = lambda qr: courtroom5_search_tool(qr, txt)  # noqa: E731
+    co_func = lambda qr: async_search_tool(qr, txt)  # noqa: E731
+
+    return Tool(name=name,
+                func=tool_func,
+                coroutine=co_func,
+                description=prompt)
+
+
 
 def serpapi_tool_creator(t: SearchTool) -> Tool:
     """Create a serpapi tool for agents to use.
@@ -259,17 +323,18 @@ def search_openai_tool(tool: SearchTool, function_args) -> str:
 
     """
     function_response = None
-    prompt = tool.prompt
     prf = tool.prefix
     qr = function_args.get("qr")
     if (tool.method == SearchMethodEnum.serpapi):
-        function_response = serpapi_tool(qr, prf, prompt)
+        function_response = serpapi_tool(qr, prf)
     elif (tool.method == SearchMethodEnum.dynamic_serpapi):
         function_response = dynamic_serpapi_tool(qr, prf)
     elif (tool.method == SearchMethodEnum.google):
         function_response = google_search_tool(qr, prf)
     elif (tool.method == SearchMethodEnum.courtlistener):
         function_response = courtlistener_search(qr)
+    elif (tool.method == SearchMethodEnum.courtroom5):
+        function_response = courtroom5_search_tool(qr, prf)
     return str(function_response)
 
 
@@ -299,7 +364,9 @@ def search_toolset_creator(bot: BotRequest) -> list[Tool]:
             elif t.method == SearchMethodEnum.google:
                 toolset.append(search_tool_creator(t))
             elif t.method == SearchMethodEnum.courtlistener:
-                toolset.append(courtlistener_query_tool(t))
+                toolset.append(courtlistener_tool_creator(t))
+            elif t.method == SearchMethodEnum.courtroom5:
+                toolset.append(courtroom5_tool_creator(t))
         elif bot.engine == EngineEnum.openai:
             toolset.append(openai_tool(t))
     return toolset
