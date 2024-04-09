@@ -660,7 +660,7 @@ def upload_elements(
                 )
                 bad_insert += (
                     "We were unable to delete some of your partially uploaded data. "
-                    "This has been logged, and your data will eventually be deleted."
+                    "This has been logged, and your data will eventually be deleted. "
                     "If you would like more information, please email "
                     "contact@openprobono.com and mention your session_id: "
                     f"{session_id}."

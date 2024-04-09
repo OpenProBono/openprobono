@@ -28,7 +28,7 @@ from ragas.testset.generator import (
 from unstructured.partition.auto import partition
 
 import milvusdb
-from decoders import GPT_4
+from chat_models import GPT_4_TURBO
 from encoders import OPENAI_3_SMALL
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def synthetic_testset(collection_name: str, expr: str) -> TestDataset | None:
     else:
         distributions = {simple: 0.5, reasoning: 0.25, multi_context: 0.25}
     generator_llm = ChatOpenAI()
-    critic_llm = ChatOpenAI(model=GPT_4)
+    critic_llm = ChatOpenAI(model=GPT_4_TURBO)
     embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
     ragas_embeddings = LangchainEmbeddingsWrapper(embeddings)
     splitter = TokenTextSplitter(chunk_size=1024, chunk_overlap=0)
@@ -153,7 +153,6 @@ def evaluate_ragas(response_dataset: Dataset) -> None:
 
 
 def scrape(site: str, old_urls: list[str], get_links: bool = False):
-    print("site: ", site)
     urls = []
     elements = []
     if get_links:
@@ -166,32 +165,44 @@ def scrape(site: str, old_urls: list[str], get_links: bool = False):
             if "href" in i.attrs:
                 href: str = i.attrs['href']
 
-                if "/PDF/" in href and href not in old_urls:
+                if "/BySection/" in href and href.endswith(".pdf") and href not in old_urls:
                     old_urls.append(href)
                     urls.append("https://www.ncleg.gov" + href)
     else:
         elements = partition(url=site, content_type="application/pdf")
-    print(" uploading")
     return urls, elements
 
 
-def crawl_and_scrape(site: str, collection: str, description: str):
-    metadataField = milvusdb.FieldSchema("metadata", milvusdb.DataType.JSON, "The associated metadata")
-    coll = milvusdb.create_collection(collection, description, [metadataField])
+def crawl_and_scrape(site: str, collection_name: str):
     urls = [site]
     new_urls, _ = scrape(site, urls, get_links=True)
-    print("new_urls: ", new_urls)
-    #resume_url = next(iter([url for url in new_urls if url.endswith("/Chapter_151.html")]), None)
-    #resume_idx = new_urls.index(resume_url)
+
     i = 0 #resume_idx
     # delete partially uploaded site
     #print(milvusdb.delete_expr(collection, f"metadata['url']=='{new_urls[i]}'"))
     while i < len(new_urls):
-        cur_url = new_urls[i]
-        _, elements = scrape(cur_url, urls + new_urls)
-        milvusdb.upload_elements(elements, coll.name)
-        i += 1
+       cur_url = new_urls[i]
+       _, elements = scrape(cur_url, urls + new_urls)
+       milvusdb.upload_elements(elements, collection_name)
+       i += 1
     return new_urls
 
-
-#urls = crawl_and_scrape("https://www.ncleg.gov/Laws/GeneralStatutesTOC", milvusdb.COURTROOM5, "NC General Statutes parsed from PDFs for Courtroom5")
+#metadataField = milvusdb.FieldSchema("metadata", milvusdb.DataType.JSON, "The associated metadata")
+#coll = milvusdb.create_collection(milvusdb.COURTROOM5, "NC General Statutes parsed from PDFs by section for Courtroom5", [metadataField])
+import os
+root_dir = "data/evals/chapter_urls/"
+chapters = sorted(os.listdir(root_dir))
+resume_chapter = next(iter([chapter for chapter in chapters if chapter == "Chapter146"]), None)
+resume_chapter_idx = chapters.index(resume_chapter) if resume_chapter else 0
+for i in range(resume_chapter_idx, len(chapters)):
+    chapter = chapters[i]
+    with Path(root_dir + chapter).open() as f:
+        section_urls = [line.strip() for line in f.readlines()]
+    resume_section = next(iter([section for section in section_urls if section == "https://www.ncleg.gov/EnactedLegislation/Statutes/PDF/BySection/Chapter_146/GS_146-32.pdf"]), None)
+    resume_section_idx = section_urls.index(resume_section) if resume_section else 0
+    print(f"{chapter}: {len(section_urls)} sections, {len(section_urls) - resume_section_idx} remaining")
+    for j in range(resume_section_idx, len(section_urls)):
+        _, elements = scrape(section_urls[j], [])
+        milvusdb.upload_elements(elements, milvusdb.COURTROOM5)
+        # with Path(f"data/evals/chapter_urls/{chapter}").open(mode="w") as f:
+        #     f.write("\n".join(section_urls))

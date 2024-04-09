@@ -5,7 +5,8 @@ from typing import List
 
 from pydantic import BaseModel
 
-import decoders
+import chat_models
+
 
 def get_uuid_id() -> str:
     """Get a string UUID4 ID."""
@@ -172,7 +173,7 @@ class BotRequest(BaseModel):
 
     user_prompt: str = ""
     message_prompt: str = ""
-    model: str = decoders.GPT_3_5
+    model: str = chat_models.GPT_3_5
     search_tools: List[SearchTool] = []
     vdb_tools: List[VDBTool] = []
     engine: EngineEnum = EngineEnum.langchain
