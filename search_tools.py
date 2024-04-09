@@ -99,12 +99,14 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
 def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
     """Query the custom courtroom5 google search api.
 
+    Whitelisted sites defined by search cx key.
+
     Parameters
     ----------
     qr : str
         the query itself
     prf : str
-        the prefix given by the tool (used for whitelists)
+        the prefix given by the tool (whitelisted sites defined by search cx key)
     max_len : int, optional
         maximum length of response text, by default 6400
 
@@ -127,6 +129,44 @@ def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
         requests.get("https://www.googleapis.com/customsearch/v1",
                      params=params,
                      headers=headers, timeout=30).json())[0:max_len]
+
+# Implement this for regular programatic google search as well.
+def dynamic_courtroom5_search_tool(qr: str, prf: str) -> str:
+    """Query the custom courtroom5 google search api, scrape the sites and embed them.
+
+    Whitelisted sites defined by search cx key.
+
+    Parameters
+    ----------
+    qr : str
+        the query itself
+    prf : str
+        the prefix given by the tool
+
+    Returns
+    -------
+    str
+        the search results
+
+    """
+    headers = {
+        "accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    params = {
+        "key": os.environ["GOOGLE_SEARCH_API_KEY"],
+        "cx": COURTROOM5_SEARCH_CX_KEY,
+        "q": prf + " " + qr,
+    }
+    response = requests.get(
+                    "https://www.googleapis.com/customsearch/v1",
+                    params=params,
+                    headers=headers,
+                    timeout=30,
+                ).json()
+    for result in response["items"]:
+        scrape(result["link"], [], [], search_collection)
+    return query(search_collection, qr)
 
 def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """Query the serpapi search api.
@@ -241,6 +281,36 @@ def courtroom5_tool_creator(t: SearchTool) -> Tool:
                 description=prompt)
 
 
+def dynamic_courtroom5_tool_creator(t: SearchTool) -> Tool:
+    """Create a custom courtroom5 search api tool for agents to use.
+
+    Parameters
+    ----------
+    t : SearchTool
+        The SearchTool object which describes the tool
+
+    Returns
+    -------
+    Tool
+        The tool created to be used by agents
+
+    """
+    name = t.name
+    prompt = t.prompt
+    txt = t.prefix
+
+    async def async_search_tool(qr: str, txt: str) -> str:
+        return dynamic_courtroom5_search_tool(qr, txt)
+
+    tool_func = lambda qr: dynamic_courtroom5_search_tool(qr, txt)  # noqa: E731
+    co_func = lambda qr: async_search_tool(qr, txt)  # noqa: E731
+
+    return Tool(name=name,
+                func=tool_func,
+                coroutine=co_func,
+                description=prompt)
+
+
 
 def serpapi_tool_creator(t: SearchTool) -> Tool:
     """Create a serpapi tool for agents to use.
@@ -335,6 +405,8 @@ def search_openai_tool(tool: SearchTool, function_args) -> str:
         function_response = courtlistener_search(qr)
     elif (tool.method == SearchMethodEnum.courtroom5):
         function_response = courtroom5_search_tool(qr, prf)
+    elif (tool.method == SearchMethodEnum.dynamic_courtroom5):
+        function_response = dynamic_courtroom5_search_tool(qr, prf)
     return str(function_response)
 
 
@@ -367,6 +439,8 @@ def search_toolset_creator(bot: BotRequest) -> list[Tool]:
                 toolset.append(courtlistener_tool_creator(t))
             elif t.method == SearchMethodEnum.courtroom5:
                 toolset.append(courtroom5_tool_creator(t))
+            elif t.method == SearchMethodEnum.dynamic_courtroom5:
+                toolset.append(dynamic_courtroom5_tool_creator(t))
         elif bot.engine == EngineEnum.openai:
             toolset.append(openai_tool(t))
     return toolset

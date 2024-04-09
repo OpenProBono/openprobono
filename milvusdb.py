@@ -221,6 +221,7 @@ NC = "NCGeneralStatutes"
 CAP = "CAP"
 SESSION_PDF = "SessionPDF"
 COURTLISTENER = "courtlistener"
+SEARCH_COLLECTION = "search_collection"
 COLLECTIONS = {US, NC, CAP, COURTLISTENER}
 # collection -> encoder mapping
 # TODO(Nick): make this a file or use firebase?
@@ -230,6 +231,7 @@ COLLECTION_ENCODER = {
     CAP: encoder.DEFAULT_PARAMS,
     COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
     SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
+    SEARCH_COLLECTION: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
 }
 
 PDF = "PDF"
@@ -240,6 +242,7 @@ COLLECTION_FORMAT = {
     SESSION_PDF: PDF,
     CAP: CAP,
     COURTLISTENER: COURTLISTENER,
+    SEARCH_COLLECTION: HTML,
 }
 
 FORMAT_OUTPUTFIELDS = {
@@ -247,7 +250,7 @@ FORMAT_OUTPUTFIELDS = {
     HTML: [],
     CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name",
           "jurisdiction_name"],
-    COURTLISTENER: ["source"]
+    COURTLISTENER: ["source"],
 }
 # can customize index params with param field assuming you know index type
 SEARCH_PARAMS = {

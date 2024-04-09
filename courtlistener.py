@@ -107,8 +107,8 @@ def get_docket(result: dict) -> dict:
         dict containing the Docket info
 
     """
-    id = str(result["docket_id"])
-    response = requests.get(docket_url + id,
+    docket_id = str(result["docket_id"])
+    response = requests.get(docket_url + docket_id,
                             headers=courtlistener_header,
                             timeout=courtlistener_timeout)
 
