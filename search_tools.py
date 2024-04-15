@@ -5,7 +5,7 @@ import requests
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
-from courtlistener import courtlistener_tool_creator, courtlistener_search
+from courtlistener import courtlistener_search, courtlistener_tool_creator
 from milvusdb import query, scrape
 from models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 
