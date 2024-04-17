@@ -18,7 +18,7 @@ if Path("states").is_file():
         states = f.readlines()
 
 responses = []
-for state in states[]:
+for state in states:
     request = ChatRequest(
         history=[(question.format(state=state), None)],
         bot_id=bot_id, api_key=api_key)
