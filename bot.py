@@ -166,8 +166,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
-                vdb_tool = next((t for t in bot.vdb_tools if function_name == t["name"]), None)
-                search_tool = next((t for t in bot.search_tools if function_name == t["name"]), None)
+                vdb_tool = next((t for t in bot.vdb_tools if function_name == t.name), None)
+                search_tool = next((t for t in bot.search_tools if function_name == t.name), None)
                 # Step 3: call the function
                 # Note: the JSON response may not always be valid; be sure to handle errors
                 if vdb_tool:

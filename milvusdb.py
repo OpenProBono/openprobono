@@ -1,4 +1,5 @@
 """Functions for managing and searching vectors and collections in Milvus."""
+import io
 import mimetypes
 import os
 from json import loads
@@ -34,6 +35,7 @@ from pymilvus import (
     utility,
 )
 from unstructured.partition.auto import partition
+from unstructured.partition.pdf import partition_pdf
 
 import encoder
 import prompts
@@ -110,7 +112,7 @@ def collection_upload_str(reader: str, collection: str, source: str, max_chunk_s
 
 def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False):
     print("site: ", site)
-    r = requests.get(site)
+    r = requests.get(site, timeout=50)
     site_base = "//".join(site.split("//")[:-1])
     # converting the text 
     s = BeautifulSoup(r.content, "html.parser")
@@ -134,8 +136,12 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], collectio
                     urls.append(link)
 
     try:
-        elements = partition(url=site)
-    except:
+        if(".pdf" in site):
+            elements = partition_pdf(file=io.BytesIO(r.content))
+        else:
+            elements = partition(url=site)
+    except Exception as error:
+        print("Error in regular partition: " + str(error))
         elements = partition(url=site, content_type="text/html")
     e_text = ""
     for el in elements:
@@ -144,7 +150,7 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], collectio
             e_text += el + "\n\n"
     print("elements: ", e_text)
     print("site: ", site)
-    collection_upload_str(e_text, collection, site)
+    collection_upload_str(e_text, collection, site, max_chunk_size=3000)
     return [urls, elements]
 
 

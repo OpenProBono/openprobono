@@ -9,10 +9,11 @@ langchain>0.1.0
 langchainhub
 langchain-openai>0.0.4
 langchain-community
-langchain-experimental
 langchainhub
 langfuse
+libmagic
 openai<2.0.0
+poppler-utils
 pip>=23.3
 pydantic>2.0.0
 python-multipart==0.0.9

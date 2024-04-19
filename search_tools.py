@@ -6,7 +6,7 @@ from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
 from courtlistener import courtlistener_search, courtlistener_tool_creator
-from milvusdb import query, scrape
+from milvusdb import qa, query, scrape
 from models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
@@ -37,7 +37,7 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
-def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
+def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 3) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters
@@ -186,11 +186,12 @@ def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
         the dict of results
 
     """
-    return filtered_search(
+    results = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
             "num": num_results,
         }).get_dict())
+    return results
 
 
 def dynamic_serpapi_tool_creator(t: SearchTool) -> Tool:
@@ -331,7 +332,7 @@ def serpapi_tool_creator(t: SearchTool) -> Tool:
     txt = t.prefix
 
     async def async_search_tool(qr: str, txt: str, prompt: str) -> dict:
-        return serpapi_tool(qr, txt, prompt)
+        return serpapi_tool(qr, txt)
 
     tool_func = lambda qr: serpapi_tool(qr, txt, prompt)  # noqa: E731
     co_func = lambda qr: async_search_tool(qr, txt, prompt)  # noqa: E731
