@@ -15,7 +15,7 @@ langfuse = Langfuse()
 # 1076cca8-a1fa-415a-b5f8-c11da178d224
 
 # which version of db we are using
-VERSION = "vm12_lang"
+VERSION = "_courtroom5_v1"
 BOT_COLLECTION = "bots"
 CONVERSATION_COLLECTION = "conversations"
 
