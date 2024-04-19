@@ -9,6 +9,7 @@ langchain>0.1.0
 langchainhub
 langchain-openai>0.0.4
 langchain-community
+langchain-experimental
 langchainhub
 langfuse
 libmagic
