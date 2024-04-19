@@ -1,7 +1,6 @@
 """Run evaluation methods on agents and chains."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import bs4
@@ -186,23 +185,3 @@ def crawl_and_scrape(site: str, collection_name: str):
        milvusdb.upload_elements(elements, collection_name)
        i += 1
     return new_urls
-
-#metadataField = milvusdb.FieldSchema("metadata", milvusdb.DataType.JSON, "The associated metadata")
-#coll = milvusdb.create_collection(milvusdb.COURTROOM5, "NC General Statutes parsed from PDFs by section for Courtroom5", [metadataField])
-import os
-root_dir = "data/evals/chapter_urls/"
-chapters = sorted(os.listdir(root_dir))
-resume_chapter = next(iter([chapter for chapter in chapters if chapter == "Chapter146"]), None)
-resume_chapter_idx = chapters.index(resume_chapter) if resume_chapter else 0
-for i in range(resume_chapter_idx, len(chapters)):
-    chapter = chapters[i]
-    with Path(root_dir + chapter).open() as f:
-        section_urls = [line.strip() for line in f.readlines()]
-    resume_section = next(iter([section for section in section_urls if section == "https://www.ncleg.gov/EnactedLegislation/Statutes/PDF/BySection/Chapter_146/GS_146-32.pdf"]), None)
-    resume_section_idx = section_urls.index(resume_section) if resume_section else 0
-    print(f"{chapter}: {len(section_urls)} sections, {len(section_urls) - resume_section_idx} remaining")
-    for j in range(resume_section_idx, len(section_urls)):
-        _, elements = scrape(section_urls[j], [])
-        milvusdb.upload_elements(elements, milvusdb.COURTROOM5)
-        # with Path(f"data/evals/chapter_urls/{chapter}").open(mode="w") as f:
-        #     f.write("\n".join(section_urls))

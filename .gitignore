@@ -1,5 +1,4 @@
 *
-!tools/
 !*.py
 !*.ipynb
 !requirements.txt

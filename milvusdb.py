@@ -37,7 +37,7 @@ from pymilvus import (
     connections,
     utility,
 )
-from unstructured.chunking.basic import Element, chunk_elements
+from unstructured.documents.elements import Element
 from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.auto import partition
 
@@ -241,17 +241,17 @@ NC = "NCGeneralStatutes"
 CAP = "CAP"
 SESSION_DATA = "SessionData"
 COURTLISTENER = "courtlistener"
-COURTROOM5 = "Courtroom5_NCStatutesPDF"
+COURTROOM5 = "Courtroom5_NCStatutes_BySection"
 COLLECTIONS = {US, NC, CAP, COURTLISTENER, COURTROOM5}
 # collection -> encoder mapping
 # TODO(Nick): make this a file or use firebase?
 COLLECTION_ENCODER = {
-    US: encoders.DEFAULT_PARAMS,
-    NC: encoders.DEFAULT_PARAMS,
-    CAP: encoders.DEFAULT_PARAMS,
-    COURTLISTENER: encoders.EncoderParams(encoders.OPENAI_ADA_2, None),
-    SESSION_DATA: encoders.EncoderParams(encoders.OPENAI_ADA_2, None),
-    COURTROOM5: encoders.DEFAULT_PARAMS,
+    US: encoders.DEFAULT_ENCODER,
+    NC: encoders.DEFAULT_ENCODER,
+    CAP: encoders.DEFAULT_ENCODER,
+    COURTLISTENER: encoders.EncoderParams(encoders.OPENAI_ADA_2, 1536),
+    SESSION_DATA: encoders.EncoderParams(encoders.OPENAI_3_SMALL, 768),
+    COURTROOM5: encoders.DEFAULT_ENCODER,
 }
 
 PDF = "PDF"
@@ -292,7 +292,8 @@ def create_collection(
         name: str,
         description: str = "",
         extra_fields: list[FieldSchema] | None = None,
-        params: encoders.EncoderParams = encoders.DEFAULT_PARAMS,
+        encoder: encoders.EncoderParams = encoders.DEFAULT_ENCODER,
+        metadata: str = JSON,
     ) -> Collection:
     """Create a collection with a given name and other parameters.
 
@@ -304,9 +305,12 @@ def create_collection(
         A description for the collection, by default ""
     extra_fields : list[FieldSchema] | None, optional
         A list of fields to add to the collections schema, by default None
-    params : encoders.EncoderParams, optional
+    encoder : encoders.EncoderParams, optional
         The embedding model used to create the vectors,
-        by default encoders.DEFAULT_PARAMS
+        by default encoders.DEFAULT_ENCODER
+    metadata : str, optional
+        The format to use to store metadata other than text, by default JSON
+        (a single dictionary called `metadata`)
 
     Returns
     -------
@@ -343,11 +347,20 @@ def create_collection(
     embedding_field = FieldSchema(
         name="vector",
         dtype=DataType.FLOAT_VECTOR,
-        dim=params.dim,
+        dim=encoder.dim,
         description="The embedded text",
     )
+
     if not extra_fields:
         extra_fields = []
+
+    if metadata == JSON:
+        extra_fields.append(FieldSchema(
+            name="metadata",
+            dtype=DataType.JSON,
+            description="The associated metadata",
+        ))
+
     schema = CollectionSchema(
         fields=[pk_field, embedding_field, text_field, *extra_fields],
         auto_id=True,
@@ -358,8 +371,8 @@ def create_collection(
     coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
 
     # save collection->encoder, collection->format
-    #COLLECTION_ENCODER[name] = params
-    #COLLECTION_FORMAT[name] = PDF
+    COLLECTION_ENCODER[name] = encoder
+    COLLECTION_FORMAT[name] = metadata
     return coll
 
 def langchain_db(collection_name: str) -> Milvus:
@@ -628,7 +641,7 @@ def upload_elements(
     for i in range(num_chunks):
         texts.append(chunks[i].text)
         metadatas.append(chunks[i].metadata.to_dict())
-    vectors = encoders.embed_strs(texts)
+    vectors = encoders.embed_strs(texts, COLLECTION_ENCODER[collection_name])
     data = [vectors, texts, metadatas]
     collection = Collection(collection_name)
     pks = []

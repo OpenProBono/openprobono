@@ -62,7 +62,7 @@ SFR_MISTRAL = "Salesforce/SFR-Embedding-Mistral" # 4096 dimensions, 32768 max to
 UAE_LARGE = "WhereIsAI/UAE-Large-V1" # 1024 dimensions, 512 max tokens
 
 # TODO(Nick): lookup dimensions and max tokens for huggingface models
-DEFAULT_PARAMS = EncoderParams(OPENAI_3_SMALL, 768)
+DEFAULT_ENCODER = EncoderParams(OPENAI_3_SMALL, 768)
 
 def get_huggingface_model(model_name: str) -> PreTrainedModel:
     """Get a HuggingFace model based on its name.
@@ -96,12 +96,12 @@ def get_huggingface_tokenizer(model_name: str) -> PreTrainedTokenizerBase:
     """
     return AutoTokenizer.from_pretrained(model_name)
 
-def get_langchain_embedding_model(params: EncoderParams = DEFAULT_PARAMS) -> Embeddings:
+def get_langchain_embedding_model(encoder: EncoderParams = DEFAULT_ENCODER) -> Embeddings:
     """Get the LangChain class for a given embedding model.
 
     Parameters
     ----------
-    params : EncoderParams, optional
+    encoder : EncoderParams, optional
         The parameters defining an embedding model, by default
         OPENAI_3_SMALL with 768 dimensions
 
@@ -111,15 +111,14 @@ def get_langchain_embedding_model(params: EncoderParams = DEFAULT_PARAMS) -> Emb
         The class representing the embedding model for use in LangChain
 
     """
-    if params.name in OPENAI_MODELS:
-        args = {"model": params.name}
-        if params.dim:
-            args["dimensions"] = params.dim
-        return OpenAIEmbeddings(**args)
-    if params.name in SENTENCE_TRANSFORMERS:
-        return HuggingFaceEmbeddings(model_name=params.name,
-                                     model_kwargs={"device": device})
-    return HuggingFaceHubEmbeddings(model=params.name)
+    if encoder.name in OPENAI_MODELS:
+        return OpenAIEmbeddings(model=encoder.name, dimensions=encoder.dim)
+    if encoder.name in SENTENCE_TRANSFORMERS:
+        return HuggingFaceEmbeddings(
+            model_name=encoder.name,
+            model_kwargs={"device": device},
+        )
+    return HuggingFaceHubEmbeddings(model=encoder.name)
 
 def token_count(string: str, model: str) -> int:
     """Return the number of tokens in a text string.
@@ -146,14 +145,14 @@ def token_count(string: str, model: str) -> int:
         encoding = tiktoken.get_encoding("cl100k_base")
     return len(encoding.encode(string))
 
-def embed_strs(text: list[str], params: EncoderParams = DEFAULT_PARAMS) -> list:
+def embed_strs(text: list[str], encoder: EncoderParams = DEFAULT_ENCODER) -> list:
     """Embeds text from a list where each element is within the model max input length.
 
     Parameters
     ----------
     text : list[str]
         The text entries to embed
-    params : EncoderParams
+    encoder : EncoderParams
         The embedding model parameters
 
     Returns
@@ -162,22 +161,22 @@ def embed_strs(text: list[str], params: EncoderParams = DEFAULT_PARAMS) -> list:
         A list of lists of floats representing the embedded text
 
     """
-    if params.name in OPENAI_MODELS:
-        return embed_strs_openai(text, params)
-    if params.name in SENTENCE_TRANSFORMERS:
-        return embed_strs_sentencetransformers(text, params)
-    if params.name == SFR_MISTRAL:
-        return embed_strs_mistral(text, params)
-    return embed_strs_huggingface(text, params)
+    if encoder.name in OPENAI_MODELS:
+        return embed_strs_openai(text, encoder)
+    if encoder.name in SENTENCE_TRANSFORMERS:
+        return embed_strs_sentencetransformers(text, encoder)
+    if encoder.name == SFR_MISTRAL:
+        return embed_strs_mistral(text, encoder)
+    return embed_strs_huggingface(text, encoder)
 
-def embed_strs_huggingface(text: list[str], params: EncoderParams) -> list:
+def embed_strs_huggingface(text: list[str], encoder: EncoderParams) -> list:
     """Embed a list of strings using a HuggingFace model.
 
     Parameters
     ----------
     text : list[str]
         The list of strings to embed
-    params : EncoderParams
+    encoder : EncoderParams
         The parameters for a HuggingFace embedding model
 
     Returns
@@ -186,8 +185,8 @@ def embed_strs_huggingface(text: list[str], params: EncoderParams) -> list:
         A list of floats representing embedded strings
 
     """
-    model = get_huggingface_model(params.name)
-    tokenizer = get_huggingface_tokenizer(params.name)
+    model = get_huggingface_model(encoder.name)
+    tokenizer = get_huggingface_tokenizer(encoder.name)
     text_tokens = tokenizer(
         text,
         return_tensors="pt",
@@ -199,14 +198,14 @@ def embed_strs_huggingface(text: list[str], params: EncoderParams) -> list:
     # might want to call ndarray.squeeze() on this
     return list(model_out.last_hidden_state.mean(dim=1).cpu().numpy())
 
-def embed_strs_openai(text: list[str], params: EncoderParams) -> list:
+def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
     """Embed a list of strings using an OpenAI client.
 
     Parameters
     ----------
     text : list[str]
         The list of strings to embed
-    params : EncoderParams
+    encoder : EncoderParams
         The parameters for an OpenAI embedding model
 
     Returns
@@ -227,16 +226,16 @@ def embed_strs_openai(text: list[str], params: EncoderParams) -> list:
         while (
             j < num_strings and
             j - i < max_array_size and
-            (tokens := tokens + token_count(text[j], params.name)) < max_tokens
+            (tokens := tokens + token_count(text[j], encoder.name)) < max_tokens
         ):
             j += 1
         attempt = 1
         num_attempts = 75
         while attempt < num_attempts:
             try:
-                args = {"input": text[i:j], "model": params.name}
-                if params.dim:
-                    args["dimensions"] = params.dim
+                args = {"input": text[i:j], "model": encoder.name}
+                if encoder.name != OPENAI_ADA_2:
+                    args["dimensions"] = encoder.dim
                 response = client.embeddings.create(**args)
                 data += [data.embedding for data in response.data]
                 i = j
@@ -247,14 +246,14 @@ def embed_strs_openai(text: list[str], params: EncoderParams) -> list:
     return data
 
 # from https://huggingface.co/sentence-transformers/all-mpnet-base-v2
-def embed_strs_sentencetransformers(text: list[str], params: EncoderParams) -> list:
+def embed_strs_sentencetransformers(text: list[str], encoder: EncoderParams) -> list:
     """Embed a list of strings using a sentence-transformers model.
 
     Parameters
     ----------
     text : list[str]
         The list of strings to embed
-    params : EncoderParams
+    encoder : EncoderParams
         The parameters for a sentence-transformers embedding model
 
     Returns
@@ -274,8 +273,8 @@ def embed_strs_sentencetransformers(text: list[str], params: EncoderParams) -> l
         num = torch.sum(token_embeddings * input_mask_expanded, 1)
         denom = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
         return num / denom
-    tokenizer = get_huggingface_tokenizer(params.name)
-    model = get_huggingface_model(params.name)
+    tokenizer = get_huggingface_tokenizer(encoder.name)
+    model = get_huggingface_model(encoder.name)
     encoded_input = tokenizer(
         text,
         padding=True,
@@ -291,14 +290,14 @@ def embed_strs_sentencetransformers(text: list[str], params: EncoderParams) -> l
     return list(sentence_embeddings.cpu().numpy())
 
 # from https://huggingface.co/Salesforce/SFR-Embedding-Mistral
-def embed_strs_mistral(text: list[str], params: EncoderParams) -> list:
+def embed_strs_mistral(text: list[str], encoder: EncoderParams) -> list:
     """Embed a list of strings using the SFR Mistral model.
 
     Parameters
     ----------
     text : list[str]
         The list of strings to embed
-    params : EncoderParams
+    encoder : EncoderParams
         The parameters for the SFR Mistral embedding model
 
     Returns
@@ -322,8 +321,8 @@ def embed_strs_mistral(text: list[str], params: EncoderParams) -> list:
         ]
 
     # load model and tokenizer
-    tokenizer = get_huggingface_tokenizer(params.name)
-    model = get_huggingface_model(params.name)
+    tokenizer = get_huggingface_tokenizer(encoder.name)
+    model = get_huggingface_model(encoder.name)
 
     # get the embeddings
     max_length = 4096
