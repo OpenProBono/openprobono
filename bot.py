@@ -1,57 +1,40 @@
 import json
 from queue import Queue
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import langchain
+from anthropic import Anthropic
 from anyio.from_thread import start_blocking_portal
 from langchain import hub
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.callbacks.base import BaseCallbackHandler
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langfuse.callback import CallbackHandler
 from langfuse.openai import OpenAI
 
+import chat_models
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest, get_uuid_id
-from search_tools import search_openai_tool, search_toolset_creator
-from vdb_tools import session_query_tool, vdb_openai_tool, vdb_toolset_creator
-import chat_models
+from prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_TEMPLATE
+from search_tools import (
+    search_anthropic_tool,
+    search_openai_tool,
+    search_toolset_creator,
+)
+from vdb_tools import (
+    session_query_tool,
+    vdb_anthropic_tool,
+    vdb_openai_tool,
+    vdb_toolset_creator,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.prompts import ChatPromptTemplate
 
 langchain.debug = True
 
 langfuse_handler = CallbackHandler()
 
-tools_template = """GENERAL INSTRUCTIONS
-    You are a legal expert. Your task is to decide which tools to use to answer a user's question. You can use up to X tools, and you can use tools multiple times with different inputs as well.
-
-    These are the tools which are at your disposal
-    {tools}
-
-    When choosing tools, use this template:
-    {{"tool": "name of the tool", "input": "input given to the tool"}}
-
-    USER QUESTION
-    {input}
-
-    ANSWER FORMAT
-    {{"tools":["<FILL>"]}}"""
-
-max_num_tools = 8
-multiple_tools_template = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
-
-Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
-"""
-
-answer_template = """GENERAL INSTRUCTIONS
-    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context.
-
-    CONTEXT:
-    {context}
-
-    USER QUESTION
-    {input}"""
 
 
 # OPB bot main function
@@ -72,12 +55,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     bot_llm = ChatOpenAI(temperature=0.0, model=chat_models.GPT_4_TURBO, request_timeout=60 * 5, streaming=True,
                             callbacks=[MyCallbackHandler(q)])
     # TODO: fix opb bot memory index
-    chat_history = []
-    for tup in r.history[1:len(r.history) - 1]:
-        if tup[0]:
-            chat_history.append(HumanMessage(content=tup[0]))
-        if tup[1]:
-            chat_history.append(AIMessage(content=tup[1]))
+    chat_history = chat_models.messages(r.history[1:len(r.history) - 1], bot.engine)
 
     # memory_llm = ChatOpenAI(temperature=0.0, model='gpt-4-turbo-preview')
     # memory = ConversationSummaryBufferMemory(llm=memory_llm, max_token_limit=2000, memory_key="chat_history", return_messages=True)
@@ -85,8 +63,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     #     memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
 
     # ------- agent definition -------#
-    toolset = []
-    toolset += search_toolset_creator(bot)
+    toolset = search_toolset_creator(bot)
     toolset += vdb_toolset_creator(bot)
     source_summaries = session_source_summaries(r.session_id)
     if source_summaries:
@@ -96,7 +73,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         raise ValueError("toolset cannot be empty")
 
     prompt: ChatPromptTemplate = hub.pull("hwchase17/openai-tools-agent")
-    prompt.messages[0].prompt.template = multiple_tools_template
+    prompt.messages[0].prompt.template = MULTIPLE_TOOLS_TEMPLATE
     agent = create_openai_tools_agent(bot_llm, toolset, prompt)
 
     async def task(p):
@@ -119,56 +96,55 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
                 return content
             content += next_token
 
-
 def openai_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
     client = OpenAI()
-    model = "gpt-3.5-turbo-0125"
-    messages = []
-    for tup in r.history:
-        if tup[0]:
-            messages.append({"role": "user", "content": tup[0]})
-        if tup[1]:
-            messages.append({"role": "assistant", "content": tup[1]})
-
-    messages.append({"role": "system", "content": multiple_tools_template})
+    chatmodel = chat_models.ChatModelParams(bot.engine, bot.model)
+    messages = chat_models.messages_dicts(r.history)
+    messages.append({"role": "system", "content": MULTIPLE_TOOLS_TEMPLATE})
     trace_id = get_uuid_id()
-    toolset = []
-    toolset += search_toolset_creator(bot)
+    toolset = search_toolset_creator(bot)
     toolset += vdb_toolset_creator(bot)
-
-    # Step 1: send the conversation and available functions to the model
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        tools=toolset,
-        tool_choice="auto",  # auto is default, but we'll be explicit
-        temperature=0,
-        trace_id=trace_id,
-        session_id=r.session_id,
-    )
+    kwargs = {
+        "client": client,
+        "trace_id": trace_id,
+        "tools": toolset,
+        "tool_choice": "auto",  # auto is default, but we'll be explicit
+        "session_id": r.session_id,
+    }
+    # response is a ChatCompletion object
+    response = chat_models.chat(messages, chatmodel, 0, **kwargs)
     response_message = response.choices[0].message
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
-        messages.append(response_message.dict(exclude={"function_call"}))
+        messages.append(response_message.model_dump(exclude={"function_call"}))
         tools_used = 0
-        while tool_calls and tools_used < max_num_tools:
+        while tool_calls and tools_used < MAX_NUM_TOOLS:
             # TODO: run tool calls in parallel
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
-                vdb_tool = next((t for t in bot.vdb_tools if function_name == t["name"]), None)
-                search_tool = next((t for t in bot.search_tools if function_name == t["name"]), None)
+                vdb_tool = next(
+                    (t for t in bot.vdb_tools if function_name == t.name),
+                    None,
+                )
+                search_tool = next(
+                    (t for t in bot.search_tools if function_name == t.name),
+                    None,
+                )
                 # Step 3: call the function
-                # Note: the JSON response may not always be valid; be sure to handle errors
+                # Note: the JSON response may not always be valid;
+                # be sure to handle errors
                 if vdb_tool:
                     tool_response = vdb_openai_tool(vdb_tool, function_args)
                 elif search_tool:
                     tool_response = search_openai_tool(search_tool, function_args)
                 else:
                     tool_response = "error: unable to run tool"
+                # Step 4: send the info for each function call and function response to
+                # the model
                 messages.append(
                     {
                         "tool_call_id": tool_call.id,
@@ -178,18 +154,70 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                     },
                 )  # extend conversation with function response
                 tools_used += 1
-            # Step 4: send the info for each function call and function response to the model
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=toolset,
-                temperature=0,
-                trace_id=trace_id,
-                session_id=r.session_id,
-            )  # get a new response from the model where it can see the function response
+            # get a new response from the model where it can see the function response
+            response = chat_models.chat(messages, chatmodel, 0, **kwargs)
             response_message = response.choices[0].message
             messages.append(response_message)
             tool_calls = response_message.tool_calls
-    else:
-        print("no tool used")
     return response_message.content
+
+def anthropic_bot(r: ChatRequest, bot: BotRequest):
+    if r.history[-1][0].strip() == "":
+        return "Hi, how can I assist you today?"
+    messages = chat_models.messages(r.history, bot.engine)
+    chatmodel = chat_models.ChatModelParams(bot.engine, bot.model)
+    toolset = search_toolset_creator(bot)
+    toolset += vdb_toolset_creator(bot)
+    client = Anthropic()
+    # Step 1: send the conversation and available functions to the model
+    kwargs = {
+        "tools": toolset,
+        "client": client,
+        "system": MULTIPLE_TOOLS_TEMPLATE,
+    }
+    response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+    messages.append({"role": response.role, "content": response.content})
+    tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
+    # Step 2: check if the model wanted to call a function
+    if tool_msgs:
+        tools_used = 0
+        while tool_msgs and tools_used < MAX_NUM_TOOLS:
+            for tool_msg in tool_msgs:
+                function_name = tool_msg.name
+                vdb_tool = next(
+                    (t for t in bot.vdb_tools if function_name == t.name),
+                    None,
+                )
+                search_tool = next(
+                    (t for t in bot.search_tools if function_name == t.name),
+                    None,
+                )
+                # Step 3: call the function
+                if vdb_tool:
+                    tool_response = vdb_anthropic_tool(vdb_tool, tool_msg.input)
+                elif search_tool:
+                    tool_response = search_anthropic_tool(search_tool, tool_msg.input)
+                else:
+                    tool_response = "error: unable to identify tool"
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool_msg.id,
+                                "content": tool_response,
+                            },
+                        ],
+                    },
+                )  # extend conversation with function response
+                tools_used += 1
+            # Step 4: send the info for each function call and function response to the
+            # model
+            # get a new response from the model where it can see the function response
+            response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+            messages.append({"role": response.role, "content": response.content})
+            tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
+    if isinstance(messages[-1]["content"], list):
+        return "\n\n".join([msg.text for msg in messages[-1]["content"]])
+    return messages[-1].content

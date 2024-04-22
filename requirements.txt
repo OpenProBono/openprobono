@@ -1,3 +1,4 @@
+anthropic
 fastapi>0.105.0
 uvicorn[standard]==0.20.0
 anyio==3.7.1

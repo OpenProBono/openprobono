@@ -6,8 +6,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from langfuse import Langfuse
 
-from bot import BotRequest, ChatRequest, opb_bot, openai_bot
-from models import ChatBySession, FetchSession, get_uuid_id
+from bot import BotRequest, ChatRequest, anthropic_bot, opb_bot, openai_bot
+from models import ChatBySession, EngineEnum, FetchSession, get_uuid_id
 
 langfuse = Langfuse()
 
@@ -222,17 +222,20 @@ def process_chat(r: ChatRequest) -> dict:
         if bot is None:
             return {"message": "Failure: No bot found with bot id: " + r.bot_id}
 
-        if bot.engine == "langchain":
-            output = opb_bot(r, bot)
-        elif bot.engine == "openai":
-            output = openai_bot(r, bot)
-        else:
-            return {"message": f"Failure: invalid bot engine {bot.engine}"}
+        match bot.engine:
+            case EngineEnum.langchain:
+                output = opb_bot(r, bot)
+            case EngineEnum.openai:
+                output = openai_bot(r, bot)
+            case EngineEnum.anthropic:
+                output = anthropic_bot(r, bot)
+            case _:
+                return {"message": f"Failure: invalid bot engine {bot.engine}"}
 
         # store conversation (and also log the api_key)
         store_conversation(r, output)
 
-        # return the chat and the bot_id
-        return {"message": "Success", "output": output, "bot_id": r.bot_id}
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
+    # return the chat and the bot_id
+    return {"message": "Success", "output": output, "bot_id": r.bot_id}

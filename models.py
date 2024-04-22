@@ -1,11 +1,9 @@
 """Written by Arman Aydemir. This file contains the main models/classes."""
 import uuid
-from enum import Enum
+from enum import Enum, unique
 from typing import List
 
 from pydantic import BaseModel
-
-import chat_models
 
 
 def get_uuid_id() -> str:
@@ -13,6 +11,7 @@ def get_uuid_id() -> str:
     return str(uuid.uuid4())
 
 
+@unique
 class SearchMethodEnum(str, Enum):
     """Enumeration class representing different search methods."""
 
@@ -39,7 +38,7 @@ class SearchTool(BaseModel):
     prompt: str
     prefix: str = ""
 
-
+@unique
 class VDBMethodEnum(str, Enum):
     """Enumeration class representing different VDB methods."""
 
@@ -149,11 +148,15 @@ class FetchSession(BaseModel):
     api_key: str
 
 
+@unique
 class EngineEnum(str, Enum):
     """Enumeration class representing different engine options."""
 
     langchain = "langchain"
     openai = "openai"
+    hive = "hive"
+    anthropic = "anthropic"
+    huggingface = "huggingface"
 
 
 class BotRequest(BaseModel):
@@ -173,7 +176,7 @@ class BotRequest(BaseModel):
 
     user_prompt: str = ""
     message_prompt: str = ""
-    model: str = chat_models.GPT_3_5
+    model: str = "gpt-3.5-turbo-0125"
     search_tools: List[SearchTool] = []
     vdb_tools: List[VDBTool] = []
     engine: EngineEnum = EngineEnum.langchain

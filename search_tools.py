@@ -143,19 +143,17 @@ def serpapi_tool_creator(t: SearchTool) -> Tool:
 
 
 def openai_tool(t: SearchTool) -> dict:
-    name = t.name
-    prompt = t.prompt
     return {
         "type": "function",
         "function": {
-            "name": name,
-            "description": prompt,
+            "name": t.name,
+            "description": t.prompt,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "qr": {
                         "type": "string",
-                        "description": "the search text"
+                        "description": "the search text",
                     },
                 },
                 "required": ["qr"],
@@ -163,35 +161,71 @@ def openai_tool(t: SearchTool) -> dict:
         },
     }
 
+def anthropic_tool(t: SearchTool) -> dict:
+    return {
+        "name": t.name,
+        "description": t.prompt,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "qr": {
+                    "type": "string",
+                    "description": "The search text",
+                },
+            },
+            "required": ["qr"],
+        },
+    }
+
 
 def search_openai_tool(tool: SearchTool, function_args) -> str:
     function_response = None
-    prompt = tool.prompt
     prf = tool.prefix
     qr = function_args.get("qr")
-    if (tool.method == SearchMethodEnum.serpapi):
-        function_response = serpapi_tool(qr, prf, prompt)
-    elif (tool.method == SearchMethodEnum.dynamic_serpapi):
-        function_response = dynamic_serpapi_tool(qr, prf)
-    elif (tool.method == SearchMethodEnum.google):
-        function_response = google_search_tool(qr, prf)
-    elif (tool.method == SearchMethodEnum.courtlistener):
-        function_response = courtlistener_search(qr)
+    match tool.method:
+        case SearchMethodEnum.serpapi:
+            function_response = serpapi_tool(qr, prf)
+        case SearchMethodEnum.dynamic_serpapi:
+            function_response = dynamic_serpapi_tool(qr, prf)
+        case SearchMethodEnum.google:
+            function_response = google_search_tool(qr, prf)
+        case SearchMethodEnum.courtlistener:
+            function_response = courtlistener_search(qr)
+    return str(function_response)
+
+def search_anthropic_tool(tool: SearchTool, function_args: dict) -> str:
+    function_response = None
+    prompt = tool.prompt
+    prf = tool.prefix
+    qr = function_args["qr"]
+    match tool.method:
+        case SearchMethodEnum.serpapi:
+            function_response = serpapi_tool(qr, prf)
+        case SearchMethodEnum.dynamic_serpapi:
+            function_response = dynamic_serpapi_tool(qr, prf)
+        case SearchMethodEnum.google:
+            function_response = google_search_tool(qr, prf)
+        case SearchMethodEnum.courtlistener:
+            function_response = courtlistener_search(qr)
     return str(function_response)
 
 
-def search_toolset_creator(bot: BotRequest) -> list[Tool]:
+def search_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.search_tools:
-        if (bot.engine == EngineEnum.langchain):
-            if t.method == SearchMethodEnum.serpapi:
-                toolset.append(serpapi_tool_creator(t))
-            elif t.method == SearchMethodEnum.dynamic_serpapi:
-                toolset.append(dynamic_serpapi_tool_creator(t))
-            elif t.method == SearchMethodEnum.google:
-                toolset.append(search_tool_creator(t))
-            elif t.method == SearchMethodEnum.courtlistener:
-                toolset.append(courtlistener_query_tool(t))
-        elif bot.engine == EngineEnum.openai:
-            toolset.append(openai_tool(t))
+        match bot.engine:
+            case EngineEnum.langchain:
+                match t.method:
+                    case SearchMethodEnum.serpapi:
+                        toolset.append(serpapi_tool_creator(t))
+                    case SearchMethodEnum.dynamic_serpapi:
+                        toolset.append(dynamic_serpapi_tool_creator(t))
+                    case SearchMethodEnum.google:
+                        toolset.append(search_tool_creator(t))
+                    case SearchMethodEnum.courtlistener:
+                        toolset.append(courtlistener_query_tool(t))
+            case EngineEnum.openai:
+                toolset.append(openai_tool(t))
+            case EngineEnum.anthropic:
+                toolset.append(anthropic_tool(t))
     return toolset
