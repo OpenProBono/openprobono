@@ -130,9 +130,11 @@ def chat_hive(
             },
         },
     }
-    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=10)
+    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=120)
     response_json = response.json()
-    return response_json["status"][0]["response"]["output"][0]["choices"][0]["message"]
+    message = response_json["status"][0]["response"]["output"][0]["choices"][0]["message"]
+    chunks = response_json["status"][0]["response"]["output"][0]["augmentations"]
+    return message, chunks
 
 def chat_openai(
     messages: list[dict],

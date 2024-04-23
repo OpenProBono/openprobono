@@ -112,7 +112,8 @@ def get_langchain_embedding_model(encoder: EncoderParams = DEFAULT_ENCODER) -> E
 
     """
     if encoder.name in OPENAI_MODELS:
-        return OpenAIEmbeddings(model=encoder.name, dimensions=encoder.dim)
+        dim = encoder.dim if encoder.name != OPENAI_ADA_2 else None
+        return OpenAIEmbeddings(model=encoder.name, dimensions=dim)
     if encoder.name in SENTENCE_TRANSFORMERS:
         return HuggingFaceEmbeddings(
             model_name=encoder.name,

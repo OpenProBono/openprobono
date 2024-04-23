@@ -52,7 +52,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     q = Queue()
     job_done = object()
 
-    bot_llm = ChatOpenAI(temperature=0.0, model=chat_models.GPT_4_TURBO, request_timeout=60 * 5, streaming=True,
+    bot_llm = ChatOpenAI(temperature=0.0, model=bot.model, request_timeout=60 * 5, streaming=True,
                             callbacks=[MyCallbackHandler(q)])
     # TODO: fix opb bot memory index
     chat_history = chat_models.messages(r.history[1:len(r.history) - 1], bot.engine)
@@ -101,7 +101,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         return "Hi, how can I assist you today?"
     client = OpenAI()
     chatmodel = chat_models.ChatModelParams(bot.engine, bot.model)
-    messages = chat_models.messages_dicts(r.history)
+    messages = chat_models.messages(r.history, bot.engine)
     messages.append({"role": "system", "content": MULTIPLE_TOOLS_TEMPLATE})
     trace_id = get_uuid_id()
     toolset = search_toolset_creator(bot)
@@ -179,45 +179,44 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     messages.append({"role": response.role, "content": response.content})
     tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
     # Step 2: check if the model wanted to call a function
-    if tool_msgs:
-        tools_used = 0
-        while tool_msgs and tools_used < MAX_NUM_TOOLS:
-            for tool_msg in tool_msgs:
-                function_name = tool_msg.name
-                vdb_tool = next(
-                    (t for t in bot.vdb_tools if function_name == t.name),
-                    None,
-                )
-                search_tool = next(
-                    (t for t in bot.search_tools if function_name == t.name),
-                    None,
-                )
-                # Step 3: call the function
-                if vdb_tool:
-                    tool_response = vdb_anthropic_tool(vdb_tool, tool_msg.input)
-                elif search_tool:
-                    tool_response = search_anthropic_tool(search_tool, tool_msg.input)
-                else:
-                    tool_response = "error: unable to identify tool"
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool_msg.id,
-                                "content": tool_response,
-                            },
-                        ],
-                    },
-                )  # extend conversation with function response
-                tools_used += 1
-            # Step 4: send the info for each function call and function response to the
-            # model
-            # get a new response from the model where it can see the function response
-            response = chat_models.chat(messages, chatmodel, 0, **kwargs)
-            messages.append({"role": response.role, "content": response.content})
-            tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
+    tools_used = 0
+    while tool_msgs and tools_used < MAX_NUM_TOOLS:
+        for tool_msg in tool_msgs:
+            function_name = tool_msg.name
+            vdb_tool = next(
+                (t for t in bot.vdb_tools if function_name == t.name),
+                None,
+            )
+            search_tool = next(
+                (t for t in bot.search_tools if function_name == t.name),
+                None,
+            )
+            tool_response_msg = {
+                "type": "tool_result",
+                "tool_use_id": tool_msg.id,
+            }
+            # Step 3: call the function
+            if vdb_tool:
+                tool_response = vdb_anthropic_tool(vdb_tool, tool_msg.input)
+            elif search_tool:
+                tool_response = search_anthropic_tool(search_tool, tool_msg.input)
+            else:
+                tool_response = "error: unable to identify tool"
+                tool_response_msg["is_error"] = True
+            tool_response_msg["content"] = tool_response
+            # extend conversation with function response
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [tool_response_msg],
+                },
+            )
+            tools_used += 1
+        # Step 4: send info for each function call and function response to the model
+        # get a new response from the model where it can see the function response
+        response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+        messages.append({"role": response.role, "content": response.content})
+        tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
     if isinstance(messages[-1]["content"], list):
         return "\n\n".join([msg.text for msg in messages[-1]["content"]])
     return messages[-1].content
