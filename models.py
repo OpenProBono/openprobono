@@ -158,6 +158,37 @@ class EngineEnum(str, Enum):
     anthropic = "anthropic"
     huggingface = "huggingface"
 
+@unique
+class AnthropicChatModel(str, Enum):
+    """Enumeration class representing different Anthropic chat models."""
+
+    CLAUDE_3_OPUS = "claude-3-opus-20240229"
+    CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
+    CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
+
+@unique
+class HuggingFaceChatModel(str, Enum):
+    """Enumeration class representing different HuggingFace chat models."""
+
+    LLAMA_3_70B = "meta-llama/Meta-Llama-3-70B-Instruct"
+    LLAMA_3_8B = "meta-llama/Meta-Llama-3-8B-Instruct"
+    PHI_3_128K = "microsoft/Phi-3-mini-128k-instruct"
+    PHI_3_4K = "microsoft/Phi-3-mini-4k-instruct"
+
+@unique
+class HiveChatModel(str, Enum):
+    """Enumeration class representing different Hive chat models."""
+
+    HIVE_7B = "hive-7b"
+    HIVE_70B = "hive-70b"
+
+@unique
+class OpenAIChatModel(str, Enum):
+    """Enumeration class representing different OpenAI chat models."""
+
+    GPT_3_5 = "gpt-3.5-turbo-0125"
+    GPT_4 = "gpt-4"
+    GPT_4_TURBO = "gpt-4-turbo-preview"
 
 class BotRequest(BaseModel):
     """Model class representing a bot request.
@@ -176,7 +207,7 @@ class BotRequest(BaseModel):
 
     user_prompt: str = ""
     message_prompt: str = ""
-    model: str = "gpt-3.5-turbo-0125"
+    model: str = OpenAIChatModel.GPT_3_5
     search_tools: List[SearchTool] = []
     vdb_tools: List[VDBTool] = []
     engine: EngineEnum = EngineEnum.langchain

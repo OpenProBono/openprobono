@@ -1,3 +1,4 @@
+"""Load messages and chat with chat models."""
 from __future__ import annotations
 
 import os
@@ -7,11 +8,14 @@ import anthropic
 import openai
 import openai.resources
 import requests
-import torch
-import transformers
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
-from models import EngineEnum
+from models import (
+    EngineEnum,
+    HiveChatModel,
+    HuggingFaceChatModel,
+)
 from prompts import HIVE_QA_PROMPT
 
 if TYPE_CHECKING:
@@ -19,23 +23,7 @@ if TYPE_CHECKING:
     from anthropic.types.beta.tools import ToolsBetaMessage
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
-
-HIVE_7B = "hive-7b"
-HIVE_70B = "hive-70b"
-
-GPT_3_5 = "gpt-3.5-turbo-0125"
-GPT_4 = "gpt-4"
-GPT_4_TURBO = "gpt-4-turbo-preview"
-
 ANTHROPIC_MSG_URL = "https://api.anthropic.com/v1/messages"
-
-CLAUDE_3_OPUS = "claude-3-opus-20240229"
-CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
-CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
-
-LLAMA_3_70B_INSTRUCT = "meta-llama/Meta-Llama-3-70B-Instruct"
-LLAMA_3_8B_INSTRUCT = "meta-llama/Meta-Llama-3-8B-Instruct"
-
 MAX_TOKENS = 1000
 
 class ChatModelParams:
@@ -57,16 +45,12 @@ class ChatModelParams:
 
 def messages(history: list[tuple[str | None, str | None]], engine: EngineEnum) -> list:
     match engine:
-        case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.huggingface:
+        case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.huggingface \
+            | EngineEnum.hive:
             return messages_dicts(history)
-        case EngineEnum.hive:
-            return messages_hive(history)
         case EngineEnum.langchain:
             return messages_langchain(history)
     return []
-
-def messages_hive(history: list[tuple]):
-    pass
 
 def messages_dicts(
     history: list[tuple[str | None, str | None]],
@@ -93,25 +77,31 @@ def messages_langchain(
 def chat(
     messages: list,
     chatmodel: ChatModelParams,
-    temperature: float,
     **kwargs: dict,
 ):
     match chatmodel.engine:
         case EngineEnum.hive:
-            return chat_hive(messages[-1], chatmodel.model, temperature, **kwargs)
+            return chat_hive(messages[-1]["content"], chatmodel.model, **kwargs)
         case EngineEnum.openai:
-            return chat_openai(messages, chatmodel.model, temperature, **kwargs)
+            return chat_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
-            return chat_anthropic(messages, chatmodel.model, temperature, **kwargs)
+            return chat_anthropic(messages, chatmodel.model, **kwargs)
+        case EngineEnum.huggingface:
+            return chat_huggingface(messages, chatmodel, **kwargs)
+        case EngineEnum.langchain:
+            msg = "langchain chat function must be implemented manually"
+    raise ValueError(msg)
 
 def chat_hive(
     message: str,
     model: str,
-    temperature: float,
     **kwargs: dict,
-):
-    key = "HIVE_7B_API_KEY" if model == HIVE_7B else "HIVE_70B_API_KEY"
+) -> tuple[str, list[str]]:
+    key = "HIVE_7B_API_KEY" if model == HiveChatModel.HIVE_7B else "HIVE_70B_API_KEY"
     system = kwargs.pop("system", HIVE_QA_PROMPT)
+    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
+    temperature = kwargs.pop("temperature", 0.0)
+    top_p = kwargs.pop("top_p", 0.95)
     headers = {
         "Accept": "application/json",
         "Authorization": f"Token {os.environ[key]}",
@@ -120,30 +110,31 @@ def chat_hive(
     data = {
         "text_data": message,
         "options": {
-            "max_tokens": 4096,
-            "top_p": 0.95,
+            "max_tokens": max_tokens,
+            "top_p": top_p,
             "temperature": temperature,
             "system_prompt": system,
             "roles": {
-                "user": "User",
-                "model": "Assistant",
+                "user": "user",
+                "model": "assistant",
             },
         },
     }
     response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=120)
     response_json = response.json()
-    message = response_json["status"][0]["response"]["output"][0]["choices"][0]["message"]
-    chunks = response_json["status"][0]["response"]["output"][0]["augmentations"]
+    output = response_json["status"][0]["response"]["output"][0]
+    message = output["choices"][0]["message"]
+    chunks = output["augmentations"]
     return message, chunks
 
 def chat_openai(
     messages: list[dict],
     model: str,
-    temperature: float,
     **kwargs: dict,
 ):
     client = kwargs.pop("client", openai.OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
+    temperature = kwargs.pop("temperature", 0.0)
     return client.chat.completions.create(
         model=model,
         messages=messages,
@@ -155,12 +146,12 @@ def chat_openai(
 def chat_anthropic(
     messages: list[dict],
     model: str,
-    temperature: float,
     **kwargs: dict,
 ) -> AnthropicMessage | ToolsBetaMessage:
     client = kwargs.pop("client", anthropic.Anthropic())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     tools = kwargs.get("tools", [])
+    temperature = kwargs.pop("temperature", 0.0)
     endpoint = client.beta.tools.messages if tools else client.messages
     return endpoint.create(
         model=model,
@@ -170,35 +161,80 @@ def chat_anthropic(
         **kwargs,
     )
 
+def chat_huggingface(
+    messages: list,
+    chatmodel: ChatModelParams,
+    **kwargs: dict,
+):
+    match chatmodel.model:
+        case HuggingFaceChatModel.LLAMA_3_70B | HuggingFaceChatModel.LLAMA_3_8B:
+            return chat_llama(messages, chatmodel.model, **kwargs)
+        case HuggingFaceChatModel.PHI_3_128K | HuggingFaceChatModel.PHI_3_4K:
+            return chat_phi(messages, chatmodel.model, **kwargs)
+
 def chat_llama(
     messages: list[dict],
     model: str,
-    temperature: float,
     **kwargs: dict,
 ):
-    temperature = min([1, max([0.01, temperature])])
-    pipeline = transformers.pipeline(
+    pipe = pipeline(
         "text-generation",
         model=model,
-        model_kwargs={"torch_dtype": torch.bfloat16},
-        device="mps",
+        model_kwargs={"torch_dtype": "auto"},
+        device_map="auto",
     )
-    prompt = pipeline.tokenizer.apply_chat_template(
+    prompt = pipe.tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
     )
     terminators = [
-        pipeline.tokenizer.eos_token_id,
-        pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>"),
+        pipe.tokenizer.eos_token_id,
+        pipe.tokenizer.convert_tokens_to_ids("<|eot_id|>"),
     ]
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    outputs = pipeline(
+    do_sample = kwargs.pop("do_sample", False)
+    temperature = kwargs.pop("temperature", 0.01)
+    top_p = kwargs.pop("top_p", 0.95)
+    outputs = pipe(
         prompt,
         max_new_tokens=max_tokens,
         eos_token_id=terminators,
-        do_sample=True,
+        do_sample=do_sample,
         temperature=temperature,
-        top_p=0.9,
+        top_p=top_p,
+        return_full_text=False,
     )
-    return outputs[0]["generated_text"][len(prompt):]
+    return outputs[0]["generated_text"]
+
+def chat_phi(
+    messages: list[dict],
+    model: str,
+    temperature: float,
+    **kwargs: dict,
+):
+    lm = AutoModelForCausalLM.from_pretrained(
+        model,
+        device_map="auto",
+        torch_dtype="auto",
+        trust_remote_code=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(model)
+    pipe = pipeline(
+        "text-generation",
+        model=lm,
+        tokenizer=tokenizer,
+    )
+    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
+    do_sample = kwargs.pop("do_sample", False)
+    temperature = kwargs.pop("temperature", 0.01)
+    top_p = kwargs.pop("top_p", 0.95)
+    outputs = pipe(
+        messages,
+        max_new_tokens=max_tokens,
+        do_sample=do_sample,
+        top_p=top_p,
+        temperature=temperature,
+        return_full_text=False,
+    )
+    return outputs[0]["generated_text"]

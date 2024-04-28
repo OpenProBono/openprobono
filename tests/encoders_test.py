@@ -57,8 +57,9 @@ class EncoderTests(unittest.TestCase):
         """
         self.assertTrue(isinstance(
             encoders.get_langchain_embedding_model(
-                params=encoders.EncoderParams(encoders.MPNET, None),
-            ), encoders.HuggingFaceEmbeddings,
+                encoders.EncoderParams(encoders.MPNET, None),
+            ),
+            encoders.HuggingFaceEmbeddings,
         ))
 
     def test_langchain_embeddings_hf(self: "EncoderTests") -> None:
@@ -71,7 +72,6 @@ class EncoderTests(unittest.TestCase):
 
         """
         self.assertTrue(isinstance(
-            encoders.get_langchain_embedding_model(
-                params=self.test_model,
-            ), encoders.HuggingFaceHubEmbeddings,
+            encoders.get_langchain_embedding_model(self.test_model),
+            encoders.HuggingFaceHubEmbeddings,
         ))
