@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from queue import Queue
 from typing import TYPE_CHECKING, Any
@@ -30,7 +32,9 @@ from vdb_tools import (
 )
 
 if TYPE_CHECKING:
+    from anthropic.types.beta.tools import ToolsBetaContentBlock
     from langchain_core.prompts import ChatPromptTemplate
+    from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
 langchain.debug = True
 
@@ -116,52 +120,62 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         "temperature": 0,
     }
     # response is a ChatCompletion object
-    response = chat_models.chat(messages, chatmodel, **kwargs)
+    response: ChatCompletion = chat_models.chat(messages, chatmodel, **kwargs)
     response_message = response.choices[0].message
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
     if tool_calls:
         messages.append(response_message.model_dump(exclude={"function_call"}))
-        tools_used = 0
-        while tool_calls and tools_used < MAX_NUM_TOOLS:
-            # TODO: run tool calls in parallel
-            for tool_call in tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
-                vdb_tool = next(
-                    (t for t in bot.vdb_tools if function_name == t.name),
-                    None,
-                )
-                search_tool = next(
-                    (t for t in bot.search_tools if function_name == t.name),
-                    None,
-                )
-                # Step 3: call the function
-                # Note: the JSON response may not always be valid;
-                # be sure to handle errors
-                if vdb_tool:
-                    tool_response = vdb_openai_tool(vdb_tool, function_args)
-                elif search_tool:
-                    tool_response = search_openai_tool(search_tool, function_args)
-                else:
-                    tool_response = "error: unable to run tool"
-                # Step 4: send the info for each function call and function response to
-                # the model
-                messages.append(
-                    {
-                        "tool_call_id": tool_call.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": tool_response,
-                    },
-                )  # extend conversation with function response
-                tools_used += 1
-            # get a new response from the model where it can see the function response
-            response = chat_models.chat(messages, chatmodel, **kwargs)
-            response_message = response.choices[0].message
-            messages.append(response_message)
-            tool_calls = response_message.tool_calls
+        response_message = openai_tools(messages, tool_calls, bot, chatmodel, **kwargs)
     return response_message.content
+
+def openai_tools(
+    messages: list[dict],
+    tool_calls: list[ChatCompletionMessageToolCall],
+    bot: BotRequest,
+    chatmodel: chat_models.ChatModelParams,
+    **kwargs: dict,
+):
+    tools_used = 0
+    while tool_calls and tools_used < MAX_NUM_TOOLS:
+        # TODO: run tool calls in parallel
+        for tool_call in tool_calls:
+            function_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            vdb_tool = next(
+                (t for t in bot.vdb_tools if function_name == t.name),
+                None,
+            )
+            search_tool = next(
+                (t for t in bot.search_tools if function_name == t.name),
+                None,
+            )
+            # Step 3: call the function
+            # Note: the JSON response may not always be valid;
+            # be sure to handle errors
+            if vdb_tool:
+                tool_response = vdb_openai_tool(vdb_tool, function_args)
+            elif search_tool:
+                tool_response = search_openai_tool(search_tool, function_args)
+            else:
+                tool_response = "error: unable to run tool"
+            # Step 4: send the info for each function call and function response to
+            # the model
+            messages.append(
+                {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": tool_response,
+                },
+            )  # extend conversation with function response
+            tools_used += 1
+        # get a new response from the model where it can see the function response
+        response = chat_models.chat(messages, chatmodel, **kwargs)
+        response_message = response.choices[0].message
+        messages.append(response_message)
+        tool_calls = response_message.tool_calls
+    return response_message
 
 @observe()
 def anthropic_bot(r: ChatRequest, bot: BotRequest):
@@ -179,19 +193,32 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
         "system": MULTIPLE_TOOLS_TEMPLATE,
         "temperature": 0,
     }
-    langfuse_context.update_current_trace(session_id=r.session_id)
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
     # Anthropic system prompt does not go in messages list,
     # but thats where langfuse expects it, so insert it and add it to the observation
     langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
     langfuse_context.update_current_observation(input=messages + langfuse_prompt_msg)
     response = chat_models.chat(messages, chatmodel, **kwargs)
     messages.append({"role": response.role, "content": response.content})
-    tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
     # Step 2: check if the model wanted to call a function
+    tool_calls: list[ToolsBetaContentBlock] = [msg for msg in response.content if msg.type == "tool_use"]
+    return anthropic_tools(messages, tool_calls, bot, chatmodel, **kwargs)
+
+@observe()
+def anthropic_tools(
+    messages: list[dict],
+    tool_calls: list[ToolsBetaContentBlock],
+    bot: BotRequest,
+    chatmodel: chat_models.ChatModelParams,
+    **kwargs: dict,
+):
     tools_used = 0
-    while tool_msgs and tools_used < MAX_NUM_TOOLS:
-        for tool_msg in tool_msgs:
-            function_name = tool_msg.name
+    while tool_calls and tools_used < MAX_NUM_TOOLS:
+        for tool_call in tool_calls:
+            function_name = tool_call.name
             vdb_tool = next(
                 (t for t in bot.vdb_tools if function_name == t.name),
                 None,
@@ -202,13 +229,13 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
             )
             tool_response_msg = {
                 "type": "tool_result",
-                "tool_use_id": tool_msg.id,
+                "tool_use_id": tool_call.id,
             }
             # Step 3: call the function
             if vdb_tool:
-                tool_response = vdb_anthropic_tool(vdb_tool, tool_msg.input)
+                tool_response = vdb_anthropic_tool(vdb_tool, tool_call.input)
             elif search_tool:
-                tool_response = search_anthropic_tool(search_tool, tool_msg.input)
+                tool_response = search_anthropic_tool(search_tool, tool_call.input)
             else:
                 tool_response = "error: unable to identify tool"
                 tool_response_msg["is_error"] = True
@@ -225,7 +252,6 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
         # get a new response from the model where it can see the function response
         response = chat_models.chat(messages, chatmodel, **kwargs)
         messages.append({"role": response.role, "content": response.content})
-        tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
-    if isinstance(messages[-1]["content"], list):
-        return "\n\n".join([msg.text for msg in messages[-1]["content"]])
-    return messages[-1].content
+        tool_calls = [msg for msg in response.content if msg.type == "tool_use"]
+    content: list[ToolsBetaContentBlock] = messages[-1]["content"]
+    return content[-1].text

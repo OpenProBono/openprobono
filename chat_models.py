@@ -5,11 +5,10 @@ import os
 from typing import TYPE_CHECKING
 
 import anthropic
-import openai
-import openai.resources
 import requests
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langfuse.decorators import langfuse_context, observe
+from langfuse.openai import OpenAI
 
 from models import EngineEnum, HiveChatModel
 from prompts import HIVE_QA_PROMPT
@@ -17,6 +16,9 @@ from prompts import HIVE_QA_PROMPT
 if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
     from anthropic.types.beta.tools import ToolsBetaMessage
+    from langchain_core.documents import Document as LCDocument
+    from openai.types.chat import ChatCompletion
+    from unstructured.documents.elements import Element
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
 MAX_TOKENS = 1000
@@ -38,13 +40,16 @@ class ChatModelParams:
         self.engine = engine
         self.model = model
 
-def messages(history: list[tuple[str | None, str | None]], engine: EngineEnum) -> list:
+def messages(
+    history: list[tuple[str | None, str | None]],
+    engine: EngineEnum,
+) -> list[dict] | list[BaseMessage]:
     match engine:
         case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.hive:
             return messages_dicts(history)
         case EngineEnum.langchain:
             return messages_langchain(history)
-    return []
+    raise ValueError(engine)
 
 def messages_dicts(
     history: list[tuple[str | None, str | None]],
@@ -72,7 +77,7 @@ def chat(
     messages: list,
     chatmodel: ChatModelParams,
     **kwargs: dict,
-):
+) -> (tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage):
     match chatmodel.engine:
         case EngineEnum.hive:
             return chat_hive(messages[-1]["content"], chatmodel.model, **kwargs)
@@ -123,8 +128,8 @@ def chat_openai(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-):
-    client = kwargs.pop("client", openai.OpenAI())
+) -> ChatCompletion:
+    client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
     return client.chat.completions.create(
@@ -146,11 +151,23 @@ def chat_anthropic(
     tools = kwargs.get("tools", [])
     temperature = kwargs.pop("temperature", 0.0)
     endpoint = client.beta.tools.messages if tools else client.messages
-    langfuse_context.update_current_observation(input=messages, model=model)
-    return endpoint.create(
+    response: AnthropicMessage | ToolsBetaMessage = endpoint.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
         **kwargs,
     )
+    # report input, output, model, usage to langfuse
+    usage = {
+        "input": response.usage.input_tokens,
+        "output": response.usage.output_tokens,
+        "total": response.usage.input_tokens + response.usage.output_tokens,
+    }
+    langfuse_context.update_current_observation(
+        input=messages,
+        model=model,
+        output=response.content,
+        usage=usage,
+    )
+    return response
