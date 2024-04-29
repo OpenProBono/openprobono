@@ -112,9 +112,10 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
         "session_id": r.session_id,
+        "temperature": 0,
     }
     # response is a ChatCompletion object
-    response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+    response = chat_models.chat(messages, chatmodel, **kwargs)
     response_message = response.choices[0].message
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
@@ -155,7 +156,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
                 )  # extend conversation with function response
                 tools_used += 1
             # get a new response from the model where it can see the function response
-            response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+            response = chat_models.chat(messages, chatmodel, **kwargs)
             response_message = response.choices[0].message
             messages.append(response_message)
             tool_calls = response_message.tool_calls
@@ -174,8 +175,9 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
         "tools": toolset,
         "client": client,
         "system": MULTIPLE_TOOLS_TEMPLATE,
+        "temperature": 0,
     }
-    response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+    response = chat_models.chat(messages, chatmodel, **kwargs)
     messages.append({"role": response.role, "content": response.content})
     tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
     # Step 2: check if the model wanted to call a function
@@ -214,7 +216,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
             tools_used += 1
         # Step 4: send info for each function call and function response to the model
         # get a new response from the model where it can see the function response
-        response = chat_models.chat(messages, chatmodel, 0, **kwargs)
+        response = chat_models.chat(messages, chatmodel, **kwargs)
         messages.append({"role": response.role, "content": response.content})
         tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
     if isinstance(messages[-1]["content"], list):

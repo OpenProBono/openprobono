@@ -27,8 +27,8 @@ from ragas.testset.generator import (
 from unstructured.partition.auto import partition
 
 import milvusdb
-from chat_models import GPT_4_TURBO
 from encoders import OPENAI_3_SMALL
+from models import OpenAIChatModel
 
 if TYPE_CHECKING:
     from datasets import Dataset
@@ -69,7 +69,7 @@ def synthetic_testset(collection_name: str, expr: str) -> TestDataset | None:
     else:
         distributions = {simple: 0.5, reasoning: 0.25, multi_context: 0.25}
     generator_llm = ChatOpenAI()
-    critic_llm = ChatOpenAI(model=GPT_4_TURBO)
+    critic_llm = ChatOpenAI(model=OpenAIChatModel.GPT_4_TURBO.value)
     embeddings = OpenAIEmbeddings(model=OPENAI_3_SMALL, dimensions=768)
     ragas_embeddings = LangchainEmbeddingsWrapper(embeddings)
     splitter = TokenTextSplitter(chunk_size=1024, chunk_overlap=0)

@@ -156,7 +156,6 @@ class EngineEnum(str, Enum):
     openai = "openai"
     hive = "hive"
     anthropic = "anthropic"
-    huggingface = "huggingface"
 
 @unique
 class AnthropicChatModel(str, Enum):
@@ -165,15 +164,6 @@ class AnthropicChatModel(str, Enum):
     CLAUDE_3_OPUS = "claude-3-opus-20240229"
     CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
     CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
-
-@unique
-class HuggingFaceChatModel(str, Enum):
-    """Enumeration class representing different HuggingFace chat models."""
-
-    LLAMA_3_70B = "meta-llama/Meta-Llama-3-70B-Instruct"
-    LLAMA_3_8B = "meta-llama/Meta-Llama-3-8B-Instruct"
-    PHI_3_128K = "microsoft/Phi-3-mini-128k-instruct"
-    PHI_3_4K = "microsoft/Phi-3-mini-4k-instruct"
 
 @unique
 class HiveChatModel(str, Enum):

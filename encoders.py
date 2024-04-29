@@ -38,63 +38,14 @@ class EncoderParams:
         self.name = name
         self.dim = dim
 
-# load PyTorch Tensors onto GPU or Mac MPS, if possible
-if torch.cuda.is_available():
-    device = "cuda"
-elif torch.backends.mps.is_available():
-    device = "mps"
-else:
-    device = "cpu"
-
 # models
 OPENAI_3_LARGE = "text-embedding-3-large" # 3072 dimensions, can project down
 OPENAI_3_SMALL = "text-embedding-3-small" # 1536 dimensions, can project down
 OPENAI_ADA_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
 OPENAI_MODELS = {OPENAI_3_LARGE, OPENAI_3_SMALL, OPENAI_ADA_2}
 
-MPNET = "sentence-transformers/all-mpnet-base-v2" # max input length 384
-MINILM = "sentence-transformers/all-MiniLM-L6-v2"
-SENTENCE_TRANSFORMERS = {MPNET, MINILM}
-
-LEGALBERT = "nlpaueb/legal-bert-base-uncased"
-BERT = "bert-base-uncased"
-SFR_MISTRAL = "Salesforce/SFR-Embedding-Mistral" # 4096 dimensions, 32768 max tokens
-UAE_LARGE = "WhereIsAI/UAE-Large-V1" # 1024 dimensions, 512 max tokens
-
 # TODO(Nick): lookup dimensions and max tokens for huggingface models
 DEFAULT_ENCODER = EncoderParams(OPENAI_3_SMALL, 768)
-
-def get_huggingface_model(model_name: str) -> PreTrainedModel:
-    """Get a HuggingFace model based on its name.
-
-    Parameters
-    ----------
-    model_name : str
-        The name of a model on HuggingFace. Usually in username/model_name format.
-
-    Returns
-    -------
-    PreTrainedModel
-        The model, loaded onto a PyTorch device.
-
-    """
-    return AutoModel.from_pretrained(model_name).to(device)
-
-def get_huggingface_tokenizer(model_name: str) -> PreTrainedTokenizerBase:
-    """Get a HuggingFace tokenizer based on an associated model name.
-
-    Parameters
-    ----------
-    model_name : str
-        The name of a model on HuggingFace. Usually in username/model_name format.
-
-    Returns
-    -------
-    PreTrainedTokenizerBase
-        The tokenizer, to be used with a PreTrainedModel.
-
-    """
-    return AutoTokenizer.from_pretrained(model_name)
 
 def get_langchain_embedding_model(encoder: EncoderParams = DEFAULT_ENCODER) -> Embeddings:
     """Get the LangChain class for a given embedding model.
@@ -114,11 +65,6 @@ def get_langchain_embedding_model(encoder: EncoderParams = DEFAULT_ENCODER) -> E
     if encoder.name in OPENAI_MODELS:
         dim = encoder.dim if encoder.name != OPENAI_ADA_2 else None
         return OpenAIEmbeddings(model=encoder.name, dimensions=dim)
-    if encoder.name in SENTENCE_TRANSFORMERS:
-        return HuggingFaceEmbeddings(
-            model_name=encoder.name,
-            model_kwargs={"device": device},
-        )
     return HuggingFaceHubEmbeddings(model=encoder.name)
 
 def token_count(string: str, model: str) -> int:
@@ -164,40 +110,7 @@ def embed_strs(text: list[str], encoder: EncoderParams = DEFAULT_ENCODER) -> lis
     """
     if encoder.name in OPENAI_MODELS:
         return embed_strs_openai(text, encoder)
-    if encoder.name in SENTENCE_TRANSFORMERS:
-        return embed_strs_sentencetransformers(text, encoder)
-    if encoder.name == SFR_MISTRAL:
-        return embed_strs_mistral(text, encoder)
-    return embed_strs_huggingface(text, encoder)
-
-def embed_strs_huggingface(text: list[str], encoder: EncoderParams) -> list:
-    """Embed a list of strings using a HuggingFace model.
-
-    Parameters
-    ----------
-    text : list[str]
-        The list of strings to embed
-    encoder : EncoderParams
-        The parameters for a HuggingFace embedding model
-
-    Returns
-    -------
-    list
-        A list of floats representing embedded strings
-
-    """
-    model = get_huggingface_model(encoder.name)
-    tokenizer = get_huggingface_tokenizer(encoder.name)
-    text_tokens = tokenizer(
-        text,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-    ).to(device)
-    with torch.no_grad():
-        model_out: BaseModelOutput = model(**text_tokens)
-    # might want to call ndarray.squeeze() on this
-    return list(model_out.last_hidden_state.mean(dim=1).cpu().numpy())
+    raise ValueError(encoder.name)
 
 def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
     """Embed a list of strings using an OpenAI client.
@@ -245,101 +158,3 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
                 time.sleep(1)
                 attempt += 1
     return data
-
-# from https://huggingface.co/sentence-transformers/all-mpnet-base-v2
-def embed_strs_sentencetransformers(text: list[str], encoder: EncoderParams) -> list:
-    """Embed a list of strings using a sentence-transformers model.
-
-    Parameters
-    ----------
-    text : list[str]
-        The list of strings to embed
-    encoder : EncoderParams
-        The parameters for a sentence-transformers embedding model
-
-    Returns
-    -------
-    list
-        A list of floats representing embedded strings
-
-    """
-    # Mean Pooling - Take attention mask into account for correct averaging
-    def mean_pooling(model_output: BaseModelOutput,
-                     attention_mask: torch.Tensor) -> torch.Tensor:
-        # First element of model_output contains all token embeddings
-        token_embeddings = model_output[0]
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(
-            token_embeddings.size(),
-        ).float()
-        num = torch.sum(token_embeddings * input_mask_expanded, 1)
-        denom = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-        return num / denom
-    tokenizer = get_huggingface_tokenizer(encoder.name)
-    model = get_huggingface_model(encoder.name)
-    encoded_input = tokenizer(
-        text,
-        padding=True,
-        truncation=True,
-        return_tensors="pt").to(device)
-    # Compute token embeddings
-    with torch.no_grad():
-        model_output = model(**encoded_input)
-    # Perform pooling
-    sentence_embeddings = mean_pooling(model_output, encoded_input["attention_mask"])
-    # Normalize embeddings
-    sentence_embeddings = torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
-    return list(sentence_embeddings.cpu().numpy())
-
-# from https://huggingface.co/Salesforce/SFR-Embedding-Mistral
-def embed_strs_mistral(text: list[str], encoder: EncoderParams) -> list:
-    """Embed a list of strings using the SFR Mistral model.
-
-    Parameters
-    ----------
-    text : list[str]
-        The list of strings to embed
-    encoder : EncoderParams
-        The parameters for the SFR Mistral embedding model
-
-    Returns
-    -------
-    list
-        A list of floats representing embedded strings
-
-    """
-    def last_token_pool(last_hidden_states: torch.Tensor,
-                 attention_mask: torch.Tensor) -> torch.Tensor:
-        left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
-        if left_padding:
-            return last_hidden_states[:, -1]
-        sequence_lengths = attention_mask.sum(dim=1) - 1
-        batch_size = last_hidden_states.shape[0]
-        return last_hidden_states[
-            torch.arange(
-                batch_size,
-                device=last_hidden_states.device,
-            ), sequence_lengths,
-        ]
-
-    # load model and tokenizer
-    tokenizer = get_huggingface_tokenizer(encoder.name)
-    model = get_huggingface_model(encoder.name)
-
-    # get the embeddings
-    max_length = 4096
-    batch_dict = tokenizer(
-        text,
-        max_length=max_length,
-        padding=True,
-        truncation=True,
-        return_tensors="pt",
-    )
-    outputs = model(**batch_dict)
-    embeddings = last_token_pool(
-        outputs.last_hidden_state,
-        batch_dict["attention_mask"],
-    )
-
-    # normalize embeddings
-    embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-    return list(embeddings.cpu().numpy())
