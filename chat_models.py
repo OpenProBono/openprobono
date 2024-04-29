@@ -9,6 +9,7 @@ import openai
 import openai.resources
 import requests
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langfuse.decorators import langfuse_context, observe
 
 from models import EngineEnum, HiveChatModel
 from prompts import HIVE_QA_PROMPT
@@ -134,6 +135,7 @@ def chat_openai(
         **kwargs,
     )
 
+@observe(as_type="generation")
 def chat_anthropic(
     messages: list[dict],
     model: str,
@@ -144,6 +146,7 @@ def chat_anthropic(
     tools = kwargs.get("tools", [])
     temperature = kwargs.pop("temperature", 0.0)
     endpoint = client.beta.tools.messages if tools else client.messages
+    langfuse_context.update_current_observation(input=messages, model=model)
     return endpoint.create(
         model=model,
         messages=messages,

@@ -10,6 +10,7 @@ from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
 from langfuse.callback import CallbackHandler
+from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
 
 import chat_models
@@ -162,6 +163,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
             tool_calls = response_message.tool_calls
     return response_message.content
 
+@observe()
 def anthropic_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
@@ -177,6 +179,11 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
         "system": MULTIPLE_TOOLS_TEMPLATE,
         "temperature": 0,
     }
+    langfuse_context.update_current_trace(session_id=r.session_id)
+    # Anthropic system prompt does not go in messages list,
+    # but thats where langfuse expects it, so insert it and add it to the observation
+    langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
+    langfuse_context.update_current_observation(input=messages + langfuse_prompt_msg)
     response = chat_models.chat(messages, chatmodel, **kwargs)
     messages.append({"role": response.role, "content": response.content})
     tool_msgs = [msg for msg in response.content if msg.type == "tool_use"]
