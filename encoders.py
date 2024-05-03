@@ -5,49 +5,19 @@ import time
 from typing import TYPE_CHECKING
 
 import tiktoken
-import torch
-from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain_community.embeddings.huggingface_hub import HuggingFaceHubEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from openai import APITimeoutError, OpenAI
-from transformers import (
-    AutoModel,
-    AutoTokenizer,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-)
+
+from models import OpenAIEncoder
 
 if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
-    from transformers.modeling_outputs import BaseModelOutput
 
-class EncoderParams:
-    """Define the embedding model for a Collection."""
+    from models import EncoderParams
 
-    def __init__(self: EncoderParams, name: str, dim: int) -> None:
-        """Define parameters for an embedding model to pass to chains.
 
-        Parameters
-        ----------
-        name : str
-            The name of the embedding model
-        dim : int
-            The number of dimensions in the model hidden layers
-
-        """
-        self.name = name
-        self.dim = dim
-
-# models
-OPENAI_3_LARGE = "text-embedding-3-large" # 3072 dimensions, can project down
-OPENAI_3_SMALL = "text-embedding-3-small" # 1536 dimensions, can project down
-OPENAI_ADA_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
-OPENAI_MODELS = {OPENAI_3_LARGE, OPENAI_3_SMALL, OPENAI_ADA_2}
-
-# TODO(Nick): lookup dimensions and max tokens for huggingface models
-DEFAULT_ENCODER = EncoderParams(OPENAI_3_SMALL, 768)
-
-def get_langchain_embedding_model(encoder: EncoderParams = DEFAULT_ENCODER) -> Embeddings:
+def get_langchain_embedding_model(encoder: EncoderParams) -> Embeddings:
     """Get the LangChain class for a given embedding model.
 
     Parameters
@@ -62,8 +32,8 @@ def get_langchain_embedding_model(encoder: EncoderParams = DEFAULT_ENCODER) -> E
         The class representing the embedding model for use in LangChain
 
     """
-    if encoder.name in OPENAI_MODELS:
-        dim = encoder.dim if encoder.name != OPENAI_ADA_2 else None
+    if encoder.name in OpenAIEncoder:
+        dim = encoder.dim if encoder.name != OpenAIEncoder.ADA_2.value else None
         return OpenAIEmbeddings(model=encoder.name, dimensions=dim)
     return HuggingFaceHubEmbeddings(model=encoder.name)
 
@@ -92,7 +62,7 @@ def token_count(string: str, model: str) -> int:
         encoding = tiktoken.get_encoding("cl100k_base")
     return len(encoding.encode(string))
 
-def embed_strs(text: list[str], encoder: EncoderParams = DEFAULT_ENCODER) -> list:
+def embed_strs(text: list[str], encoder: EncoderParams) -> list:
     """Embeds text from a list where each element is within the model max input length.
 
     Parameters
@@ -108,7 +78,7 @@ def embed_strs(text: list[str], encoder: EncoderParams = DEFAULT_ENCODER) -> lis
         A list of lists of floats representing the embedded text
 
     """
-    if encoder.name in OPENAI_MODELS:
+    if encoder.name in OpenAIEncoder:
         return embed_strs_openai(text, encoder)
     raise ValueError(encoder.name)
 
@@ -148,7 +118,7 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
         while attempt < num_attempts:
             try:
                 args = {"input": text[i:j], "model": encoder.name}
-                if encoder.name != OPENAI_ADA_2:
+                if encoder.name != OpenAIEncoder.ADA_2.value:
                     args["dimensions"] = encoder.dim
                 response = client.embeddings.create(**args)
                 data += [data.embedding for data in response.data]

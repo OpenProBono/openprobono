@@ -20,12 +20,6 @@ from encoders import (
     embed_strs,
     get_langchain_embedding_model,
 )
-from milvusdb import (
-    COLLECTION_ENCODER,
-    COLLECTION_FORMAT,
-    FORMAT_OUTPUTFIELDS,
-    get_expr,
-)
 
 if TYPE_CHECKING:
     from fastapi import UploadFile

@@ -1,13 +1,21 @@
 """Written by Arman Aydemir. Used to access and store data in the Firestore database."""
 import os
 from json import loads
+from typing import Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 from langfuse import Langfuse
 
-from bot import BotRequest, ChatRequest, anthropic_bot, opb_bot, openai_bot
-from models import ChatBySession, EngineEnum, FetchSession, get_uuid_id
+from models import (
+    BotRequest,
+    ChatBySession,
+    ChatRequest,
+    EncoderParams,
+    FetchSession,
+    MilvusMetadataFormat,
+    get_uuid_id,
+)
 
 langfuse = Langfuse()
 
@@ -18,6 +26,7 @@ langfuse = Langfuse()
 VERSION = "vm12_lang"
 BOT_COLLECTION = "bots"
 conversation_collection = "conversations"
+MILVUS_COLLECTION = "milvus"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -215,27 +224,57 @@ def load_bot(bot_id: str) -> BotRequest:
 
     return None
 
+def load_vdb(collection_name: str) -> dict:
+    """Load the parameters for a collection from the database.
 
-def process_chat(r: ChatRequest) -> dict:
-    try:
-        bot = load_bot(r.bot_id)
-        if bot is None:
-            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection that uses the parameters.
 
-        match bot.engine:
-            case EngineEnum.langchain:
-                output = opb_bot(r, bot)
-            case EngineEnum.openai:
-                output = openai_bot(r, bot)
-            case EngineEnum.anthropic:
-                output = anthropic_bot(r, bot)
-            case _:
-                return {"message": f"Failure: invalid bot engine {bot.engine}"}
+    Returns
+    -------
+    dict
+        The collection parameters: encoder, metadata_format, fields.
 
-        # store conversation (and also log the api_key)
-        store_conversation(r, output)
+    """
+    data = db.collection(MILVUS_COLLECTION).document(collection_name).get()
+    if data.exists:
+        return data.to_dict()
 
-    except Exception as error:
-        return {"message": "Failure: Internal Error: " + str(error)}
-    # return the chat and the bot_id
-    return {"message": "Success", "output": output, "bot_id": r.bot_id}
+    return None
+
+def store_vdb(
+    collection_name: str,
+    encoder: EncoderParams,
+    metadata_format: MilvusMetadataFormat,
+    fields: Optional[list] = None,
+) -> bool:
+    """Store the configuration of a Milvus collection in the database.
+
+    Parameters
+    ----------
+    collection_name : str
+        The collection that uses the configuration.
+    encoder : EncoderParams
+        The EncoderParams object to store.
+    metadata_format : MilvusMetadataFormat
+        The MilvusMetadataFormat object to store.
+    fields : list
+        The list of field names to store if metadata_format is field.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+
+    """
+    data = {
+        "encoder": encoder.model_dump(),
+        "metadata_format": metadata_format.value,
+        "timestamp": firestore.SERVER_TIMESTAMP,
+    }
+    if fields is not None:
+        data["fields"] = fields
+    db.collection(MILVUS_COLLECTION).document(collection_name).set(data)
+    return True

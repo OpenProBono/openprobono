@@ -7,11 +7,10 @@ import os
 from json import loads
 from logging.handlers import RotatingFileHandler
 from operator import itemgetter
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from langchain.chains.summarize import load_summarize_chain
@@ -37,12 +36,17 @@ from pymilvus import (
     connections,
     utility,
 )
-from unstructured.documents.elements import Element
 from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.auto import partition
 
 import encoders
 import prompts
+from db import load_vdb, store_vdb
+from models import EncoderParams, MilvusMetadataFormat
+
+if TYPE_CHECKING:
+    from fastapi import UploadFile
+    from unstructured.documents.elements import Element
 
 langfuse_handler = CallbackHandler(public_key=os.environ["LANGFUSE_PUBLIC_KEY"], secret_key=os.environ["LANGFUSE_SECRET_KEY"])
 
@@ -233,84 +237,89 @@ def quickstart_ocr(
     print(document.text)
     return document.text
 
+# used to cache collection params from firebase
+COLLECTION_PARAMS = {}
 
-# collections by jurisdiction?
-# TODO(Nick): get collection names from Milvus
-US = "USCode"
-NC = "NCGeneralStatutes"
-CAP = "CAP"
-SESSION_DATA = "SessionData"
-COURTLISTENER = "courtlistener"
-COURTROOM5 = "Courtroom5_NCStatutes_BySection"
-COLLECTIONS = {US, NC, CAP, COURTLISTENER, COURTROOM5}
-# collection -> encoder mapping
-# TODO(Nick): make this a file or use firebase?
-COLLECTION_ENCODER = {
-    US: encoders.DEFAULT_ENCODER,
-    NC: encoders.DEFAULT_ENCODER,
-    CAP: encoders.DEFAULT_ENCODER,
-    COURTLISTENER: encoders.EncoderParams(encoders.OPENAI_ADA_2, 1536),
-    SESSION_DATA: encoders.EncoderParams(encoders.OPENAI_3_SMALL, 768),
-    COURTROOM5: encoders.DEFAULT_ENCODER,
-}
-
-PDF = "PDF"
-HTML = "HTML"
-JSON = "JSON"
-COLLECTION_FORMAT = {
-    US: PDF,
-    NC: PDF,
-    SESSION_DATA: JSON,
-    CAP: CAP,
-    COURTLISTENER: COURTLISTENER,
-    COURTROOM5: JSON,
-}
-
-FORMAT_OUTPUTFIELDS = {
-    PDF: ["source", "page"],
-    HTML: [],
-    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name",
-          "jurisdiction_name"],
-    COURTLISTENER: ["source"],
-    JSON: ["metadata"],
-}
-# can customize index params with param field assuming you know index type
 SEARCH_PARAMS = {
     "anns_field": "vector",
-    "param": {},
+    "param": {}, # can customize index params assuming you know index type
     "output_fields": ["text"],
 }
+
 # AUTOINDEX is only supported through Zilliz, not standalone Milvus
 AUTO_INDEX = {
     "index_type": "AUTOINDEX",
     "metric_type": "IP",
 }
-
+SESSION_DATA = "SessionData"
 MAX_K = 16384
 
+def load_vdb_param(
+    collection_name: str,
+    param_name: str,
+) -> EncoderParams | MilvusMetadataFormat | list:
+    """Load a vector database parameter from firebase.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection using the parameter
+    param_name : str
+        The name of the desired parameter value
+
+    Returns
+    -------
+    EncoderParams | MilvusMetadataFormat | list
+        EncoderParams if param_name = "encoder"
+
+        MilvusMetadataFormat if param_name = "metadata_format"
+
+        list if param_name = "fields"
+
+    """
+    # check if the params are cached
+    if collection_name in COLLECTION_PARAMS:
+        param_value = COLLECTION_PARAMS[collection_name][param_name]
+    else:
+        param_value = load_vdb(collection_name)[param_name]
+    # create the parameter object
+    match param_name:
+        case "encoder":
+            return EncoderParams(**param_value)
+        case "metadata_format":
+            return MilvusMetadataFormat(param_value)
+        case "fields":
+            return param_value
+        case _:
+            raise ValueError(param_name)
+
 def create_collection(
-        name: str,
-        description: str = "",
-        extra_fields: list[FieldSchema] | None = None,
-        encoder: encoders.EncoderParams = encoders.DEFAULT_ENCODER,
-        metadata: str = JSON,
-    ) -> Collection:
+    name: str,
+    encoder: EncoderParams | None = None,
+    description: str = "",
+    extra_fields: list[FieldSchema] | None = None,
+    metadata_format: MilvusMetadataFormat = MilvusMetadataFormat.JSON,
+) -> Collection:
     """Create a collection with a given name and other parameters.
 
     Parameters
     ----------
     name : str
         The name of the collection to be created
+    encoder : EncoderParams, optional
+        The embedding model used to create the vectors,
+        by default text-embedding-3-small with 768 dimensions
     description : str, optional
         A description for the collection, by default ""
     extra_fields : list[FieldSchema] | None, optional
         A list of fields to add to the collections schema, by default None
-    encoder : encoders.EncoderParams, optional
-        The embedding model used to create the vectors,
-        by default encoders.DEFAULT_ENCODER
-    metadata : str, optional
-        The format to use to store metadata other than text, by default JSON
-        (a single dictionary called `metadata`)
+    metadata_format : MilvusMetadataFormat, optional
+        The format used to store metadata other than text, by default JSON
+        (a single field called `metadata`)
+
+        If `JSON`, the `metadata` field will be made automatically
+
+        If `NONE`, `extra_fields` should not contain fields
 
     Returns
     -------
@@ -326,10 +335,10 @@ def create_collection(
     if utility.has_collection(name):
         already_exists = f"collection named {name} already exists"
         raise ValueError(already_exists)
+    encoder = encoder if encoder is not None else EncoderParams()
+    db_fields = None
 
-    # TODO: if possible, support custom embedding size for huggingface models
-    # TODO: support other OpenAI models
-    # define schema, create collection, create index on vectors
+    # define schema
     pk_field = FieldSchema(
         name="pk",
         dtype=DataType.INT64,
@@ -337,7 +346,6 @@ def create_collection(
         description="The primary key",
         auto_id=True,
     )
-    # unstructured chunk lengths are sketchy
     text_field = FieldSchema(
         name="text",
         dtype=DataType.VARCHAR,
@@ -351,15 +359,25 @@ def create_collection(
         description="The embedded text",
     )
 
-    if not extra_fields:
-        extra_fields = []
-
-    if metadata == JSON:
-        extra_fields.append(FieldSchema(
-            name="metadata",
-            dtype=DataType.JSON,
-            description="The associated metadata",
-        ))
+    # keep track of how the collection stores metadata
+    match metadata_format:
+        case MilvusMetadataFormat.JSON:
+            extra_fields = [FieldSchema(
+                name="metadata",
+                dtype=DataType.JSON,
+                description="The associated metadata",
+            )]
+        case MilvusMetadataFormat.NONE:
+            if extra_fields:
+                msg = "metadata_format = NONE but extra_fields is not empty"
+                raise ValueError(msg)
+        case MilvusMetadataFormat.FIELD:
+            # FIELD format allows for empty extra_fields or a single json field as long
+            # as dynamic fields are enabled, otherwise should be NONE or JSON
+            if extra_fields is None:
+                extra_fields = []
+            else:
+                db_fields = [field.name for field in extra_fields]
 
     schema = CollectionSchema(
         fields=[pk_field, embedding_field, text_field, *extra_fields],
@@ -367,12 +385,21 @@ def create_collection(
         enable_dynamic_field=True,
         description=description,
     )
+
+    # create collection
     coll = Collection(name=name, schema=schema)
+    # create index for vector field
     coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
 
-    # save collection->encoder, collection->format
-    COLLECTION_ENCODER[name] = encoder
-    COLLECTION_FORMAT[name] = metadata
+    # save params in firebase
+    store_vdb(name, encoder, metadata_format, db_fields)
+    # cache params in dictionary
+    COLLECTION_PARAMS[name] = {
+        "encoder": encoder,
+        "metadata_format": metadata_format,
+    }
+    if db_fields is not None:
+        COLLECTION_PARAMS[name]["fields"] = db_fields
     return coll
 
 def langchain_db(collection_name: str) -> Milvus:
@@ -389,10 +416,9 @@ def langchain_db(collection_name: str) -> Milvus:
         A subclass of LangChain's VectorStore
 
     """
+    encoder = load_vdb_param(collection_name, "encoder")
     return Milvus(
-        embedding_function=encoders.get_langchain_embedding_model(
-            COLLECTION_ENCODER[collection_name],
-        ),
+        embedding_function=encoders.get_langchain_embedding_model(encoder),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True,
@@ -427,10 +453,6 @@ def query_check(collection_name: str, query: str, k: int, session_id: str = "") 
         msg["message"] = f"Failure: k = {k} out of range [1, {MAX_K}]"
     if not session_id and collection_name == SESSION_DATA:
         msg["message"] = "Failure: session_id not found"
-    if collection_name not in COLLECTION_ENCODER:
-        msg["message"] = f"Failure: encoder for collection {collection_name} not found"
-    if collection_name not in COLLECTION_FORMAT:
-        msg["message"] = f"Failure: format for collection {collection_name} not found"
     return msg
 
 def query(collection_name: str, query: str,
@@ -462,13 +484,18 @@ def query(collection_name: str, query: str,
     coll = Collection(collection_name)
     coll.load()
     search_params = SEARCH_PARAMS
+    encoder = load_vdb_param(collection_name, "encoder")
     search_params["data"] = encoders.embed_strs(
         [query],
-        COLLECTION_ENCODER[collection_name],
+        encoder,
     )
     search_params["limit"] = k
-    search_params["output_fields"] += FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
-
+    metadata_format = load_vdb_param(collection_name, "metadata_format")
+    match metadata_format:
+        case MilvusMetadataFormat.JSON:
+            search_params["output_fields"] += ["metadata"]
+        case MilvusMetadataFormat.FIELD:
+            search_params["output_fields"] += load_vdb_param(collection_name, "fields")
     if expr:
         search_params["expr"] = expr
     if session_id:
@@ -482,7 +509,11 @@ def query(collection_name: str, query: str,
     if res:
         # on success, returns a list containing a single inner list containing result objects
         if len(res) == 1:
-            hits = res[0]
+            # sort hits by ascending distance
+            hits = sorted([hit.to_dict() for hit in res[0]], key=lambda h: h["distance"])
+            # delete pks
+            for hit in hits:
+                del hit["id"]
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
@@ -513,7 +544,14 @@ def qa_chain(collection_name: str, k: int = 4,
         tool_choice="CitedAnswer",
     )
     output_parser = JsonOutputKeyToolsParser(key_name="CitedAnswer", return_single=True)
-    output_fields = FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
+    metadata_format = load_vdb_param(collection_name, "metadata_format")
+    match metadata_format:
+        case MilvusMetadataFormat.FIELD:
+            output_fields = load_vdb_param(collection_name, "fields")
+        case MilvusMetadataFormat.JSON:
+            output_fields = ["metadata"]
+        case MilvusMetadataFormat.NONE:
+            output_fields = ["text"]
 
     def format_docs_with_id(docs: list[Document]) -> str:
         formatted = [
@@ -521,7 +559,6 @@ def qa_chain(collection_name: str, k: int = 4,
             [f"Chunk {f.capitalize()}: {doc.metadata[f]}" for f in output_fields]) +
             "\nChunk Text: " + doc.page_content
             # start=1 because the LLM will switch to 1-indexed IDs if chunks are large
-            # TODO(Nick): format QA chain docs differently based on chunk size
             for i, doc in enumerate(docs, start=1)
         ]
         return "\n\n" + "\n\n".join(formatted)
@@ -568,13 +605,12 @@ def qa(collection_name: str, query: str,
     chain = qa_chain(collection_name, k, session_id)
     result = chain.invoke(query)
     cited_sources = [
-        {
-            # i - 1 because start=1 in format_docs_with_id (see above)
-            field: result["docs"][i - 1].metadata[field]
-            for field in FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
-        }
+        # i - 1 because start=1 in format_docs_with_id (see qa_chain)
+        result["docs"][i - 1].metadata
         for i in set(result["cited_answer"][0]["citations"])
     ]
+    for src in cited_sources:
+        del src["pk"]
     return {
         "message": "Success",
         "result": {
@@ -583,17 +619,15 @@ def qa(collection_name: str, query: str,
         },
     }
 
-def file_upload(file: UploadFile, collection_name: str, session_id: str = "") -> dict:
+def file_upload(file: UploadFile, session_id: str) -> dict:
     """Upload a file to a collection.
 
     Parameters
     ----------
     file : UploadFile
         The file to upload
-    collection_name : str
-        The collection where the file will be uploaded
-    session_id : str, optional
-        The session associated with the file, by default ""
+    session_id : str
+        The session associated with the file
 
     Returns
     -------
@@ -602,7 +636,7 @@ def file_upload(file: UploadFile, collection_name: str, session_id: str = "") ->
 
     """
     elements = partition(file=file.file, metadata_filename=file.filename)
-    result = upload_elements(elements, collection_name, session_id)
+    result = upload_elements(elements, SESSION_DATA, session_id)
     if result["message"] == "Success":
         result["message"] = f"Success: uploaded {file.filename}"
     return result
@@ -641,7 +675,7 @@ def upload_elements(
     for i in range(num_chunks):
         texts.append(chunks[i].text)
         metadatas.append(chunks[i].metadata.to_dict())
-    vectors = encoders.embed_strs(texts, COLLECTION_ENCODER[collection_name])
+    vectors = encoders.embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     data = [vectors, texts, metadatas]
     collection = Collection(collection_name)
     pks = []
@@ -684,9 +718,10 @@ def upload_elements(
     return {"message": "Success", "num_chunks": num_chunks}
 
 def upload_documents(collection_name: str, documents: list[Document]):
+    encoder = load_vdb_param(collection_name, "encoder")
     ids = langchain_db(collection_name).add_documents(
         documents=documents,
-        embedding=encoders.get_langchain_embedding_model(COLLECTION_ENCODER[collection_name]),
+        embedding=encoders.get_langchain_embedding_model(encoder),
         connection_args=connection_args,
     )
     num_docs = len(documents)
@@ -716,7 +751,7 @@ def get_documents(collection_name: str, expr: str) -> list[Document]:
             page_content=hit["text"],
             metadata={
                 field: hit[field]
-                for field in FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
+                for field in hit if field != "text"
             },
         )
         for hit in hits
@@ -745,7 +780,14 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
     coll.load()
-    output_fields = ["text"] + FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
+    collection_format = load_vdb_param(collection_name, "metadata_format")
+    match collection_format:
+        case MilvusMetadataFormat.FIELD:
+            output_fields = ["text", *load_vdb_param(collection_name, "fields")]
+        case MilvusMetadataFormat.JSON:
+            output_fields = ["text", "metadata"]
+        case MilvusMetadataFormat.NONE:
+            output_fields = ["text"]
     q_iter = coll.query_iterator(
         expr=expr,
         output_fields=output_fields,
@@ -754,6 +796,9 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     hits = []
     res = q_iter.next()
     while len(res) > 0:
+        # delete pks
+        for hit in res:
+            del hit["pk"]
         hits += res
         res = q_iter.next()
     q_iter.close()
@@ -831,6 +876,6 @@ class FilteredRetriever(VectorStoreRetriever):
         # double k on each call to get_relevant_documents() until there are k filtered documents
         while len(docs) < k:
             results = self.vectorstore.as_retriever(search_kwargs={"k": k}).get_relevant_documents(query=query)
-            docs += [doc for doc in results if doc.metadata['session_id'] == self.session_filter and doc not in docs]
+            docs += [doc for doc in results if doc.metadata["session_id"] == self.session_filter and doc not in docs]
             k = 2 * k
         return docs[:self.search_kwargs["k"]]

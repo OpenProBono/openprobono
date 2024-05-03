@@ -1,13 +1,11 @@
 from langchain.agents import Tool
+from pymilvus import Collection
 
-from milvusdb import COLLECTIONS, SESSION_DATA, Collection, qa, query
+from milvusdb import SESSION_DATA, qa, query
 from models import BotRequest, EngineEnum, VDBMethodEnum, VDBTool
 
 
 def qa_tool(tool: VDBTool):
-    if tool.collection_name not in COLLECTIONS:
-        raise ValueError(f"invalid collection_name {tool.collection_name}")
-
     async def async_qa(tool: VDBTool, question: str):
         return qa(tool.collection_name, question, tool.k)
 
@@ -27,9 +25,6 @@ def qa_tool(tool: VDBTool):
 
 
 def query_tool(tool: VDBTool):
-    if tool.collection_name not in COLLECTIONS:
-        raise ValueError(f"invalid collection_name {tool.collection_name}")
-
     async def async_query(tool: VDBTool, q: str):
         return query(tool.collection_name, q, tool.k)
 

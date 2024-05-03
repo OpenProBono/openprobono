@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
 
-from models import EngineEnum, HiveChatModel
+from models import ChatModelParams, EngineEnum, HiveChatModel
 from prompts import HIVE_QA_PROMPT
 
 if TYPE_CHECKING:
@@ -22,23 +22,6 @@ if TYPE_CHECKING:
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
 MAX_TOKENS = 1000
-
-class ChatModelParams:
-    """Define a chat model for RAG."""
-
-    def __init__(self: ChatModelParams, engine: EngineEnum, model: str) -> None:
-        """Define parameters for a chat model.
-
-        Parameters
-        ----------
-        engine : str
-            The API/Framework on which the model runs
-        model : str
-            The name of the model
-
-        """
-        self.engine = engine
-        self.model = model
 
 def messages(
     history: list[tuple[str | None, str | None]],

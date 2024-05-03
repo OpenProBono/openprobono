@@ -5,19 +5,19 @@ from typing import Annotated, Optional
 import langfuse
 from fastapi import Body, FastAPI, UploadFile
 
+from bot import anthropic_bot, opb_bot, openai_bot
 from db import (
     admin_check,
     api_key_check,
     fetch_session,
+    load_bot,
     load_session,
-    process_chat,
     set_session_to_bot,
     store_bot,
+    store_conversation,
 )
 from milvusdb import (
-    COLLECTIONS,
     SESSION_DATA,
-    US,
     crawl_and_scrape,
     delete_expr,
     file_upload,
@@ -29,6 +29,7 @@ from models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    EngineEnum,
     FetchSession,
     InitializeSession,
     get_uuid_id,
@@ -46,6 +47,31 @@ async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
     # Flush all events to be sent to Langfuse on shutdown and
     # terminate all Threads gracefully. This operation is blocking.
     langfuse.flush()
+
+
+def process_chat(r: ChatRequest) -> dict:
+    try:
+        bot = load_bot(r.bot_id)
+        if bot is None:
+            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+
+        match bot.engine:
+            case EngineEnum.langchain:
+                output = opb_bot(r, bot)
+            case EngineEnum.openai:
+                output = openai_bot(r, bot)
+            case EngineEnum.anthropic:
+                output = anthropic_bot(r, bot)
+            case _:
+                return {"message": f"Failure: invalid bot engine {bot.engine}"}
+
+        # store conversation (and also log the api_key)
+        store_conversation(r, output)
+
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+    # return the chat and the bot_id
+    return {"message": "Success", "output": output, "bot_id": r.bot_id}
 
 
 api = FastAPI(lifespan=lifespan)
@@ -232,7 +258,7 @@ def create_bot(
                                 {
                                     "name": "USCode_query",
                                     "method": "query",
-                                    "collection_name": US,
+                                    "collection_name": "USCode",
                                     "k": 4,
                                     "prompt": "Useful for finding information about US Code",  # noqa: E501
                                 },
@@ -264,7 +290,7 @@ def create_bot(
                                 {
                                     "name": "name for tool",
                                     "method": "which search method to use, must be one of: qa, query",  # noqa: E501
-                                    "collection_name": f"name of database to query, must be one of: {', '.join(list(COLLECTIONS))}",  # noqa: E501
+                                    "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",  # noqa: E501
                                     "prompt": "description for agent to know when to use the tool",  # noqa: E501
                                     "prefix": "a prefix to add to query passed to tool by llm",  # noqa: E501
@@ -305,7 +331,7 @@ def upload_file(file: UploadFile, session_id: str) -> dict:
         Success or failure message.
 
     """
-    return file_upload(file, SESSION_DATA, session_id)
+    return file_upload(file, session_id)
 
 
 @api.post("/upload_files", tags=["User Upload"])
