@@ -279,9 +279,8 @@ def load_vdb_param(
     """
     # check if the params are cached
     if collection_name in COLLECTION_PARAMS:
-        param_value = COLLECTION_PARAMS[collection_name][param_name]
-    else:
-        param_value = load_vdb(collection_name)[param_name]
+        return COLLECTION_PARAMS[collection_name][param_name]
+    param_value = load_vdb(collection_name)[param_name]
     # create the parameter object
     match param_name:
         case "encoder":
