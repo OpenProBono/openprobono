@@ -9,12 +9,11 @@ from langchain_community.embeddings.huggingface_hub import HuggingFaceHubEmbeddi
 from langchain_openai import OpenAIEmbeddings
 from openai import APITimeoutError, OpenAI
 
-from models import OpenAIEncoder
+from models import EncoderParams, OpenAIEncoder
 
 if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
 
-    from models import EncoderParams
 
 
 def get_langchain_embedding_model(encoder: EncoderParams) -> Embeddings:
@@ -95,7 +94,7 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
     Returns
     -------
     list
-        A list of floats representing embedded strings
+        A list of lists of floats representing embedded strings
 
     """
     max_tokens = 8191
@@ -106,12 +105,11 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
     num_strings = len(text)
     while i < num_strings:
         j = i
-        tokens = 0
-        while (
-            j < num_strings and
-            j - i < max_array_size and
-            (tokens := tokens + token_count(text[j], encoder.name)) < max_tokens
-        ):
+        while j < num_strings and j - i < max_array_size:
+            tokens = token_count(text[j], encoder.name)
+            if tokens > max_tokens:
+                msg = f"str is {tokens} tokens but the max is {max_tokens}"
+                raise ValueError(msg)
             j += 1
         attempt = 1
         num_attempts = 75

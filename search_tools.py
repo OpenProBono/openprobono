@@ -213,7 +213,7 @@ def search_anthropic_tool(tool: SearchTool, function_args: dict) -> str:
 def search_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.search_tools:
-        match bot.engine:
+        match bot.chat_model.engine:
             case EngineEnum.langchain:
                 match t.method:
                     case SearchMethodEnum.serpapi:

@@ -55,7 +55,7 @@ def process_chat(r: ChatRequest) -> dict:
         if bot is None:
             return {"message": "Failure: No bot found with bot id: " + r.bot_id}
 
-        match bot.engine:
+        match bot.chat_model.engine:
             case EngineEnum.langchain:
                 output = opb_bot(r, bot)
             case EngineEnum.openai:
@@ -63,7 +63,7 @@ def process_chat(r: ChatRequest) -> dict:
             case EngineEnum.anthropic:
                 output = anthropic_bot(r, bot)
             case _:
-                return {"message": f"Failure: invalid bot engine {bot.engine}"}
+                return {"message": f"Failure: invalid bot engine {bot.chat_model.engine}"}
 
         # store conversation (and also log the api_key)
         store_conversation(r, output)
@@ -331,7 +331,10 @@ def upload_file(file: UploadFile, session_id: str) -> dict:
         Success or failure message.
 
     """
-    return file_upload(file, session_id)
+    try:
+        return file_upload(file, session_id)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
 
 
 @api.post("/upload_files", tags=["User Upload"])

@@ -142,18 +142,18 @@ def vdb_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.vdb_tools:
         if (t.method == VDBMethodEnum.qa):
-            if (bot.engine == EngineEnum.langchain):
+            if (bot.chat_model.engine == EngineEnum.langchain):
                 toolset.append(qa_tool(t))
-            elif (bot.engine == EngineEnum.openai):
+            elif (bot.chat_model.engine == EngineEnum.openai):
                 toolset.append(openai_qa_tool(t))
-            elif bot.engine == EngineEnum.anthropic:
+            elif bot.chat_model.engine == EngineEnum.anthropic:
                 toolset.append(anthropic_qa_tool(t))
         elif (t.method == VDBMethodEnum.query):
-            if (bot.engine == EngineEnum.langchain):
+            if (bot.chat_model.engine == EngineEnum.langchain):
                 toolset.append(query_tool(t))
-            elif (bot.engine == EngineEnum.openai):
+            elif (bot.chat_model.engine == EngineEnum.openai):
                 toolset.append(openai_query_tool(t))
-            elif bot.engine == EngineEnum.anthropic:
+            elif bot.chat_model.engine == EngineEnum.anthropic:
                 toolset.append(anthropic_query_tool(t))
     return toolset
 
