@@ -10,8 +10,14 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
 
-from models import ChatModelParams, EngineEnum, HiveChatModel
-from prompts import HIVE_QA_PROMPT
+from models import (
+    AnthropicChatModel,
+    ChatModelParams,
+    EngineEnum,
+    HiveChatModel,
+    OpenAIModerationModel,
+)
+from prompts import HIVE_QA_PROMPT, MODERATION_PROMPT
 
 if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
@@ -155,3 +161,101 @@ def chat_anthropic(
         usage=usage,
     )
     return response
+
+def moderate(
+    message: str,
+    engine: EngineEnum,
+    model: str,
+    client: OpenAI | anthropic.Anthropic | None = None,
+) -> bool:
+    """Moderates the message using the specified engine and model.
+
+    Parameters
+    ----------
+    message : str
+        The message to be moderated.
+    engine : EngineEnum:
+        The moderation engine to use.
+    model : str
+        The moderation model to use.
+    client : OpenAI | anthropic.Anthropic, optional
+        The client to use for the moderation request. If not specified,
+        one will be created.
+
+    Returns
+    -------
+    bool
+        True if flagged; False otherwise.
+
+    """
+    match engine:
+        case EngineEnum.openai:
+            return moderate_openai(message, model, client)
+        case EngineEnum.anthropic:
+            return moderate_anthropic(message, model, client)
+    msg = f"Unsupported engine: {engine}"
+    raise ValueError(msg)
+
+def moderate_openai(
+    message: str,
+    model: str = OpenAIModerationModel.LATEST.value,
+    client: OpenAI | None = None,
+) -> bool:
+    """Moderates the message using OpenAI's Moderation API.
+
+    Parameters
+    ----------
+    message : str
+        The message to be moderated.
+    model : str, optional
+        The model to use for moderation, by default `text-moderation-latest`.
+    client : OpenAI, optional
+        The client to use, by default None.
+
+    Returns
+    -------
+    bool
+        True if flagged; False otherwise.
+
+    """
+    if model not in OpenAIModerationModel:
+        msg = f"Unsupported moderation model: {model}"
+        raise ValueError(msg)
+    client = OpenAI() if client is None else client
+    response = client.moderations.create(model=model, input=message)
+    return response.results[0].flagged
+
+def moderate_anthropic(
+    message: str,
+    model: str = AnthropicChatModel.CLAUDE_3_HAIKU.value,
+    client: anthropic.Anthropic | None = None,
+) -> bool:
+    """Moderates the message using an Anthropic model.
+
+    Parameters
+    ----------
+    message : str
+        The message to be moderated.
+    model : str
+        The model to use for moderation.
+    client : Anthropic, optional
+        The client to use, by default None.
+
+    Returns
+    -------
+    bool
+        True if flagged; False otherwise.
+
+    """
+    client = anthropic.Anthropic() if client is None else client
+    moderation_msg = {
+        "role": "user",
+        "content": MODERATION_PROMPT.format(user_input=message),
+    }
+    response = client.messages.create(
+        model=model,
+        max_tokens=10,
+        temperature=0,
+        messages=[moderation_msg],
+    )
+    return "Y" in response.content[-1].text.strip()
