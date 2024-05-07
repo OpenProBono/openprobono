@@ -63,7 +63,7 @@ def chat(
 ) -> (tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage):
     match chatmodel.engine:
         case EngineEnum.hive:
-            return chat_hive(messages[-1]["content"], chatmodel.model, **kwargs)
+            return chat_hive(messages, chatmodel.model, **kwargs)
         case EngineEnum.openai:
             return chat_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
@@ -73,7 +73,7 @@ def chat(
     raise ValueError(msg)
 
 def chat_hive(
-    message: str,
+    messages: list,
     model: str,
     **kwargs: dict,
 ) -> tuple[str, list[str]]:
@@ -88,7 +88,7 @@ def chat_hive(
         "Content-Type": "application/json",
     }
     data = {
-        "text_data": message,
+        "text_data": messages[-1]["content"],
         "options": {
             "max_tokens": max_tokens,
             "top_p": top_p,
@@ -98,9 +98,10 @@ def chat_hive(
                 "user": "user",
                 "model": "assistant",
             },
+            "prompt_history": messages[:-1],
         },
     }
-    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=120)
+    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=30)
     response_json = response.json()
     output = response_json["status"][0]["response"]["output"][0]
     message = output["choices"][0]["message"]
