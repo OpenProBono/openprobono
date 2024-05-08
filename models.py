@@ -197,7 +197,7 @@ class OpenAIChatModel(str, Enum):
     GPT_4_TURBO = "gpt-4-turbo-preview"
 
 @unique
-class OpenAIModerationModel(str, Enum, metaclass=MetaEnum):
+class OpenAIModerationModel(str, Enum):
     """Enumeration class representing different OpenAI moderation models."""
 
     STABLE = "text-moderation-stable"

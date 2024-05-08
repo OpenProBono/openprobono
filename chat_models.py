@@ -218,9 +218,6 @@ def moderate_openai(
         True if flagged; False otherwise.
 
     """
-    if model not in OpenAIModerationModel:
-        msg = f"Unsupported moderation model: {model}"
-        raise ValueError(msg)
     client = OpenAI() if client is None else client
     response = client.moderations.create(model=model, input=message)
     return response.results[0].flagged
@@ -236,8 +233,8 @@ def moderate_anthropic(
     ----------
     message : str
         The message to be moderated.
-    model : str
-        The model to use for moderation.
+    model : str, optional
+        The model to use for moderation, by default `claude-3-haiku-20240307`.
     client : Anthropic, optional
         The client to use, by default None.
 
