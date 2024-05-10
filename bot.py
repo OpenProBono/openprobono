@@ -17,7 +17,7 @@ from langfuse.openai import OpenAI
 import chat_models
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest, get_uuid_id
-from prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_TEMPLATE
+from prompts import COMBINE_TOOL_OUTPUTS_TEMPLATE, MAX_NUM_TOOLS, MULTIPLE_TOOLS_TEMPLATE
 from search_tools import (
     search_anthropic_tool,
     search_openai_tool,

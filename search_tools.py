@@ -451,7 +451,7 @@ def search_toolset_creator(bot: BotRequest):
                     case SearchMethodEnum.google:
                         toolset.append(search_tool_creator(t))
                     case SearchMethodEnum.courtlistener:
-                        toolset.append(courtlistener_query_tool(t))
+                        toolset.append(courtlistener_tool_creator(t))
             case EngineEnum.openai:
                 toolset.append(openai_tool(t))
             case EngineEnum.anthropic:

@@ -160,7 +160,14 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], collectio
                     urls.append(link)
 
     try:
+        if(".pdf" in site):
+             elements = partition_pdf(file=io.BytesIO(r.content))
+        else:
+            elements = partition(url=site)
+    except Exception as error:
+        print("Error in regular partition: " + str(error))
         elements = partition(url=site, content_type="text/html")
+        
     e_text = ""
     for el in elements:
         el = str(el)

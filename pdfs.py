@@ -47,30 +47,30 @@ def upload_pdf(collection: Collection, data: list, session_id: str, batch_size: 
             )
             raise ValueError(msg)
 
-def upload_pdfs(collection: Collection, directory: str, max_chunk_size: int,
-                chunk_overlap: int, session_id: str = "", batch_size: int = 1000,
-                pdf_loader: str = UNSTRUCTURED):
-    files = sorted(listdir(directory))
-    for fname in files:
-        if not fname.endswith(".pdf"):
-            continue
-        if pdf_loader == UNSTRUCTURED:
-            data = chunk_pdf_unstructured(
-                directory,
-                fname,
-                COLLECTION_ENCODER[collection.name],
-                max_chunk_size,
-                chunk_overlap,
-            )
-        else: # pypdf
-            data = chunk_pdf_pypdf(
-                directory,
-                fname,
-                COLLECTION_ENCODER[collection.name],
-                max_chunk_size,
-                chunk_overlap,
-            )
-        upload_pdf(collection, data, session_id, batch_size)
+# def upload_pdfs(collection: Collection, directory: str, max_chunk_size: int,
+#                 chunk_overlap: int, session_id: str = "", batch_size: int = 1000,
+#                 pdf_loader: str = UNSTRUCTURED):
+#     files = sorted(listdir(directory))
+#     for fname in files:
+#         if not fname.endswith(".pdf"):
+#             continue
+#         if pdf_loader == UNSTRUCTURED:
+#             data = chunk_pdf_unstructured(
+#                 directory,
+#                 fname,
+#                 COLLECTION_ENCODER[collection.name],
+#                 max_chunk_size,
+#                 chunk_overlap,
+#             )
+#         else: # pypdf
+#             data = chunk_pdf_pypdf(
+#                 directory,
+#                 fname,
+#                 COLLECTION_ENCODER[collection.name],
+#                 max_chunk_size,
+#                 chunk_overlap,
+#             )
+#         upload_pdf(collection, data, session_id, batch_size)
 
 def chunk_pdf_pypdf(directory, file,
                     params: EncoderParams, max_chunk_size: int, chunk_overlap: int):
