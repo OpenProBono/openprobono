@@ -5,21 +5,22 @@ from typing import Annotated, Optional
 import langfuse
 from fastapi import Body, FastAPI, UploadFile
 
+from bot import anthropic_bot, opb_bot, openai_bot
 from db import (
     admin_check,
     api_key_check,
     fetch_session,
+    load_bot,
     load_session,
-    process_chat,
     set_session_to_bot,
     store_bot,
+    store_conversation,
 )
 from milvusdb import (
-    COLLECTIONS,
-    SESSION_PDF,
-    US,
+    SESSION_DATA,
     crawl_and_scrape,
     delete_expr,
+    file_upload,
     session_source_summaries,
     session_upload_ocr,
     upload_documents,
@@ -28,6 +29,7 @@ from models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    EngineEnum,
     FetchSession,
     InitializeSession,
     get_uuid_id,
@@ -45,6 +47,31 @@ async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
     # Flush all events to be sent to Langfuse on shutdown and
     # terminate all Threads gracefully. This operation is blocking.
     langfuse.flush()
+
+
+def process_chat(r: ChatRequest) -> dict:
+    try:
+        bot = load_bot(r.bot_id)
+        if bot is None:
+            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+
+        match bot.chat_model.engine:
+            case EngineEnum.langchain:
+                output = opb_bot(r, bot)
+            case EngineEnum.openai:
+                output = openai_bot(r, bot)
+            case EngineEnum.anthropic:
+                output = anthropic_bot(r, bot)
+            case _:
+                return {"message": f"Failure: invalid bot engine {bot.chat_model.engine}"}
+
+        # store conversation (and also log the api_key)
+        store_conversation(r, output)
+
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+    # return the chat and the bot_id
+    return {"message": "Success", "output": output, "bot_id": r.bot_id}
 
 
 api = FastAPI(lifespan=lifespan)
@@ -231,12 +258,13 @@ def create_bot(
                                 {
                                     "name": "USCode_query",
                                     "method": "query",
-                                    "collection_name": US,
+                                    "collection_name": "USCode",
                                     "k": 4,
                                     "prompt": "Useful for finding information about US Code",  # noqa: E501
                                 },
                             ],
                             "engine": "langchain",
+                            "model": "gpt-3.5-turbo-0125",
                             "api_key": "xyz",
                         },
                     },
@@ -246,7 +274,7 @@ def create_bot(
                         "value": {
                             "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",  # noqa: E501
                             "message_prompt": "prompt to use for the bot, this is appended each message",  # noqa: E501
-                            "model": "model to be used, currently only openai models, default is gpt-3.5-turbo-0125",  # noqa: E501
+                            "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
                             "search_tools": [
                                 {
                                     "name": "name for tool",
@@ -262,13 +290,13 @@ def create_bot(
                                 {
                                     "name": "name for tool",
                                     "method": "which search method to use, must be one of: qa, query",  # noqa: E501
-                                    "collection_name": f"name of database to query, must be one of: {', '.join(list(COLLECTIONS))}",  # noqa: E501
+                                    "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",  # noqa: E501
                                     "prompt": "description for agent to know when to use the tool",  # noqa: E501
                                     "prefix": "a prefix to add to query passed to tool by llm",  # noqa: E501
                                 },
                             ],
-                            "engine": "which library to use for model calls, must be one of: langchain, openai. "  # noqa: E501
+                            "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic, huggingface. "  # noqa: E501
                                       "Default is langchain.",
                             "api_key": "api key necessary for auth",
                         },
@@ -287,8 +315,7 @@ def create_bot(
 
 
 @api.post("/upload_file", tags=["User Upload"])
-def upload_file(file: UploadFile,
-        session_id: str, summary: Optional[str] = None) -> dict:
+def upload_file(file: UploadFile, session_id: str) -> dict:
     """File upload by user.
 
     Parameters
@@ -297,8 +324,6 @@ def upload_file(file: UploadFile,
         file to upload.
     session_id : str
         the session to associate the file with.
-    summary : Optional[str], optional
-        summary given by the user, by default None
 
     Returns
     -------
@@ -306,15 +331,15 @@ def upload_file(file: UploadFile,
         Success or failure message.
 
     """
-    docs = summarized_chunks_pdf(
-        file, session_id, summary if summary else file.filename,
-    )
-    return upload_documents(SESSION_PDF, docs)
+    try:
+        return file_upload(file, session_id)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
 
 
 @api.post("/upload_files", tags=["User Upload"])
 def upload_files(files: list[UploadFile],
-    session_id: str, summaries: Optional[list[str]] = None) -> dict:
+    session_id: str, summaries: list[str] | None = None) -> dict:
     """Upload multiple files by user.
 
     Parameters
@@ -323,7 +348,7 @@ def upload_files(files: list[UploadFile],
         files to upload.
     session_id : str
         the session to associate the file with.
-    summaries : Optional[list[str]], optional
+    summaries : list[str] | None, optional
         summaries given by the user, by default None
 
     Returns
@@ -343,7 +368,7 @@ def upload_files(files: list[UploadFile],
     failures = []
     for i, file in enumerate(files):
         docs = summarized_chunks_pdf(file, session_id, summaries[i])
-        result = upload_documents(SESSION_PDF, docs)
+        result = upload_documents(SESSION_DATA, docs)
         if result["message"].startswith("Failure"):
             failures.append(
                 f"Upload #{i + 1} of {len(files)} failed. "
@@ -363,8 +388,8 @@ def vectordb_upload_ocr(file: UploadFile,
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str) -> dict:
-    """Delete a file from the database.
+def delete_file(filename: str, session_id: str):
+    """Delete a file from the sessions database.
 
     Parameters
     ----------
@@ -374,8 +399,10 @@ def delete_file(filename: str, session_id: str) -> dict:
         session to delete the file from.
 
     """
-    return delete_expr(SESSION_PDF,
-            f"source=='{filename}' and session_id=='{session_id}'")
+    return delete_expr(
+        SESSION_DATA,
+        f"metadata['source']=='{filename}' and session_id=='{session_id}'",
+    )
 
 
 @api.post("/delete_files", tags=["Vector Database"])
@@ -396,7 +423,7 @@ def delete_files(filenames: list[str], session_id: str) -> dict:
 
     """
     for filename in filenames:
-        delete_expr(SESSION_PDF, f"source=='{filename}' and session_id=='{session_id}'")
+        delete_file(filename, session_id)
     return {"message": f"Success: deleted {len(filenames)} files"}
 
 
@@ -434,7 +461,7 @@ def delete_session_files(session_id: str):
     _type_
         _description_
     """
-    return delete_expr(SESSION_PDF, f"session_id=='{session_id}'")
+    return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
 
 
 @api.post("/upload_site", tags=["Admin Upload"])

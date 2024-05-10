@@ -22,6 +22,11 @@ class ApiTests(unittest.TestCase):
     #_courtroom5_v1
     test_bot_vdb_id = "37394099-4c05-474f-8a35-28bcc4dc68ca"
     test_session_vdb_id = "0c393d97-a70e-4b2f-b3e8-5c4326e6e10c"
+    # in botsvm12_lang
+    test_bot_vdb_id = "2c580482-046e-4118-87dd-4f3abeb391b2"
+    test_bot_search_id = "7ab97742-ec5e-4663-862e-019f57ced68a"
+    # in conversationsvm12_lang
+    test_session_vdb_id = "23c66d05-a5c1-4b30-af3a-9c22536d0e49"
 
     def test_read_root(self):
         response = client.get("/")
@@ -55,6 +60,7 @@ class ApiTests(unittest.TestCase):
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
+        print(response_json)
         self.assertEqual(response_json["message"], "Success")
         self.assertTrue("bot_id" in response_json)
         self.assertTrue(isinstance(response_json["bot_id"], str))
@@ -260,6 +266,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
+        print(response_json)
         self.assertEqual(response_json["message"], "Success")
         self.assertTrue("bot_id" in response_json)
         self.assertTrue(isinstance(response_json["bot_id"], str))
@@ -347,6 +354,7 @@ class ApiTests(unittest.TestCase):
         response = client.post("/chat_session", json=test_cont_session.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
+        print(response_json)
         self.assertEqual(response_json["message"], "Success")
         self.assertTrue("bot_id" in response_json)
         self.assertTrue(isinstance(response_json["bot_id"], str))
@@ -359,10 +367,7 @@ class ApiTests(unittest.TestCase):
 
     def test_chat_session(self):
         from models import ChatBySession
-
-        test_chat_session = ChatBySession(
-            api_key="xyz", session_id=self.test_session_vdb_id, message="test"
-        )
+        test_chat_session = ChatBySession(api_key='xyz', session_id=self.test_session_vdb_id, message='test')
         response = client.post("/chat_session", json=test_chat_session.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -378,10 +383,7 @@ class ApiTests(unittest.TestCase):
 
     def test_fetch_session(self):
         from models import FetchSession
-
-        test_fetch_session = FetchSession(
-            api_key="xyz", session_id=self.test_session_vdb_id,
-        )
+        test_fetch_session = FetchSession(api_key='xyz', session_id=self.test_session_vdb_id)
         response = client.post("/fetch_session", json=test_fetch_session.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()

@@ -1,13 +1,21 @@
 """Written by Arman Aydemir. Used to access and store data in the Firestore database."""
 import os
 from json import loads
+from typing import Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 from langfuse import Langfuse
 
-from bot import BotRequest, ChatRequest, opb_bot, openai_bot
-from models import ChatBySession, FetchSession, get_uuid_id
+from models import (
+    BotRequest,
+    ChatBySession,
+    ChatRequest,
+    EncoderParams,
+    FetchSession,
+    MilvusMetadataFormat,
+    get_uuid_id,
+)
 
 langfuse = Langfuse()
 
@@ -17,6 +25,7 @@ langfuse = Langfuse()
 # which version of db we are using
 VERSION = "_courtroom5_v1"
 BOT_COLLECTION = "bots"
+MILVUS_COLLECTION = "milvus"
 CONVERSATION_COLLECTION = "conversations"
 
 firebase_config = loads(os.environ["Firebase"])
@@ -38,8 +47,7 @@ def api_key_check(api_key: str) -> bool:
         true if valid
 
     """
-    doc = db.collection("api_keys").document(api_key).get()
-    return doc.exists #just check if key exists in DB
+    return db.collection("api_keys").document(api_key).get().exists
 
 
 def admin_check(api_key: str) -> bool:
@@ -56,11 +64,7 @@ def admin_check(api_key: str) -> bool:
         true if valid admin key
 
     """
-    doc = db.collection("api_keys").document(api_key).get()
-    if doc.exists: #if api key exists, check if it is an admin key
-        return doc.to_dict()["admin"]
-
-    return False
+    return db.collection("api_keys").document(api_key).get()["admin"]
 
 def store_conversation(r: ChatRequest, output: str) -> bool:
     """Store the conversation in the database.
@@ -222,39 +226,57 @@ def load_bot(bot_id: str) -> BotRequest:
 
     return None
 
-
-def process_chat(r: ChatRequest) -> dict:
-    """Process the chat request.
-
-    Load bot, send request to correct engine, and store conversation updates.
+def load_vdb(collection_name: str) -> dict:
+    """Load the parameters for a collection from the database.
 
     Parameters
     ----------
-    r : ChatRequest
-        The chat request object.
+    collection_name : str
+        The name of the collection that uses the parameters.
 
     Returns
     -------
     dict
-        Success or failure message with output and bot_id.
+        The collection parameters: encoder, metadata_format, fields.
 
     """
-    try:
-        bot = load_bot(r.bot_id)
-        if bot is None:
-            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+    data = db.collection(MILVUS_COLLECTION).document(collection_name).get()
+    if data.exists:
+        return data.to_dict()
 
-        if bot.engine == "langchain":
-            output = opb_bot(r, bot)
-        elif bot.engine == "openai":
-            output = openai_bot(r, bot)
-        else:
-            return {"message": f"Failure: invalid bot engine {bot.engine}"}
+    return None
 
-        # store conversation (and also log the api_key)
-        store_conversation(r, output)
+def store_vdb(
+    collection_name: str,
+    encoder: EncoderParams,
+    metadata_format: MilvusMetadataFormat,
+    fields: Optional[list] = None,
+) -> bool:
+    """Store the configuration of a Milvus collection in the database.
 
-        # return the chat and the bot_id
-        return {"message": "Success", "output": output, "bot_id": r.bot_id}
-    except Exception as error:
-        return {"message": "Failure: Internal Error: " + str(error)}
+    Parameters
+    ----------
+    collection_name : str
+        The collection that uses the configuration.
+    encoder : EncoderParams
+        The EncoderParams object to store.
+    metadata_format : MilvusMetadataFormat
+        The MilvusMetadataFormat object to store.
+    fields : list
+        The list of field names to store if metadata_format is field.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+
+    """
+    data = {
+        "encoder": encoder.model_dump(),
+        "metadata_format": metadata_format.value,
+        "timestamp": firestore.SERVER_TIMESTAMP,
+    }
+    if fields is not None:
+        data["fields"] = fields
+    db.collection(MILVUS_COLLECTION).document(collection_name).set(data)
+    return True

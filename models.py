@@ -1,9 +1,21 @@
 """Written by Arman Aydemir. This file contains the main models/classes."""
 import uuid
-from enum import Enum
+from enum import Enum, EnumMeta, unique
 from typing import List
 
 from pydantic import BaseModel
+
+
+class MetaEnum(EnumMeta):
+    """Metaclass for Enum types to support in keyword."""
+
+    def __contains__(self: Enum, item: str) -> bool:
+        """Return True if item is in Enum, else False."""
+        try:
+            self(item)
+        except ValueError:
+            return False
+        return True
 
 
 def get_uuid_id() -> str:
@@ -11,6 +23,7 @@ def get_uuid_id() -> str:
     return str(uuid.uuid4())
 
 
+@unique
 class SearchMethodEnum(str, Enum):
     """Enumeration class representing different search methods."""
 
@@ -40,6 +53,7 @@ class SearchTool(BaseModel):
     prefix: str = ""
 
 
+@unique
 class VDBMethodEnum(str, Enum):
     """Enumeration class representing different VDB methods."""
 
@@ -149,11 +163,84 @@ class FetchSession(BaseModel):
     api_key: str
 
 
+@unique
 class EngineEnum(str, Enum):
     """Enumeration class representing different engine options."""
 
     langchain = "langchain"
     openai = "openai"
+    hive = "hive"
+    anthropic = "anthropic"
+
+
+@unique
+class AnthropicChatModel(str, Enum):
+    """Enumeration class representing different Anthropic chat models."""
+
+    CLAUDE_3_OPUS = "claude-3-opus-20240229"
+    CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
+    CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
+
+
+@unique
+class HiveChatModel(str, Enum):
+    """Enumeration class representing different Hive chat models."""
+
+    HIVE_7B = "hive-7b"
+    HIVE_70B = "hive-70b"
+
+
+@unique
+class OpenAIChatModel(str, Enum):
+    """Enumeration class representing different OpenAI chat models."""
+
+    GPT_3_5 = "gpt-3.5-turbo-0125"
+    GPT_4 = "gpt-4"
+    GPT_4_TURBO = "gpt-4-turbo-preview"
+
+@unique
+class OpenAIModerationModel(str, Enum):
+    """Enumeration class representing different OpenAI moderation models."""
+
+    STABLE = "text-moderation-stable"
+    LATEST = "text-moderation-latest"
+
+
+@unique
+class OpenAIEncoder(str, Enum, metaclass=MetaEnum):
+    """Enumeration class representing different OpenAI embedding models."""
+
+    LARGE = "text-embedding-3-large" # 3072 dimensions, can project down
+    SMALL = "text-embedding-3-small" # 1536 dimensions, can project down
+    ADA_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
+
+
+@unique
+class MilvusMetadataFormat(str, Enum):
+    """Enumeration class representing different ways of storing metadata in Milvus.
+
+    JSON = a single `metadata` field containing json
+    FIELD = explicitly defined metadata fields
+    NONE = no metadata field
+    """
+
+    JSON = "json"
+    FIELD = "field"
+    NONE = "none"
+
+
+class ChatModelParams(BaseModel):
+    """Define a chat model for RAG."""
+
+    engine: EngineEnum = EngineEnum.langchain
+    model: str = OpenAIChatModel.GPT_3_5.value
+
+
+class EncoderParams(BaseModel):
+    """Define the embedding model for a Collection."""
+
+    name: str = OpenAIEncoder.SMALL.value
+    dim: int = 768
 
 
 class BotRequest(BaseModel):
@@ -173,8 +260,7 @@ class BotRequest(BaseModel):
 
     user_prompt: str = ""
     message_prompt: str = ""
-    model: str = "gpt-3.5-turbo-0125"
     search_tools: List[SearchTool] = []
     vdb_tools: List[VDBTool] = []
-    engine: EngineEnum = EngineEnum.langchain
+    chat_model: ChatModelParams = ChatModelParams()
     api_key: str

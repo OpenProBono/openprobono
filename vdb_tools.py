@@ -1,13 +1,11 @@
 from langchain.agents import Tool
+from pymilvus import Collection
 
-from milvusdb import COLLECTIONS, SESSION_PDF, Collection, qa, query
+from milvusdb import SESSION_DATA, qa, query
 from models import BotRequest, EngineEnum, VDBMethodEnum, VDBTool
 
 
 def qa_tool(tool: VDBTool):
-    if tool.collection_name not in COLLECTIONS:
-        raise ValueError(f"invalid collection_name {tool.collection_name}")
-
     async def async_qa(tool: VDBTool, question: str):
         return qa(tool.collection_name, question, tool.k)
 
@@ -27,9 +25,6 @@ def qa_tool(tool: VDBTool):
 
 
 def query_tool(tool: VDBTool):
-    if tool.collection_name not in COLLECTIONS:
-        raise ValueError(f"invalid collection_name {tool.collection_name}")
-
     async def async_query(tool: VDBTool, q: str):
         return query(tool.collection_name, q, tool.k)
 
@@ -66,6 +61,22 @@ def openai_qa_tool(tool: VDBTool):
         },
     }
 
+def anthropic_qa_tool(tool: VDBTool):
+    return {
+        "name": tool.name,
+        "description": tool.prompt,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "the question to answer",
+                },
+            },
+            "required": ["question"],
+        },
+    }
+
 
 def openai_query_tool(tool: VDBTool):
     return {
@@ -78,11 +89,27 @@ def openai_query_tool(tool: VDBTool):
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "the query text"
+                        "description": "the query text",
                     },
                 },
                 "required": ["query"],
             },
+        },
+    }
+
+def anthropic_query_tool(tool: VDBTool):
+    return {
+        "name": tool.name,
+        "description": tool.prompt,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "the query text",
+                },
+            },
+            "required": ["query"],
         },
     }
 
@@ -99,20 +126,35 @@ def vdb_openai_tool(t: VDBTool, function_args):
         function_response = qa(collection_name, tool_question, k)
     return str(function_response)
 
+def vdb_anthropic_tool(t: VDBTool, function_args: dict):
+    function_response = None
+    collection_name = t.collection_name
+    k = t.k
+    if (t.method == VDBMethodEnum.query):
+        tool_query = function_args["query"]
+        function_response = query(collection_name, tool_query, k)
+    elif (t.method == VDBMethodEnum.qa):
+        tool_question = function_args["question"]
+        function_response = qa(collection_name, tool_question, k)
+    return str(function_response)
 
 def vdb_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.vdb_tools:
         if (t.method == VDBMethodEnum.qa):
-            if (bot.engine == EngineEnum.langchain):
+            if (bot.chat_model.engine == EngineEnum.langchain):
                 toolset.append(qa_tool(t))
-            elif (bot.engine == EngineEnum.openai):
+            elif (bot.chat_model.engine == EngineEnum.openai):
                 toolset.append(openai_qa_tool(t))
+            elif bot.chat_model.engine == EngineEnum.anthropic:
+                toolset.append(anthropic_qa_tool(t))
         elif (t.method == VDBMethodEnum.query):
-            if (bot.engine == EngineEnum.langchain):
+            if (bot.chat_model.engine == EngineEnum.langchain):
                 toolset.append(query_tool(t))
-            elif (bot.engine == EngineEnum.openai):
+            elif (bot.chat_model.engine == EngineEnum.openai):
                 toolset.append(openai_query_tool(t))
+            elif bot.chat_model.engine == EngineEnum.anthropic:
+                toolset.append(anthropic_query_tool(t))
     return toolset
 
 
@@ -121,7 +163,7 @@ def vdb_toolset_creator(bot: BotRequest):
 def session_query_tool(session_id: str, source_summaries: dict):
 
     def query_tool(q: str):
-        return query(SESSION_PDF, q, session_id=session_id)
+        return query(SESSION_DATA, q, session_id=session_id)
 
     async def async_query_tool(q: str):
         return query_tool(q)

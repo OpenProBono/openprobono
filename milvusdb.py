@@ -1,14 +1,17 @@
 """Functions for managing and searching vectors and collections in Milvus."""
 import io
+from __future__ import annotations
+
+import logging
 import mimetypes
 import os
 from json import loads
+from logging.handlers import RotatingFileHandler
 from operator import itemgetter
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import UploadFile
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from langchain.chains.summarize import load_summarize_chain
@@ -34,17 +37,38 @@ from pymilvus import (
     connections,
     utility,
 )
+from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.auto import partition
 from unstructured.partition.pdf import partition_pdf
 
-import encoder
+import encoders
 import prompts
+from db import load_vdb, store_vdb
+from models import EncoderParams, MilvusMetadataFormat
 
-langfuse_handler = CallbackHandler()
+if TYPE_CHECKING:
+    from fastapi import UploadFile
+    from unstructured.documents.elements import Element
+
+langfuse_handler = CallbackHandler(public_key=os.environ["LANGFUSE_PUBLIC_KEY"], secret_key=os.environ["LANGFUSE_SECRET_KEY"])
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
+
+# init logs
+log_formatter = logging.Formatter(
+    "%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s",
+)
+my_handler = RotatingFileHandler("vdb.log", maxBytes=5*1024*1024, backupCount=2)
+my_handler.setFormatter(log_formatter)
+my_handler.setLevel(logging.ERROR)
+
+vdb_log = logging.getLogger("vdb")
+vdb_log.setLevel(logging.ERROR)
+
+vdb_log.addHandler(my_handler)
+
 
 project_id = "h2o-gpt"
 location = "us"  # Format is "us" or "eu"
@@ -72,7 +96,7 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
-    ids = load_db(SESSION_PDF).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
+    ids = langchain_db(SESSION_DATA).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
                                              connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
@@ -101,7 +125,7 @@ def collection_upload_str(reader: str, collection: str, source: str, max_chunk_s
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
-    ids = load_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
+    ids = langchain_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
                                             connection_args=connection_args)
     num_docs = len(documents)
     if num_docs != len(ids):
@@ -136,12 +160,6 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], collectio
                     urls.append(link)
 
     try:
-        if(".pdf" in site):
-            elements = partition_pdf(file=io.BytesIO(r.content))
-        else:
-            elements = partition(url=site)
-    except Exception as error:
-        print("Error in regular partition: " + str(error))
         elements = partition(url=site, content_type="text/html")
     e_text = ""
     for el in elements:
@@ -219,121 +237,264 @@ def quickstart_ocr(
     print(document.text)
     return document.text
 
+# used to cache collection params from firebase
+COLLECTION_PARAMS = {}
 
-# collections by jurisdiction?
-# TODO(Nick): get collection names from Milvus
-US = "USCode"
-NC = "NCGeneralStatutes"
-CAP = "CAP"
-SESSION_PDF = "SessionPDF"
-COURTLISTENER = "courtlistener"
-SEARCH_COLLECTION = "search_collection"
-COLLECTIONS = {US, NC, CAP, COURTLISTENER}
-# collection -> encoder mapping
-# TODO(Nick): make this a file or use firebase?
-COLLECTION_ENCODER = {
-    US: encoder.DEFAULT_PARAMS,
-    NC: encoder.DEFAULT_PARAMS,
-    CAP: encoder.DEFAULT_PARAMS,
-    COURTLISTENER: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
-    SESSION_PDF: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
-    SEARCH_COLLECTION: encoder.EncoderParams(encoder.OPENAI_ADA_2, None),
-}
-
-PDF = "PDF"
-HTML = "HTML"
-COLLECTION_FORMAT = {
-    US: PDF,
-    NC: PDF,
-    SESSION_PDF: PDF,
-    CAP: CAP,
-    COURTLISTENER: COURTLISTENER,
-    SEARCH_COLLECTION: HTML,
-}
-
-FORMAT_OUTPUTFIELDS = {
-    PDF: ["source", "page"],
-    HTML: [],
-    CAP: ["opinion_author", "opinion_type", "case_name_abbreviation", "decision_date", "cite", "court_name",
-          "jurisdiction_name"],
-    COURTLISTENER: ["source"],
-}
-# can customize index params with param field assuming you know index type
 SEARCH_PARAMS = {
     "anns_field": "vector",
-    "param": {},
+    "param": {}, # can customize index params assuming you know index type
     "output_fields": ["text"],
 }
+
 # AUTOINDEX is only supported through Zilliz, not standalone Milvus
 AUTO_INDEX = {
     "index_type": "AUTOINDEX",
     "metric_type": "IP",
 }
-
+SESSION_DATA = "SessionData"
 MAX_K = 16384
 
-def create_collection(name: str, description: str = "", extra_fields: list[FieldSchema] = [], params: encoder.EncoderParams = encoder.DEFAULT_PARAMS):
-    if utility.has_collection(name):
-        print(f"error: collection {name} already exists")
-        return None
+def load_vdb_param(
+    collection_name: str,
+    param_name: str,
+) -> EncoderParams | MilvusMetadataFormat | list:
+    """Load a vector database parameter from firebase.
 
-    # TODO: if possible, support custom embedding size for huggingface models
-    # TODO: support other OpenAI models
-    # define schema, create collection, create index on vectors
-    pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, description="The primary key",
-                           auto_id=True)
-    # unstructured chunk lengths are sketchy
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, description="The source text", max_length=65535)
-    embedding_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=params.dim, description="The embedded text")
-    schema = CollectionSchema(fields=[pk_field, embedding_field, text_field, *extra_fields],
-                              auto_id=True, enable_dynamic_field=True, description=description)
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection using the parameter
+    param_name : str
+        The name of the desired parameter value
+
+    Returns
+    -------
+    EncoderParams | MilvusMetadataFormat | list
+        EncoderParams if param_name = "encoder"
+
+        MilvusMetadataFormat if param_name = "metadata_format"
+
+        list if param_name = "fields"
+
+    """
+    # check if the params are cached
+    if collection_name in COLLECTION_PARAMS:
+        return COLLECTION_PARAMS[collection_name][param_name]
+    param_value = load_vdb(collection_name)[param_name]
+    # create the parameter object
+    match param_name:
+        case "encoder":
+            return EncoderParams(**param_value)
+        case "metadata_format":
+            return MilvusMetadataFormat(param_value)
+        case "fields":
+            return param_value
+        case _:
+            raise ValueError(param_name)
+
+def create_collection(
+    name: str,
+    encoder: EncoderParams | None = None,
+    description: str = "",
+    extra_fields: list[FieldSchema] | None = None,
+    metadata_format: MilvusMetadataFormat = MilvusMetadataFormat.JSON,
+) -> Collection:
+    """Create a collection with a given name and other parameters.
+
+    Parameters
+    ----------
+    name : str
+        The name of the collection to be created
+    encoder : EncoderParams, optional
+        The embedding model used to create the vectors,
+        by default text-embedding-3-small with 768 dimensions
+    description : str, optional
+        A description for the collection, by default ""
+    extra_fields : list[FieldSchema] | None, optional
+        A list of fields to add to the collections schema, by default None
+    metadata_format : MilvusMetadataFormat, optional
+        The format used to store metadata other than text, by default JSON
+        (a single field called `metadata`)
+
+        If `JSON`, the `metadata` field will be made automatically
+
+        If `NONE`, `extra_fields` should not contain fields
+
+    Returns
+    -------
+    pymilvus.Collection
+        The created collection. Must call load() before query/search.
+
+    Raises
+    ------
+    ValueError
+        If the collection name already exists
+
+    """
+    if utility.has_collection(name):
+        already_exists = f"collection named {name} already exists"
+        raise ValueError(already_exists)
+    encoder = encoder if encoder is not None else EncoderParams()
+    db_fields = None
+
+    # define schema
+    pk_field = FieldSchema(
+        name="pk",
+        dtype=DataType.INT64,
+        is_primary=True,
+        description="The primary key",
+        auto_id=True,
+    )
+    text_field = FieldSchema(
+        name="text",
+        dtype=DataType.VARCHAR,
+        description="The source text",
+        max_length=65535,
+    )
+    embedding_field = FieldSchema(
+        name="vector",
+        dtype=DataType.FLOAT_VECTOR,
+        dim=encoder.dim,
+        description="The embedded text",
+    )
+
+    # keep track of how the collection stores metadata
+    match metadata_format:
+        case MilvusMetadataFormat.JSON:
+            extra_fields = [FieldSchema(
+                name="metadata",
+                dtype=DataType.JSON,
+                description="The associated metadata",
+            )]
+        case MilvusMetadataFormat.NONE:
+            if extra_fields:
+                msg = "metadata_format = NONE but extra_fields is not empty"
+                raise ValueError(msg)
+        case MilvusMetadataFormat.FIELD:
+            # FIELD format allows for empty extra_fields or a single json field as long
+            # as dynamic fields are enabled, otherwise should be NONE or JSON
+            if extra_fields is None:
+                extra_fields = []
+            else:
+                db_fields = [field.name for field in extra_fields]
+
+    schema = CollectionSchema(
+        fields=[pk_field, embedding_field, text_field, *extra_fields],
+        auto_id=True,
+        enable_dynamic_field=True,
+        description=description,
+    )
+
+    # create collection
     coll = Collection(name=name, schema=schema)
+    # create index for vector field
     coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
 
-    # save collection->encoder, collection->format
-    COLLECTION_ENCODER[name] = params
-    COLLECTION_FORMAT[name] = PDF
-    # must call coll.load() before query/search
+    # save params in firebase
+    store_vdb(name, encoder, metadata_format, db_fields)
+    # cache params in dictionary
+    COLLECTION_PARAMS[name] = {
+        "encoder": encoder,
+        "metadata_format": metadata_format,
+    }
+    if db_fields is not None:
+        COLLECTION_PARAMS[name]["fields"] = db_fields
     return coll
 
+def langchain_db(collection_name: str) -> Milvus:
+    """Get an instance of the database for use in LangChain.
 
-# TODO: custom OpenAIEmbeddings embedding dimensions
-def load_db(collection_name: str) -> Milvus:
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection to load
+
+    Returns
+    -------
+    Milvus
+        A subclass of LangChain's VectorStore
+
+    """
+    encoder = load_vdb_param(collection_name, "encoder")
     return Milvus(
-        embedding_function=encoder.get_langchain_embedding_model(COLLECTION_ENCODER[collection_name]),
+        embedding_function=encoders.get_langchain_embedding_model(encoder),
         collection_name=collection_name,
         connection_args=connection_args,
         auto_id=True,
     )
 
+def query_check(collection_name: str, query: str, k: int, session_id: str = "") -> dict:
+    """Check query parameters.
 
-def check_params(collection_name: str, query: str, k: int, session_id: str = ""):
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection
+    query : str
+        The query for the collection
+    k : int
+        The number of vectors to return from the collection
+    session_id : str, optional
+        The session id if the query is to a session collection, by default ""
+
+    Returns
+    -------
+    dict
+        Contains a `message` if there was an error, otherwise empty
+
+    """
+    msg = {}
     if not utility.has_collection(collection_name):
-        return {"message": f"Failure: collection {collection_name} not found"}
+        msg["message"] = f"Failure: collection {collection_name} not found"
     if not query or query == "":
-        return {"message": "Failure: query not found"}
+        msg["message"] = "Failure: query not found"
     if k < 1 or k > MAX_K:
-        return {"message": f"Failure: k = {k} out of range [1, {MAX_K}]"}
-    if not session_id and collection_name == SESSION_PDF:
-        return {"message": "Failure: session_id not found"}
-    if collection_name not in COLLECTION_ENCODER:
-        return {"message": f"Failure: encoder for collection {collection_name} not found"}
-    if collection_name not in COLLECTION_FORMAT:
-        return {"message": f"Failure: format for collection {collection_name} not found"}
-    return None
+        msg["message"] = f"Failure: k = {k} out of range [1, {MAX_K}]"
+    if not session_id and collection_name == SESSION_DATA:
+        msg["message"] = "Failure: session_id not found"
+    return msg
 
+def query(collection_name: str, query: str,
+          k: int = 4, expr: str = "", session_id: str = "") -> dict:
+    """Run a query on a given collection.
 
-def query(collection_name: str, q: str, k: int = 4, expr: str = "", session_id: str = "") -> dict:
-    if check_params(collection_name, q, k, session_id):
-        return check_params(collection_name, q, k, session_id)
+    Parameters
+    ----------
+    collection_name : str
+        the collection to query
+    query : str
+        the query itself
+    k : int, optional
+        how many chunks to return, by default 4
+    expr : str, optional
+        a boolean expression to specify conditions for ANN search, by default ""
+    session_id : str, optional
+        The session id for filtering session data, by default ""
+
+    Returns
+    -------
+    dict
+        With message and result on success, just message on failure
+
+    """
+    if query_check(collection_name, query, k, session_id):
+        return query_check(collection_name, query, k, session_id)
 
     coll = Collection(collection_name)
     coll.load()
     search_params = SEARCH_PARAMS
-    search_params["data"] = encoder.embed_strs([q], COLLECTION_ENCODER[collection_name])
+    encoder = load_vdb_param(collection_name, "encoder")
+    search_params["data"] = encoders.embed_strs(
+        [query],
+        encoder,
+    )
     search_params["limit"] = k
-    search_params["output_fields"] += FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
-
+    metadata_format = load_vdb_param(collection_name, "metadata_format")
+    match metadata_format:
+        case MilvusMetadataFormat.JSON:
+            search_params["output_fields"] += ["metadata"]
+        case MilvusMetadataFormat.FIELD:
+            search_params["output_fields"] += load_vdb_param(collection_name, "fields")
     if expr:
         search_params["expr"] = expr
     if session_id:
@@ -347,11 +508,14 @@ def query(collection_name: str, q: str, k: int = 4, expr: str = "", session_id: 
     if res:
         # on success, returns a list containing a single inner list containing result objects
         if len(res) == 1:
-            hits = res[0]
+            # sort hits by ascending distance
+            hits = sorted([hit.to_dict() for hit in res[0]], key=lambda h: h["distance"])
+            # delete pks
+            for hit in hits:
+                del hit["id"]
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
-
 
 def qa_chain(collection_name: str, k: int = 4,
              session_id: str = "") -> RunnableSerializable:
@@ -372,22 +536,28 @@ def qa_chain(collection_name: str, k: int = 4,
         A LangChain Runnable QA chain
 
     """
-    db = load_db(collection_name)
+    db = langchain_db(collection_name)
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
     llm_with_tool = llm.bind_tools(
         [prompts.CitedAnswer],
         tool_choice="CitedAnswer",
     )
     output_parser = JsonOutputKeyToolsParser(key_name="CitedAnswer", return_single=True)
-    output_fields = FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
+    metadata_format = load_vdb_param(collection_name, "metadata_format")
+    match metadata_format:
+        case MilvusMetadataFormat.FIELD:
+            output_fields = load_vdb_param(collection_name, "fields")
+        case MilvusMetadataFormat.JSON:
+            output_fields = ["metadata"]
+        case MilvusMetadataFormat.NONE:
+            output_fields = ["text"]
 
-    def format_docs_with_id(docs: List[Document]) -> str:
+    def format_docs_with_id(docs: list[Document]) -> str:
         formatted = [
             f"Chunk ID: {i}\n" + "\n".join(
             [f"Chunk {f.capitalize()}: {doc.metadata[f]}" for f in output_fields]) +
             "\nChunk Text: " + doc.page_content
             # start=1 because the LLM will switch to 1-indexed IDs if chunks are large
-            # TODO(Nick): format QA chain docs differently based on chunk size
             for i, doc in enumerate(docs, start=1)
         ]
         return "\n\n" + "\n\n".join(formatted)
@@ -428,19 +598,18 @@ def qa(collection_name: str, query: str,
         With success message, result, and sources or else failure message
 
     """
-    if check_params(collection_name, query, k, session_id):
-        return check_params(collection_name, query, k, session_id)
+    if query_check(collection_name, query, k, session_id):
+        return query_check(collection_name, query, k, session_id)
 
     chain = qa_chain(collection_name, k, session_id)
     result = chain.invoke(query)
     cited_sources = [
-        {
-            # i - 1 because start=1 in format_docs_with_id (see above)
-            field: result["docs"][i - 1].metadata[field]
-            for field in FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
-        }
+        # i - 1 because start=1 in format_docs_with_id (see qa_chain)
+        result["docs"][i - 1].metadata
         for i in set(result["cited_answer"][0]["citations"])
     ]
+    for src in cited_sources:
+        del src["pk"]
     return {
         "message": "Success",
         "result": {
@@ -449,11 +618,109 @@ def qa(collection_name: str, query: str,
         },
     }
 
+def file_upload(file: UploadFile, session_id: str) -> dict:
+    """Upload a file to a collection.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to upload
+    session_id : str
+        The session associated with the file
+
+    Returns
+    -------
+    dict
+        With a `message`, and `num_chunks` if success
+
+    """
+    elements = partition(file=file.file, metadata_filename=file.filename)
+    result = upload_elements(elements, SESSION_DATA, session_id)
+    if result["message"] == "Success":
+        result["message"] = f"Success: uploaded {file.filename}"
+    return result
+
+def upload_elements(
+        elements: list[Element],
+        collection_name: str,
+        session_id: str = "",
+    ) -> dict:
+    """Upload elements to a collection.
+
+    Parameters
+    ----------
+    elements : list[Element]
+        The elements to upload
+    collection_name : str
+        The collection where the elements will be uploaded
+    session_id : str, optional
+        The session associated with the elements, by default ""
+
+    Returns
+    -------
+    dict
+        With a `message`, and `num_chunks` if success
+
+    """
+    chunks = chunk_by_title(
+        elements,
+        max_characters=2500,
+        new_after_n_chars=1000,
+        overlap=250,
+    )
+    batch_size = 1000
+    texts, metadatas = [], []
+    num_chunks = len(chunks)
+    for i in range(num_chunks):
+        texts.append(chunks[i].text)
+        metadatas.append(chunks[i].metadata.to_dict())
+    vectors = encoders.embed_strs(texts, load_vdb_param(collection_name, "encoder"))
+    data = [vectors, texts, metadatas]
+    collection = Collection(collection_name)
+    pks = []
+    for i in range(0, len(chunks), batch_size):
+        batch_vector = data[0][i: i + batch_size]
+        batch_text = data[1][i: i + batch_size]
+        batch_metadata = data[2][i: i + batch_size]
+        batch = [batch_vector, batch_text, batch_metadata]
+        current_batch_size = len(batch[0])
+        if session_id:
+            batch.append([session_id] * current_batch_size)
+        res = collection.insert(batch)
+        pks += res.primary_keys
+        if res.insert_count != current_batch_size:
+            # the upload failed, try deleting any partially uploaded data
+            bad_deletes = []
+            for pk in pks:
+                delete_res = collection.delete(expr=f"pk=={pk}")
+                if delete_res.delete_count != 1:
+                    bad_deletes.append(pk)
+            bad_insert = (
+                f"Failure: expected {current_batch_size} insertions but got "
+                f"{res.insert_count}. "
+            )
+            if bad_deletes:
+                logging.error(
+                    "dangling data",
+                    extra={"session_id": session_id, "pks": bad_deletes},
+                )
+                bad_insert += (
+                    "We were unable to delete some of your partially uploaded data. "
+                    "This has been logged, and your data will eventually be deleted. "
+                    "If you would like more information, please email "
+                    "contact@openprobono.com and mention your session_id: "
+                    f"{session_id}."
+                )
+            else:
+                bad_insert += "Any partially uploaded data has been deleted."
+            return {"message": bad_insert}
+    return {"message": "Success", "num_chunks": num_chunks}
 
 def upload_documents(collection_name: str, documents: list[Document]):
-    ids = load_db(collection_name).add_documents(
+    encoder = load_vdb_param(collection_name, "encoder")
+    ids = langchain_db(collection_name).add_documents(
         documents=documents,
-        embedding=encoder.get_langchain_embedding_model(COLLECTION_ENCODER[collection_name]),
+        embedding=encoders.get_langchain_embedding_model(encoder),
         connection_args=connection_args,
     )
     num_docs = len(documents)
@@ -461,9 +728,37 @@ def upload_documents(collection_name: str, documents: list[Document]):
         return {"message": f"Failure: expected to upload {num_docs} chunks but got {len(ids)}"}
     return {"message": f"Success: uploaded {num_docs} chunks"}
 
+def get_documents(collection_name: str, expr: str) -> list[Document]:
+    """Get chunks from a Milvus Collection as a list of LangChain Documents.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of a pymilvus.Collection
+    expr : str
+        The boolean expression used to filter chunks
+
+    Returns
+    -------
+    list[Document]
+        Documents representing the filtered chunks from the collection
+
+    """
+    hits = get_expr(collection_name, expr)["result"]
+    return [
+        Document(
+            page_content=hit["text"],
+            metadata={
+                field: hit[field]
+                for field in hit if field != "text"
+            },
+        )
+        for hit in hits
+    ]
+
 
 def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
-    """Get database entries according to expr.
+    """Get database entries according to a boolean expression.
 
     Parameters
     ----------
@@ -484,7 +779,14 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
     coll.load()
-    output_fields = ["text"] + FORMAT_OUTPUTFIELDS[COLLECTION_FORMAT[collection_name]]
+    collection_format = load_vdb_param(collection_name, "metadata_format")
+    match collection_format:
+        case MilvusMetadataFormat.FIELD:
+            output_fields = ["text", *load_vdb_param(collection_name, "fields")]
+        case MilvusMetadataFormat.JSON:
+            output_fields = ["text", "metadata"]
+        case MilvusMetadataFormat.NONE:
+            output_fields = ["text"]
     q_iter = coll.query_iterator(
         expr=expr,
         output_fields=output_fields,
@@ -493,13 +795,16 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     hits = []
     res = q_iter.next()
     while len(res) > 0:
+        # delete pks
+        for hit in res:
+            del hit["pk"]
         hits += res
         res = q_iter.next()
     q_iter.close()
     return {"message": "Success", "result": hits}
 
 def delete_expr(collection_name: str, expr: str) -> dict:
-    """Delete database entries according to expr.
+    """Delete database entries according to a boolean expression.
 
     Parameters
     ----------
@@ -537,11 +842,10 @@ def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chun
         doc.metadata["ai_summary"] = result["output_text"].strip()
 
     # upload
-    return upload_documents(SESSION_PDF, documents)
-
+    return upload_documents(SESSION_DATA, documents)
 
 def session_source_summaries(session_id: str, batch_size: int = 1000):
-    coll = Collection(SESSION_PDF)
+    coll = Collection(SESSION_DATA)
     coll.load()
     q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'",
                                  output_fields=["source", "ai_summary", "user_summary"], batch_size=batch_size)
@@ -571,6 +875,6 @@ class FilteredRetriever(VectorStoreRetriever):
         # double k on each call to get_relevant_documents() until there are k filtered documents
         while len(docs) < k:
             results = self.vectorstore.as_retriever(search_kwargs={"k": k}).get_relevant_documents(query=query)
-            docs += [doc for doc in results if doc.metadata['session_id'] == self.session_filter and doc not in docs]
+            docs += [doc for doc in results if doc.metadata["session_id"] == self.session_filter and doc not in docs]
             k = 2 * k
         return docs[:self.search_kwargs["k"]]
