@@ -53,7 +53,7 @@ class ApiTests(unittest.TestCase):
         search_tool = {
             "method": "serpapi",
             "name": "google_search",
-            "txt": "",
+            "prefix": "",
             "prompt": "Tool used to search the web, useful for current events or facts",
         }
         test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
@@ -72,7 +72,7 @@ class ApiTests(unittest.TestCase):
         search_tool = {
             "method": "google",
             "name": "google_search",
-            "txt": "",
+            "prefix": "",
             "prompt": "Tool used to search the web, useful for current events or facts",
         }
         test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
@@ -90,7 +90,7 @@ class ApiTests(unittest.TestCase):
         search_tool = {
             "name": "courtroom5",
             "method": "courtroom5",
-            "txt": "",
+            "prefix": "",
             "prompt": "Tool used to search government and legal resources",
         }
         test_bot_request = BotRequest(
@@ -133,7 +133,7 @@ class ApiTests(unittest.TestCase):
         search_tool = {
             "name": "courtroom5",
             "method": "courtroom5",
-            "txt": "",
+            "prefix": "",
             "prompt": "Tool used to search government and legal resources",
         }
         test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
@@ -172,7 +172,7 @@ class ApiTests(unittest.TestCase):
     #     search_tool = {
     #         "name": "dynamic_courtroom5",
     #         "method": "dynamic_courtroom5",
-    #         "txt": "",
+    #         "prefix": "",
     #         "prompt": "Tool used to search government and legal resources",
     #     }
     #     test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
@@ -211,7 +211,7 @@ class ApiTests(unittest.TestCase):
     #     search_tool = {
     #         "name": "dynamic_serpapi",
     #         "method": "dynamic_serpapi",
-    #         "txt": "",
+    #         "prefix": "",
     #         "prompt": "Tool used to search government and legal resources",
     #     }
     #     test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
@@ -250,7 +250,7 @@ class ApiTests(unittest.TestCase):
         search_tool = {
             "name": "courtlistener",
             "method": "courtlistener",
-            "txt": "",
+            "prefix": "",
             "prompt": "Tool used to search courtlistener for legal cases and opinions",
         }
         test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
@@ -410,7 +410,7 @@ class ApiTests(unittest.TestCase):
         search_tool = {
             "name": "courtroom5",
             "method": "courtroom5",
-            "txt": "",
+            "prefix": "",
             "prompt": "Tool used to search government and legal resources",
         }
         test_bot_request = BotRequest(
@@ -454,13 +454,115 @@ class ApiTests(unittest.TestCase):
         gov_search = {
             "name": "government-search",
             "method": "serpapi",
-            "txt": "site:*.gov | site:*.edu | site:*scholar.google.com ",
+            "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com ",
             "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.",
         }
         case_search = {
             "name": "case-search",
             "method": "serpapi",
-            "txt": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com ",
+            "prefix": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com ",
+            "prompt": "Use for finding case law. Always cite your sources.",
+        }
+        test_bot_request = BotRequest(
+            api_key="axyz",
+            chat_model=ChatModelParams(engine=EngineEnum.openai),
+            search_tools=[gov_search, case_search],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key="axyz", bot_id=bot_id,
+            message="What is the rule in Florida related to designating an "
+                    "email address for service in litigation?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        print("---- OUTPUT ----")
+        print(response_json["output"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+    def test_exp_opb_google_openai_bot(self):
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
+
+        gov_search = {
+            "name": "government-search",
+            "method": "google",
+            "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com ",
+            "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.",
+        }
+        case_search = {
+            "name": "case-search",
+            "method": "google",
+            "prefix": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com ",
+            "prompt": "Use for finding case law. Always cite your sources.",
+        }
+        test_bot_request = BotRequest(
+            api_key="axyz",
+            chat_model=ChatModelParams(engine=EngineEnum.openai),
+            search_tools=[gov_search, case_search],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key="axyz", bot_id=bot_id,
+            message="What is the rule in Florida related to designating an "
+                    "email address for service in litigation?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        print("---- OUTPUT ----")
+        print(response_json["output"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+    def test_dynamic_exp_opb_openai_bot(self):
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
+
+        gov_search = {
+            "name": "government-search",
+            "method": "dynamic_serpapi",
+            "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com ",
+            "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.",
+        }
+        case_search = {
+            "name": "case-search",
+            "method": "dynamic_serpapi",
+            "prefix": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com ",
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
