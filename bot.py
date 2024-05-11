@@ -68,8 +68,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     #     memory.save_context({'input': r.history[i][0]}, {'output': r.history[i][1]})
 
     # ------- agent definition -------#
-    toolset = search_toolset_creator(bot)
-    toolset += vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     source_summaries = session_source_summaries(r.session_id)
     if source_summaries:
         toolset.append(session_query_tool(r.session_id, source_summaries))
@@ -108,8 +107,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
     messages = chat_models.messages(r.history, bot.chat_model.engine)
     messages.append({"role": "system", "content": MULTIPLE_TOOLS_TEMPLATE})
     trace_id = get_uuid_id()
-    toolset = search_toolset_creator(bot)
-    toolset += vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     kwargs = {
         "client": client,
         "trace_id": trace_id,
@@ -180,8 +178,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
     messages = chat_models.messages(r.history, bot.chat_model.engine)
-    toolset = search_toolset_creator(bot)
-    toolset += vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     client = Anthropic()
     # Step 1: send the conversation and available functions to the model
     kwargs = {

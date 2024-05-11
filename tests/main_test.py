@@ -1,5 +1,7 @@
 import unittest
+
 from fastapi.testclient import TestClient
+
 import main
 
 
@@ -132,5 +134,3 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
         self.assertTrue("history" in response_json)
         self.assertTrue(isinstance(response_json["history"], list))
-
-# TODO: more unit tests
