@@ -1,6 +1,7 @@
+from __future__ import annotations
 """Functions for managing and searching vectors and collections in Milvus."""
 import io
-from __future__ import annotations
+
 
 import logging
 import mimetypes

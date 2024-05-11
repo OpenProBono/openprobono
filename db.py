@@ -23,7 +23,7 @@ langfuse = Langfuse()
 # 1076cca8-a1fa-415a-b5f8-c11da178d224
 
 # which version of db we are using
-VERSION = "_courtroom5_v1"
+VERSION = "vm12_lang"
 BOT_COLLECTION = "bots"
 MILVUS_COLLECTION = "milvus"
 CONVERSATION_COLLECTION = "conversations"
@@ -64,7 +64,10 @@ def admin_check(api_key: str) -> bool:
         true if valid admin key
 
     """
-    return db.collection("api_keys").document(api_key).get()["admin"]
+    result = db.collection("api_keys").document(api_key).get()
+    if result.exists:
+        return result.to_dict()["admin"]
+    return False
 
 def store_conversation(r: ChatRequest, output: str) -> bool:
     """Store the conversation in the database.

@@ -19,14 +19,15 @@ class UUIDTests(unittest.TestCase):
 client = TestClient(main.api)
 
 class ApiTests(unittest.TestCase):
-    #_courtroom5_v1
-    test_bot_vdb_id = "37394099-4c05-474f-8a35-28bcc4dc68ca"
-    test_session_vdb_id = "0c393d97-a70e-4b2f-b3e8-5c4326e6e10c"
+    # #_courtroom5_v1
+    # test_bot_vdb_id = "37394099-4c05-474f-8a35-28bcc4dc68ca"
+    # test_session_vdb_id = "0c393d97-a70e-4b2f-b3e8-5c4326e6e10c"
     # in botsvm12_lang
     test_bot_vdb_id = "2c580482-046e-4118-87dd-4f3abeb391b2"
     test_bot_search_id = "7ab97742-ec5e-4663-862e-019f57ced68a"
     # in conversationsvm12_lang
-    test_session_vdb_id = "23c66d05-a5c1-4b30-af3a-9c22536d0e49"
+    # 23c66d05-a5c1-4b30-af3a-9c22536d0e49
+    test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
 
     def test_read_root(self):
         response = client.get("/")
@@ -34,11 +35,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {"message": "API is alive"})
 
     def test_create_bot_vdb_query_US(self):
-        from milvusdb import US
         from models import BotRequest, VDBTool
 
-        vdb_tool = VDBTool(name="query", collection_name=US, k=4)
-        test_bot_request = BotRequest(api_key="xyz", vdb_tools=[vdb_tool])
+        vdb_tool = VDBTool(name="query", collection_name="USCode", k=4)
+        test_bot_request = BotRequest(api_key="axyz", vdb_tools=[vdb_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -56,7 +56,7 @@ class ApiTests(unittest.TestCase):
             "txt": "",
             "prompt": "Tool used to search the web, useful for current events or facts",
         }
-        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -75,7 +75,7 @@ class ApiTests(unittest.TestCase):
             "txt": "",
             "prompt": "Tool used to search the web, useful for current events or facts",
         }
-        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -84,8 +84,8 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(isinstance(response_json["bot_id"], str))
         self.assertEqual(len(response_json["bot_id"]), 36)
 
-    def test_courtroom5_openai_bot(self):
-        from models import BotRequest, InitializeSession
+    def test_courtroom5_anthropic_bot(self):
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
 
         search_tool = {
             "name": "courtroom5",
@@ -93,7 +93,11 @@ class ApiTests(unittest.TestCase):
             "txt": "",
             "prompt": "Tool used to search government and legal resources",
         }
-        test_bot_request = BotRequest(api_key="xyz", engine="openai", search_tools=[search_tool])
+        test_bot_request = BotRequest(
+            api_key="axyz",
+            chat_model=ChatModelParams(engine=EngineEnum.anthropic),
+            search_tools=[search_tool],
+        )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -103,7 +107,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["bot_id"]), 36)
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key="xyz", bot_id=bot_id,
+            api_key="axyz", bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
         )
@@ -132,7 +136,7 @@ class ApiTests(unittest.TestCase):
             "txt": "",
             "prompt": "Tool used to search government and legal resources",
         }
-        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -142,7 +146,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["bot_id"]), 36)
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key="xyz", bot_id=bot_id, 
+            api_key="axyz", bot_id=bot_id, 
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
         )
@@ -171,7 +175,7 @@ class ApiTests(unittest.TestCase):
     #         "txt": "",
     #         "prompt": "Tool used to search government and legal resources",
     #     }
-    #     test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+    #     test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
     #     response = client.post("/create_bot", json=test_bot_request.model_dump())
     #     self.assertEqual(response.status_code, 200)
     #     response_json = response.json()
@@ -181,7 +185,7 @@ class ApiTests(unittest.TestCase):
     #     self.assertEqual(len(response_json["bot_id"]), 36)
     #     bot_id = response_json["bot_id"]
     #     test_initialize_session = InitializeSession(
-    #         api_key="xyz", bot_id=bot_id, 
+    #         api_key="axyz", bot_id=bot_id, 
     #         message="What is the rule in Florida related to designating an "
     #                 "email address for service in litigation?",
     #     )
@@ -210,7 +214,7 @@ class ApiTests(unittest.TestCase):
     #         "txt": "",
     #         "prompt": "Tool used to search government and legal resources",
     #     }
-    #     test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+    #     test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
     #     response = client.post("/create_bot", json=test_bot_request.model_dump())
     #     self.assertEqual(response.status_code, 200)
     #     response_json = response.json()
@@ -220,7 +224,7 @@ class ApiTests(unittest.TestCase):
     #     self.assertEqual(len(response_json["bot_id"]), 36)
     #     bot_id = response_json["bot_id"]
     #     test_initialize_session = InitializeSession(
-    #         api_key="xyz", bot_id=bot_id,
+    #         api_key="axyz", bot_id=bot_id,
     #         message="What is the rule in Florida related to designating an "
     #                 "email address for service in litigation?",
     #     )
@@ -249,7 +253,7 @@ class ApiTests(unittest.TestCase):
             "txt": "",
             "prompt": "Tool used to search courtlistener for legal cases and opinions",
         }
-        test_bot_request = BotRequest(api_key="xyz", search_tools=[search_tool])
+        test_bot_request = BotRequest(api_key="axyz", search_tools=[search_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -259,7 +263,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["bot_id"]), 36)
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key="xyz", bot_id=bot_id, message="find me cases related to covid",
+            api_key="axyz", bot_id=bot_id, message="find me cases related to covid",
         )
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
@@ -285,7 +289,7 @@ class ApiTests(unittest.TestCase):
         from models import InitializeSession
 
         test_initialize_session = InitializeSession(
-            api_key="xyz", bot_id=self.test_bot_vdb_id, message="test",
+            api_key="axyz", bot_id=self.test_bot_vdb_id, message="test",
         )
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
@@ -307,7 +311,7 @@ class ApiTests(unittest.TestCase):
         from models import InitializeSession
 
         test_initialize_session = InitializeSession(
-            api_key="xyz", bot_id=self.test_bot_vdb_id, message="",
+            api_key="axyz", bot_id=self.test_bot_vdb_id, message="",
         )
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
@@ -330,7 +334,7 @@ class ApiTests(unittest.TestCase):
         from models import ChatBySession, InitializeSession
 
         test_initialize_session = InitializeSession(
-            api_key="xyz", bot_id=self.test_bot_vdb_id, message="test"
+            api_key="axyz", bot_id=self.test_bot_vdb_id, message="test"
         )
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
@@ -349,7 +353,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
         test_cont_session = ChatBySession(
-            api_key="xyz", session_id=response_json["session_id"], message="test2",
+            api_key="axyz", session_id=response_json["session_id"], message="test2",
         )
         response = client.post("/chat_session", json=test_cont_session.model_dump())
         self.assertEqual(response.status_code, 200)
@@ -367,7 +371,7 @@ class ApiTests(unittest.TestCase):
 
     def test_chat_session(self):
         from models import ChatBySession
-        test_chat_session = ChatBySession(api_key='xyz', session_id=self.test_session_vdb_id, message='test')
+        test_chat_session = ChatBySession(api_key='axyz', session_id=self.test_session_vdb_id, message='test')
         response = client.post("/chat_session", json=test_chat_session.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -383,7 +387,7 @@ class ApiTests(unittest.TestCase):
 
     def test_fetch_session(self):
         from models import FetchSession
-        test_fetch_session = FetchSession(api_key='xyz', session_id=self.test_session_vdb_id)
+        test_fetch_session = FetchSession(api_key='axyz', session_id=self.test_session_vdb_id)
         response = client.post("/fetch_session", json=test_fetch_session.model_dump())
         self.assertEqual(response.status_code, 200)
         response_json = response.json()
@@ -396,6 +400,104 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
         self.assertTrue("history" in response_json)
         self.assertTrue(isinstance(response_json["history"], list))
+
+
+
+
+    def test_courtroom5_openai_bot(self):
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
+
+        search_tool = {
+            "name": "courtroom5",
+            "method": "courtroom5",
+            "txt": "",
+            "prompt": "Tool used to search government and legal resources",
+        }
+        test_bot_request = BotRequest(
+            api_key="axyz",
+            chat_model=ChatModelParams(engine=EngineEnum.openai),
+            search_tools=[search_tool],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key="axyz", bot_id=bot_id,
+            message="What is the rule in Florida related to designating an "
+                    "email address for service in litigation?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+
+    def test_exp_opb_openai_bot(self):
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
+
+        gov_search = {
+            "name": "government-search",
+            "method": "serpapi",
+            "txt": "site:*.gov | site:*.edu | site:*scholar.google.com ",
+            "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.",
+        }
+        case_search = {
+            "name": "case-search",
+            "method": "serpapi",
+            "txt": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com ",
+            "prompt": "Use for finding case law. Always cite your sources.",
+        }
+        test_bot_request = BotRequest(
+            api_key="axyz",
+            chat_model=ChatModelParams(engine=EngineEnum.openai),
+            search_tools=[gov_search, case_search],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key="axyz", bot_id=bot_id,
+            message="What is the rule in Florida related to designating an "
+                    "email address for service in litigation?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        print("---- OUTPUT ----")
+        print(response_json["output"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
 
 
 # TODO: more unit tests

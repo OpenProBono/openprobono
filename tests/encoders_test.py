@@ -11,7 +11,7 @@ class EncoderTests(unittest.TestCase):
     """Test class for different encoder models."""
 
     # 1024 dimensions, 512 max tokens
-    test_model = EncoderParams("WhereIsAI/UAE-Large-V1", 1024)
+    test_model = EncoderParams(name="WhereIsAI/UAE-Large-V1", dim=1024)
 
     def test_langchain_embeddings_openai(self: "EncoderTests") -> None:
         """Check LangChain embeddings for an OpenAI model.
