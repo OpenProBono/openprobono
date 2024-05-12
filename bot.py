@@ -30,10 +30,10 @@ from vdb_tools import (
     vdb_toolset_creator,
 )
 
-if TYPE_CHECKING:
-    from anthropic.types.beta.tools import ToolsBetaContentBlock
-    from langchain_core.prompts import ChatPromptTemplate
-    from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
+# if TYPE_CHECKING:
+from anthropic.types.beta.tools import ToolsBetaContentBlock
+from langchain_core.prompts import ChatPromptTemplate
+from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
 langchain.debug = True
 
