@@ -10,7 +10,6 @@ from anyio.from_thread import start_blocking_portal
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
-from langfuse.callback import CallbackHandler
 from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
 
@@ -36,11 +35,11 @@ if TYPE_CHECKING:
 
 langchain.debug = True
 
-langfuse_handler = CallbackHandler()
 
 
 
 # OPB bot main function
+@observe()
 def opb_bot(r: ChatRequest, bot: BotRequest):
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, query):
@@ -75,6 +74,12 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         raise ValueError("toolset cannot be empty")
 
     agent = create_openai_tools_agent(bot_llm, toolset, OPB_BOT_PROMPT)
+    # tracing
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
+    langfuse_handler = langfuse_context.get_current_langchain_handler()
 
     async def task(p):
         # definition of llm used for bot
@@ -180,7 +185,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     kwargs = {
         "tools": toolset,
         "client": client,
-       "system": MULTIPLE_TOOLS_PROMPT,
+        "system": MULTIPLE_TOOLS_PROMPT,
         "temperature": 0,
     }
     langfuse_context.update_current_trace(
