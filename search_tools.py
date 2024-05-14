@@ -131,11 +131,11 @@ def serpapi_tool_creator(t: SearchTool) -> Tool:
     prompt = t.prompt
     txt = t.prefix
 
-    async def async_search_tool(qr, txt, prompt):
-        return serpapi_tool(qr, txt, prompt)
+    async def async_search_tool(qr, txt):
+        return serpapi_tool(qr, txt)
 
-    tool_func = lambda qr: serpapi_tool(qr, txt, prompt)
-    co_func = lambda qr: async_search_tool(qr, txt, prompt)
+    tool_func = lambda qr: serpapi_tool(qr, txt)
+    co_func = lambda qr: async_search_tool(qr, txt)
     return Tool(name=name,
                 func=tool_func,
                 coroutine=co_func,

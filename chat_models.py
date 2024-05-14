@@ -55,7 +55,7 @@ def messages_langchain(
         history: list[tuple[str | None, str | None]],
 ) -> list[BaseMessage]:
     messages = []
-    for tup in history[1:len(history) - 1]:
+    for tup in history:
         if tup[0]:
             messages.append(HumanMessage(content=tup[0]))
         if tup[1]:

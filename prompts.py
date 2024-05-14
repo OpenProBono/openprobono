@@ -1,10 +1,16 @@
 from typing import List
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    MessagesPlaceholder,
+    PromptTemplate,
+    SystemMessagePromptTemplate,
+)
 from langchain_core.pydantic_v1 import BaseModel, Field
 
 MAX_NUM_TOOLS = 8
-MULTIPLE_TOOLS_TEMPLATE = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
+MULTIPLE_TOOLS_PROMPT = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
 
 Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
 """
@@ -64,3 +70,21 @@ class CitedAnswer(BaseModel):
 
     answer: str = Field(description="The answer to the user question, which is based only on the given chunks.")
     citations: List[int] = Field(description="The integer IDs of the SPECIFIC chunks which justify the answer.")
+
+OPB_BOT_PROMPT = ChatPromptTemplate(
+    input_variables=["agent_scratchpad", "input"],
+    input_types={
+        "chat_history": list,
+        "agent_scratchpad": list,
+    },
+    messages=[
+        SystemMessagePromptTemplate(
+            prompt=PromptTemplate(input_variables=[],template=MULTIPLE_TOOLS_PROMPT),
+        ),
+        MessagesPlaceholder(variable_name="chat_history", optional=True),
+        HumanMessagePromptTemplate(
+            prompt=PromptTemplate(input_variables=["input"], template="{input}"),
+        ),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ],
+)

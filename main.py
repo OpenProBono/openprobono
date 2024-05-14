@@ -245,13 +245,13 @@ def create_bot(
                                     "name": "government-search",
                                     "method": "serpapi",
                                     "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com",  # noqa: E501
-                                    "prompt": "Useful for when you need to answer questions or find resources about "  # noqa: E501
+                                    "prompt": "Use to answer questions or find resources about "  # noqa: E501
                                               "government and laws.",
                                 },
                                 {
                                     "name": "case-search",
                                     "method": "courtlistener",
-                                    "prompt": "Use for finding case law.",
+                                    "prompt": "Use to find case law.",
                                 },
                             ],
                             "vdb_tools": [
@@ -260,11 +260,13 @@ def create_bot(
                                     "method": "query",
                                     "collection_name": "USCode",
                                     "k": 4,
-                                    "prompt": "Useful for finding information about US Code",  # noqa: E501
+                                    "prompt": "Use to find information about federal laws and regulations.",  # noqa: E501
                                 },
                             ],
-                            "engine": "langchain",
-                            "model": "gpt-3.5-turbo-0125",
+                            "chat_model": {
+                                "engine": "langchain",
+                                "model": "gpt-3.5-turbo-0125",
+                            },
                             "api_key": "xyz",
                         },
                     },
@@ -274,7 +276,6 @@ def create_bot(
                         "value": {
                             "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",  # noqa: E501
                             "message_prompt": "prompt to use for the bot, this is appended each message",  # noqa: E501
-                            "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
                             "search_tools": [
                                 {
                                     "name": "name for tool",
@@ -296,8 +297,11 @@ def create_bot(
                                     "prefix": "a prefix to add to query passed to tool by llm",  # noqa: E501
                                 },
                             ],
-                            "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic, huggingface. "  # noqa: E501
+                            "chat_model": {
+                                "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic, huggingface. "  # noqa: E501
                                       "Default is langchain.",
+                                "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
+                            },
                             "api_key": "api key necessary for auth",
                         },
                     },

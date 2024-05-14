@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 import langchain
 from anthropic import Anthropic
 from anyio.from_thread import start_blocking_portal
-from langchain import hub
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
@@ -18,7 +17,7 @@ from langfuse.openai import OpenAI
 import chat_models
 from milvusdb import session_source_summaries
 from models import BotRequest, ChatRequest, get_uuid_id
-from prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_TEMPLATE
+from prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_PROMPT, OPB_BOT_PROMPT
 from search_tools import (
     search_anthropic_tool,
     search_openai_tool,
@@ -33,7 +32,6 @@ from vdb_tools import (
 
 if TYPE_CHECKING:
     from anthropic.types.beta.tools import ToolsBetaContentBlock
-    from langchain_core.prompts import ChatPromptTemplate
     from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
 langchain.debug = True
@@ -76,9 +74,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
     if len(toolset) == 0:
         raise ValueError("toolset cannot be empty")
 
-    prompt: ChatPromptTemplate = hub.pull("hwchase17/openai-tools-agent")
-    prompt.messages[0].prompt.template = MULTIPLE_TOOLS_TEMPLATE
-    agent = create_openai_tools_agent(bot_llm, toolset, prompt)
+    agent = create_openai_tools_agent(bot_llm, toolset, OPB_BOT_PROMPT)
 
     async def task(p):
         # definition of llm used for bot
@@ -105,7 +101,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest):
         return "Hi, how can I assist you today?"
     client = OpenAI()
     messages = chat_models.messages(r.history, bot.chat_model.engine)
-    messages.append({"role": "system", "content": MULTIPLE_TOOLS_TEMPLATE})
+    messages.append({"role": "system", "content": MULTIPLE_TOOLS_PROMPT})
     trace_id = get_uuid_id()
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     kwargs = {
@@ -184,7 +180,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     kwargs = {
         "tools": toolset,
         "client": client,
-        "system": MULTIPLE_TOOLS_TEMPLATE,
+       "system": MULTIPLE_TOOLS_PROMPT,
         "temperature": 0,
     }
     langfuse_context.update_current_trace(
