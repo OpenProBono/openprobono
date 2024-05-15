@@ -9,7 +9,7 @@ from langchain_community.embeddings.huggingface_hub import HuggingFaceHubEmbeddi
 from langchain_openai import OpenAIEmbeddings
 from openai import APITimeoutError, OpenAI
 
-from models import EncoderParams, OpenAIEncoder
+from models import EncoderParams, OpenAIModelEnum
 
 if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
@@ -31,8 +31,8 @@ def get_langchain_embedding_model(encoder: EncoderParams) -> Embeddings:
         The class representing the embedding model for use in LangChain
 
     """
-    if encoder.name in OpenAIEncoder:
-        dim = encoder.dim if encoder.name != OpenAIEncoder.ADA_2.value else None
+    if encoder.name in OpenAIModelEnum:
+        dim = encoder.dim if encoder.name != OpenAIModelEnum.embed_ada_2.value else None
         return OpenAIEmbeddings(model=encoder.name, dimensions=dim)
     return HuggingFaceHubEmbeddings(model=encoder.name)
 
@@ -77,7 +77,7 @@ def embed_strs(text: list[str], encoder: EncoderParams) -> list:
         A list of lists of floats representing the embedded text
 
     """
-    if encoder.name in OpenAIEncoder:
+    if encoder.name in OpenAIModelEnum:
         return embed_strs_openai(text, encoder)
     raise ValueError(encoder.name)
 
@@ -116,7 +116,7 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
         while attempt < num_attempts:
             try:
                 args = {"input": text[i:j], "model": encoder.name}
-                if encoder.name != OpenAIEncoder.ADA_2.value:
+                if encoder.name != OpenAIModelEnum.embed_ada_2.value:
                     args["dimensions"] = encoder.dim
                 response = client.embeddings.create(**args)
                 data += [data.embedding for data in response.data]

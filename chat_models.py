@@ -11,11 +11,12 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
 
 from models import (
-    AnthropicChatModel,
+    AnthropicModelEnum,
     ChatModelParams,
     EngineEnum,
-    HiveChatModel,
-    OpenAIModerationModel,
+    HiveModelEnum,
+    OpenAIModelEnum,
+    SummaryMethodEnum,
 )
 from prompts import HIVE_QA_PROMPT, MODERATION_PROMPT
 
@@ -83,7 +84,7 @@ def chat_hive(
     model: str,
     **kwargs: dict,
 ) -> tuple[str, list[str]]:
-    key = "HIVE_7B_API_KEY" if model == HiveChatModel.HIVE_7B else "HIVE_70B_API_KEY"
+    key = "HIVE_7B_API_KEY" if model == HiveModelEnum.hive_7b else "HIVE_70B_API_KEY"
     system = kwargs.pop("system", HIVE_QA_PROMPT)
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
@@ -198,7 +199,7 @@ def moderate(
 
 def moderate_openai(
     message: str,
-    model: str = OpenAIModerationModel.LATEST.value,
+    model: str = OpenAIModelEnum.mod_latest,
     client: OpenAI | None = None,
 ) -> bool:
     """Moderates the message using OpenAI's Moderation API.
@@ -224,7 +225,7 @@ def moderate_openai(
 
 def moderate_anthropic(
     message: str,
-    model: str = AnthropicChatModel.CLAUDE_3_HAIKU.value,
+    model: str = AnthropicModelEnum.claude_3_haiku,
     client: anthropic.Anthropic | None = None,
 ) -> bool:
     """Moderates the message using an Anthropic model.
@@ -256,3 +257,43 @@ def moderate_anthropic(
         messages=[moderation_msg],
     )
     return "Y" in response.content[-1].text.strip()
+
+
+def summarize(
+    documents: list[str | Element | LCDocument],
+    chatmodel: ChatModelParams,
+    method: str = SummaryMethodEnum.stuffing,
+    **kwargs: dict,
+):
+    match chatmodel.engine:
+        case EngineEnum.openai:
+            return summarize_openai(documents, chatmodel.model, method, **kwargs)
+        case EngineEnum.anthropic:
+            return summarize_anthropic(documents, chatmodel.model, method, **kwargs)
+        case EngineEnum.langchain:
+            return summarize_langchain(documents, chatmodel.model, method, **kwargs)
+    raise ValueError(chatmodel.engine)
+
+def summarize_openai(
+    documents: list[str | Element],
+    chatmodel: ChatModelParams,
+    method: str,
+    **kwargs: dict,
+):
+    pass
+
+def summarize_anthropic(
+    documents: list[str | Element],
+    chatmodel: ChatModelParams,
+    method: str,
+    **kwargs: dict,
+):
+    pass
+
+def summarize_langchain(
+    documents: list[LCDocument],
+    chatmodel: ChatModelParams,
+    method: str,
+    **kwargs: dict,
+):
+    pass

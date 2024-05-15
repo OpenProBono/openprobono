@@ -172,72 +172,69 @@ class EngineEnum(str, Enum):
 
 
 @unique
-class AnthropicChatModel(str, Enum):
+class AnthropicModelEnum(str, Enum):
     """Enumeration class representing different Anthropic chat models."""
 
-    CLAUDE_3_OPUS = "claude-3-opus-20240229"
-    CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
-    CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
+    claude_3_opus = "claude-3-opus-20240229"
+    claude_3_sonnet = "claude-3-sonnet-20240229"
+    claude_3_haiku = "claude-3-haiku-20240307"
 
 
 @unique
-class HiveChatModel(str, Enum):
+class HiveModelEnum(str, Enum):
     """Enumeration class representing different Hive chat models."""
 
-    HIVE_7B = "hive-7b"
-    HIVE_70B = "hive-70b"
+    hive_7b = "hive-7b"
+    hive_70b = "hive-70b"
 
 
 @unique
-class OpenAIChatModel(str, Enum):
+class OpenAIModelEnum(str, Enum):
     """Enumeration class representing different OpenAI chat models."""
 
-    GPT_3_5 = "gpt-3.5-turbo-0125"
-    GPT_4 = "gpt-4"
-    GPT_4_TURBO = "gpt-4-turbo-preview"
-
-@unique
-class OpenAIModerationModel(str, Enum):
-    """Enumeration class representing different OpenAI moderation models."""
-
-    STABLE = "text-moderation-stable"
-    LATEST = "text-moderation-latest"
+    gpt_3_5 = "gpt-3.5-turbo-0125"
+    gpt_4 = "gpt-4"
+    gpt_4_turbo = "gpt-4-turbo-preview"
+    mod_stable = "text-moderation-stable"
+    mod_latest = "text-moderation-latest"
+    embed_large = "text-embedding-3-large" # 3072 dimensions, can project down
+    embed_small = "text-embedding-3-small" # 1536 dimensions, can project down
+    embed_ada_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
 
 
 @unique
-class OpenAIEncoder(str, Enum, metaclass=MetaEnum):
-    """Enumeration class representing different OpenAI embedding models."""
-
-    LARGE = "text-embedding-3-large" # 3072 dimensions, can project down
-    SMALL = "text-embedding-3-small" # 1536 dimensions, can project down
-    ADA_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
-
-
-@unique
-class MilvusMetadataFormat(str, Enum):
+class MilvusMetadataEnum(str, Enum):
     """Enumeration class representing different ways of storing metadata in Milvus.
 
-    JSON = a single `metadata` field containing json
-    FIELD = explicitly defined metadata fields
-    NONE = no metadata field
+    json = a single `metadata` field containing json
+    field = explicitly defined metadata fields
+    no_field = no metadata field
     """
 
-    JSON = "json"
-    FIELD = "field"
-    NONE = "none"
+    json = "json"
+    field = "field"
+    no_field = "none"
+
+
+@unique
+class SummaryMethodEnum(str, Enum):
+    """Enumeration class representing different ways of summarizing text."""
+
+    stuffing = "stuffing"
+    map_reduce = "map_reduce"
 
 
 class ChatModelParams(BaseModel):
     """Define a chat model for RAG."""
 
     engine: EngineEnum = EngineEnum.langchain
-    model: str = OpenAIChatModel.GPT_3_5.value
+    model: str = OpenAIModelEnum.gpt_3_5.value
 
 
 class EncoderParams(BaseModel):
     """Define the embedding model for a Collection."""
 
-    name: str = OpenAIEncoder.SMALL.value
+    name: str = OpenAIModelEnum.embed_small.value
     dim: int = 768
 
 

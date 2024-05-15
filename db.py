@@ -13,7 +13,7 @@ from models import (
     ChatRequest,
     EncoderParams,
     FetchSession,
-    MilvusMetadataFormat,
+    MilvusMetadataEnum,
     get_uuid_id,
 )
 
@@ -247,7 +247,7 @@ def load_vdb(collection_name: str) -> dict:
 def store_vdb(
     collection_name: str,
     encoder: EncoderParams,
-    metadata_format: MilvusMetadataFormat,
+    metadata_format: MilvusMetadataEnum,
     fields: Optional[list] = None,
 ) -> bool:
     """Store the configuration of a Milvus collection in the database.
@@ -258,8 +258,8 @@ def store_vdb(
         The collection that uses the configuration.
     encoder : EncoderParams
         The EncoderParams object to store.
-    metadata_format : MilvusMetadataFormat
-        The MilvusMetadataFormat object to store.
+    metadata_format : MilvusMetadataEnum
+        The MilvusMetadataEnum object to store.
     fields : list
         The list of field names to store if metadata_format is field.
 

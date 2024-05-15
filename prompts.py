@@ -56,6 +56,15 @@ MODERATION_PROMPT = (
     "(N)."
 )
 
+SUMMARIZATION_PROMPT = """
+    Write a concise summary of the following text.
+    Return your response in bullet points which covers the key points of the text.
+
+    ```{text}```
+
+    BULLET POINT SUMMARY:
+"""
+
 HIVE_QA_PROMPT = (
     "You are a legal assistant that provides factual information about "
     "legal code based on the following prompts.  After using information "

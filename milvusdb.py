@@ -43,7 +43,7 @@ from unstructured.partition.auto import partition
 import encoders
 import prompts
 from db import load_vdb, store_vdb
-from models import EncoderParams, MilvusMetadataFormat
+from models import EncoderParams, MilvusMetadataEnum
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
@@ -258,7 +258,7 @@ MAX_K = 16384
 def load_vdb_param(
     collection_name: str,
     param_name: str,
-) -> EncoderParams | MilvusMetadataFormat | list:
+) -> EncoderParams | MilvusMetadataEnum | list:
     """Load a vector database parameter from firebase.
 
     Parameters
@@ -270,10 +270,10 @@ def load_vdb_param(
 
     Returns
     -------
-    EncoderParams | MilvusMetadataFormat | list
+    EncoderParams | MilvusMetadataEnum | list
         EncoderParams if param_name = "encoder"
 
-        MilvusMetadataFormat if param_name = "metadata_format"
+        MilvusMetadataEnum if param_name = "metadata_format"
 
         list if param_name = "fields"
 
@@ -287,7 +287,7 @@ def load_vdb_param(
         case "encoder":
             return EncoderParams(**param_value)
         case "metadata_format":
-            return MilvusMetadataFormat(param_value)
+            return MilvusMetadataEnum(param_value)
         case "fields":
             return param_value
         case _:
@@ -298,7 +298,7 @@ def create_collection(
     encoder: EncoderParams | None = None,
     description: str = "",
     extra_fields: list[FieldSchema] | None = None,
-    metadata_format: MilvusMetadataFormat = MilvusMetadataFormat.JSON,
+    metadata_format: MilvusMetadataEnum = MilvusMetadataEnum.json,
 ) -> Collection:
     """Create a collection with a given name and other parameters.
 
@@ -313,13 +313,13 @@ def create_collection(
         A description for the collection, by default ""
     extra_fields : list[FieldSchema] | None, optional
         A list of fields to add to the collections schema, by default None
-    metadata_format : MilvusMetadataFormat, optional
-        The format used to store metadata other than text, by default JSON
+    metadata_format : MilvusMetadataEnum, optional
+        The format used to store metadata other than text, by default json
         (a single field called `metadata`)
 
-        If `JSON`, the `metadata` field will be made automatically
+        If `json`, the `metadata` field will be made automatically
 
-        If `NONE`, `extra_fields` should not contain fields
+        If `no_field`, `extra_fields` should not contain fields
 
     Returns
     -------
@@ -361,19 +361,19 @@ def create_collection(
 
     # keep track of how the collection stores metadata
     match metadata_format:
-        case MilvusMetadataFormat.JSON:
+        case MilvusMetadataEnum.json:
             extra_fields = [FieldSchema(
                 name="metadata",
                 dtype=DataType.JSON,
                 description="The associated metadata",
             )]
-        case MilvusMetadataFormat.NONE:
+        case MilvusMetadataEnum.no_field:
             if extra_fields:
-                msg = "metadata_format = NONE but extra_fields is not empty"
+                msg = "metadata_format = no_field but extra_fields is not empty"
                 raise ValueError(msg)
-        case MilvusMetadataFormat.FIELD:
-            # FIELD format allows for empty extra_fields or a single json field as long
-            # as dynamic fields are enabled, otherwise should be NONE or JSON
+        case MilvusMetadataEnum.field:
+            # field format allows for empty extra_fields or a single json field as long
+            # as dynamic fields are enabled, otherwise should be no_field or json
             if extra_fields is None:
                 extra_fields = []
             else:
@@ -493,9 +493,9 @@ def query(collection_name: str, query: str,
     search_params["limit"] = k
     metadata_format = load_vdb_param(collection_name, "metadata_format")
     match metadata_format:
-        case MilvusMetadataFormat.JSON:
+        case MilvusMetadataEnum.json:
             search_params["output_fields"] += ["metadata"]
-        case MilvusMetadataFormat.FIELD:
+        case MilvusMetadataEnum.field:
             search_params["output_fields"] += load_vdb_param(collection_name, "fields")
     if expr:
         search_params["expr"] = expr
@@ -547,11 +547,11 @@ def qa_chain(collection_name: str, k: int = 4,
     output_parser = JsonOutputKeyToolsParser(key_name="CitedAnswer", return_single=True)
     metadata_format = load_vdb_param(collection_name, "metadata_format")
     match metadata_format:
-        case MilvusMetadataFormat.FIELD:
+        case MilvusMetadataEnum.field:
             output_fields = load_vdb_param(collection_name, "fields")
-        case MilvusMetadataFormat.JSON:
+        case MilvusMetadataEnum.json:
             output_fields = ["metadata"]
-        case MilvusMetadataFormat.NONE:
+        case MilvusMetadataEnum.no_field:
             output_fields = ["text"]
 
     def format_docs_with_id(docs: list[Document]) -> str:
@@ -784,11 +784,11 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     coll.load()
     collection_format = load_vdb_param(collection_name, "metadata_format")
     match collection_format:
-        case MilvusMetadataFormat.FIELD:
+        case MilvusMetadataEnum.field:
             output_fields = ["text", *load_vdb_param(collection_name, "fields")]
-        case MilvusMetadataFormat.JSON:
+        case MilvusMetadataEnum.json:
             output_fields = ["text", "metadata"]
-        case MilvusMetadataFormat.NONE:
+        case MilvusMetadataEnum.no_field:
             output_fields = ["text"]
     q_iter = coll.query_iterator(
         expr=expr,
