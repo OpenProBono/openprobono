@@ -1,6 +1,7 @@
 import os
 import requests
 from langchain.agents import Tool
+from langfuse.decorators import observe
 from milvusdb import collection_upload_str, query
 from models import SearchTool
 
@@ -83,6 +84,7 @@ def get_docket(result: dict) -> dict:
 
 
 # TODO: Need to parallelize this
+@observe()
 def courtlistener_search(q: str, k: int = 3) -> dict:
     """
     This is the actual courtlistener search implemented for agents.

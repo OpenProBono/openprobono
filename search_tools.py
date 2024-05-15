@@ -1,6 +1,7 @@
 import os
 import requests
 from langchain.agents import Tool
+from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
 from courtlistener import courtlistener_search, courtlistener_query_tool
 from milvusdb import query, scrape
@@ -28,6 +29,7 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
+@observe()
 def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """
     Upgraded serpapi tool which scrapes the returned websites and embeds them to query whole pages
@@ -49,6 +51,7 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     return query(search_collection, qr)
 
 
+@observe()
 def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
     """
     Queries the google search api
@@ -75,6 +78,7 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
                      headers=headers).json())[0:max_len]
 
 
+@observe()
 def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """
     Queries the serpapi

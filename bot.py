@@ -39,7 +39,7 @@ langchain.debug = True
 
 
 # OPB bot main function
-@observe()
+@observe(capture_input=False)
 def opb_bot(r: ChatRequest, bot: BotRequest):
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, query):
@@ -74,10 +74,12 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         raise ValueError("toolset cannot be empty")
 
     agent = create_openai_tools_agent(bot_llm, toolset, OPB_BOT_PROMPT)
+
     # tracing
+    langfuse_context.update_current_observation(input=r.history[-1][0])
     langfuse_context.update_current_trace(
         session_id=r.session_id,
-        metadata={"bot_id": r.bot_id},
+        metadata={"bot_id": r.bot_id, "engine": bot.chat_model.engine},
     )
     langfuse_handler = langfuse_context.get_current_langchain_handler()
 
@@ -101,22 +103,30 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
                 return content
             content += next_token
 
+@observe(capture_input=False)
 def openai_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
     client = OpenAI()
     messages = chat_models.messages(r.history, bot.chat_model.engine)
     messages.append({"role": "system", "content": MULTIPLE_TOOLS_PROMPT})
-    trace_id = get_uuid_id()
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     kwargs = {
         "client": client,
-        "trace_id": trace_id,
+        "trace_id": langfuse_context.get_current_trace_id(),
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
         "session_id": r.session_id,
         "temperature": 0,
     }
+
+    # langfuse
+    langfuse_context.update_current_observation(input=r.history[-1][0])
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id, "engine": bot.chat_model.engine},
+    )
+
     # response is a ChatCompletion object
     response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
     response_message = response.choices[0].message
@@ -174,7 +184,7 @@ def openai_tools(
         tool_calls = response_message.tool_calls
     return response_message
 
-@observe()
+@observe(capture_input=False)
 def anthropic_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
@@ -188,21 +198,25 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
         "system": MULTIPLE_TOOLS_PROMPT,
         "temperature": 0,
     }
+
+    # Step 1.5: tracing
+    # Anthropic system prompt does not go in messages list, so add it to the input
+    langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
+    langfuse_context.update_current_observation(input={
+        "input": messages[-1]["content"],
+        "prompt": langfuse_prompt_msg,
+    })
     langfuse_context.update_current_trace(
         session_id=r.session_id,
-        metadata={"bot_id": r.bot_id},
+        metadata={"bot_id": r.bot_id, "engine": bot.chat_model.engine},
     )
-    # Anthropic system prompt does not go in messages list,
-    # but thats where langfuse expects it, so insert it and add it to the observation
-    langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
-    langfuse_context.update_current_observation(input=messages + langfuse_prompt_msg)
+
     response = chat_models.chat(messages, bot.chat_model, **kwargs)
     messages.append({"role": response.role, "content": response.content})
     # Step 2: check if the model wanted to call a function
     tool_calls: list[ToolsBetaContentBlock] = [msg for msg in response.content if msg.type == "tool_use"]
     return anthropic_tools(messages, tool_calls, bot, **kwargs)
 
-@observe()
 def anthropic_tools(
     messages: list[dict],
     tool_calls: list[ToolsBetaContentBlock],

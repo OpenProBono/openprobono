@@ -28,6 +28,7 @@ from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_openai.llms import OpenAI as LangChainOpenAI
 from langfuse.callback import CallbackHandler
+from langfuse.decorators import observe
 from pymilvus import (
     Collection,
     CollectionSchema,
@@ -454,6 +455,7 @@ def query_check(collection_name: str, query: str, k: int, session_id: str = "") 
         msg["message"] = "Failure: session_id not found"
     return msg
 
+@observe()
 def query(collection_name: str, query: str,
           k: int = 4, expr: str = "", session_id: str = "") -> dict:
     """Run a query on a given collection.
@@ -577,6 +579,7 @@ def qa_chain(collection_name: str, k: int = 4,
         .pick(["cited_answer", "docs"])
     )
 
+@observe()
 def qa(collection_name: str, query: str,
        k: int = 4, session_id: str = "") -> dict:
     """Run a QA chain to answer the query and return the top k source chunks.
