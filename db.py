@@ -271,7 +271,7 @@ def store_vdb(
     """
     data = {
         "encoder": encoder.model_dump(),
-        "metadata_format": metadata_format.value,
+        "metadata_format": metadata_format,
         "timestamp": firestore.SERVER_TIMESTAMP,
     }
     if fields is not None:

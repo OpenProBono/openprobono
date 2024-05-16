@@ -68,8 +68,8 @@ def synthetic_testset(collection_name: str, expr: str) -> TestDataset | None:
     else:
         distributions = {simple: 0.5, reasoning: 0.25, multi_context: 0.25}
     generator_llm = ChatOpenAI()
-    critic_llm = ChatOpenAI(model=OpenAIModelEnum.gpt_4_turbo.value)
-    embeddings = OpenAIEmbeddings(model=OpenAIModelEnum.embed_small.value, dimensions=768)
+    critic_llm = ChatOpenAI(model=OpenAIModelEnum.gpt_4_turbo)
+    embeddings = OpenAIEmbeddings(model=OpenAIModelEnum.embed_small, dimensions=768)
     ragas_embeddings = LangchainEmbeddingsWrapper(embeddings)
     splitter = TokenTextSplitter(chunk_size=1024, chunk_overlap=0)
     generator_llm_model = LangchainLLMWrapper(generator_llm)

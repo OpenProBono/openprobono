@@ -1,21 +1,9 @@
 """Written by Arman Aydemir. This file contains the main models/classes."""
 import uuid
-from enum import Enum, EnumMeta, unique
+from enum import Enum, unique
 from typing import List
 
 from pydantic import BaseModel
-
-
-class MetaEnum(EnumMeta):
-    """Metaclass for Enum types to support in keyword."""
-
-    def __contains__(self: Enum, item: str) -> bool:
-        """Return True if item is in Enum, else False."""
-        try:
-            self(item)
-        except ValueError:
-            return False
-        return True
 
 
 def get_uuid_id() -> str:
@@ -193,6 +181,7 @@ class OpenAIModelEnum(str, Enum):
     """Enumeration class representing different OpenAI chat models."""
 
     gpt_3_5 = "gpt-3.5-turbo-0125"
+    gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
     gpt_4 = "gpt-4"
     gpt_4_turbo = "gpt-4-turbo-preview"
     mod_stable = "text-moderation-stable"
@@ -222,6 +211,7 @@ class SummaryMethodEnum(str, Enum):
 
     stuffing = "stuffing"
     map_reduce = "map_reduce"
+    refine = "refine"
 
 
 class ChatModelParams(BaseModel):

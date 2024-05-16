@@ -32,7 +32,7 @@ def get_langchain_embedding_model(encoder: EncoderParams) -> Embeddings:
 
     """
     if encoder.name in OpenAIModelEnum:
-        dim = encoder.dim if encoder.name != OpenAIModelEnum.embed_ada_2.value else None
+        dim = encoder.dim if encoder.name != OpenAIModelEnum.embed_ada_2 else None
         return OpenAIEmbeddings(model=encoder.name, dimensions=dim)
     return HuggingFaceHubEmbeddings(model=encoder.name)
 
@@ -116,7 +116,7 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
         while attempt < num_attempts:
             try:
                 args = {"input": text[i:j], "model": encoder.name}
-                if encoder.name != OpenAIModelEnum.embed_ada_2.value:
+                if encoder.name != OpenAIModelEnum.embed_ada_2:
                     args["dimensions"] = encoder.dim
                 response = client.embeddings.create(**args)
                 data += [data.embedding for data in response.data]

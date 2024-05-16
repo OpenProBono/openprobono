@@ -10,10 +10,13 @@ from langchain_core.prompts import (
 from langchain_core.pydantic_v1 import BaseModel, Field
 
 MAX_NUM_TOOLS = 8
-MULTIPLE_TOOLS_PROMPT = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
 
-Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
-"""
+MULTIPLE_TOOLS_PROMPT = (
+    "You are a legal expert, tasked with answering any question about law. ALWAYS use "
+    "tools to answer questions.\n\n"
+    "Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "
+    '"SOURCES" part in your answer.'
+)
 
 QA_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -22,7 +25,7 @@ QA_PROMPT = ChatPromptTemplate.from_messages(
             "You're a legal expert. Given a question and chunks of legal text, answer the user question. If none of the chunks answer the question, just say you don't know.\n\nHere are the chunks:{context}",
         ),
         ("human", "{question}"),
-    ]
+    ],
 )
 
 # https://docs.anthropic.com/claude/docs/tool-use-examples
@@ -56,14 +59,26 @@ MODERATION_PROMPT = (
     "(N)."
 )
 
-SUMMARIZATION_PROMPT = """
-    Write a concise summary of the following text.
-    Return your response in bullet points which covers the key points of the text.
+SUMMARY_PROMPT = (
+    "Write a concise summary of the following text delimited by triple backquotes. "
+    "Return your response in bullet points which covers the key points of the text."
+    "\n\n```{text}```\n\n"
+    "BULLET POINT SUMMARY:"
+)
 
-    ```{text}```
+SUMMARY_MAP_PROMPT = (
+    "Write a concise summary of the following text delimited by triple backquotes."
+    "\n\n```{text}```\n\n"
+    "CONCISE SUMMARY:"
+)
 
-    BULLET POINT SUMMARY:
-"""
+SUMMARY_REFINE_PROMPT = (
+    "Taking the following context delimited by triple backquotes into consideration:"
+    "\n\n```{context}```\n\n"
+    "Write a concise summary of the following text delimited by triple backquotes."
+    "\n\n```{text}```\n\n"
+    "CONCISE SUMMARY:"
+)
 
 HIVE_QA_PROMPT = (
     "You are a legal assistant that provides factual information about "
@@ -74,6 +89,7 @@ HIVE_QA_PROMPT = (
     "answering something not correct. Please respond clearly and concisely "
     "as if talking to the customer directly."
 )
+
 class CitedAnswer(BaseModel):
     """Answer the user question based only on the given chunks, and cite the chunks used."""
 

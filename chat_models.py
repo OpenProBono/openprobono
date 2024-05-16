@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING
 
 import anthropic
 import requests
+from langchain.chains.summarize import load_summarize_chain
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_openai.llms import OpenAI as LangChainOpenAI
 from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
+from unstructured.documents.elements import Element
 
 from models import (
     AnthropicModelEnum,
@@ -18,14 +21,20 @@ from models import (
     OpenAIModelEnum,
     SummaryMethodEnum,
 )
-from prompts import HIVE_QA_PROMPT, MODERATION_PROMPT
+from prompts import (
+    HIVE_QA_PROMPT,
+    MODERATION_PROMPT,
+    SUMMARY_MAP_PROMPT,
+    SUMMARY_PROMPT,
+    SUMMARY_REFINE_PROMPT,
+)
 
 if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
     from anthropic.types.beta.tools import ToolsBetaMessage
+    from langchain.llms.base import BaseLLM
     from langchain_core.documents import Document as LCDocument
     from openai.types.chat import ChatCompletion
-    from unstructured.documents.elements import Element
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
 MAX_TOKENS = 1000
@@ -169,7 +178,7 @@ def moderate(
     model: str,
     client: OpenAI | anthropic.Anthropic | None = None,
 ) -> bool:
-    """Moderates the message using the specified engine and model.
+    """Moderate a message using the specified engine and model.
 
     Parameters
     ----------
@@ -188,6 +197,11 @@ def moderate(
     bool
         True if flagged; False otherwise.
 
+    Raises
+    ------
+    ValueError
+        If chatmodel.engine is not `openai` or `anthropic`.
+
     """
     match engine:
         case EngineEnum.openai:
@@ -202,7 +216,7 @@ def moderate_openai(
     model: str = OpenAIModelEnum.mod_latest,
     client: OpenAI | None = None,
 ) -> bool:
-    """Moderates the message using OpenAI's Moderation API.
+    """Moderate a message using OpenAI's Moderation API.
 
     Parameters
     ----------
@@ -228,7 +242,7 @@ def moderate_anthropic(
     model: str = AnthropicModelEnum.claude_3_haiku,
     client: anthropic.Anthropic | None = None,
 ) -> bool:
-    """Moderates the message using an Anthropic model.
+    """Moderate a message using an Anthropic model.
 
     Parameters
     ----------
@@ -258,42 +272,240 @@ def moderate_anthropic(
     )
     return "Y" in response.content[-1].text.strip()
 
+def get_summary_message(
+    documents: list[str | Element],
+    chatmodel: ChatModelParams,
+    method: SummaryMethodEnum,
+    **kwargs: dict,
+) -> dict:
+    """Get a prompt to summarize documents using the specified model and method.
+
+    Parameters
+    ----------
+    documents : list[str  |  Element]
+       The list of documents to summarize.
+    chatmodel : ChatModelParams
+        The engine and model to use for summarization.
+    method : str
+        The summarization method, must be `stuffing`, `map_reduce`, or `refine`.
+    kwargs : dict, optional
+        For the LLM. By default, temperature = 0 and max_tokens = 1000.
+
+    Returns
+    -------
+    dict
+        The final prompt to get a summary of all the documents.
+
+    Raises
+    ------
+    ValueError
+        If chatmodel.engine is not `openai` or `anthropic`.
+    ValueError
+        if method is not `stuffing`, `map_reduce`, or `refine`.
+
+    """
+    match chatmodel.engine:
+        case EngineEnum.openai:
+            chat_fn = chat_openai
+        case EngineEnum.anthropic:
+            chat_fn = chat_anthropic
+        case _:
+            raise ValueError(chatmodel.engine)
+    # convert documents to text if elements were given
+    if isinstance(documents[0], Element):
+        documents = [doc.text for doc in documents]
+    # summarize by method
+    match method:
+        case SummaryMethodEnum.stuffing:
+            # concatenate the documents into a single document
+            text = "\n".join(documents)
+            prompt = SUMMARY_PROMPT.format(text=text)
+            msg = {"role":"user", "content":prompt}
+        case SummaryMethodEnum.map_reduce:
+            # summarize each document and concatenate the summaries
+            summaries = []
+            for doc in documents:
+                prompt = SUMMARY_MAP_PROMPT.format(text=doc)
+                doc_msg = {"role":"user", "content":prompt}
+                # response is ChatCompletion if openai or AnthropicMessage if anthropic
+                response = chat_fn([doc_msg], chatmodel.model, **kwargs)
+                if chatmodel.engine == EngineEnum.openai:
+                    summary = response.choices[0].message.content
+                else:
+                    summary = "\n".join([
+                        block.text for block in response.content if block.type == "text"
+                    ])
+                summaries.append(summary)
+            concat_summary = "\n".join(summaries)
+            prompt = SUMMARY_PROMPT.format(text=concat_summary)
+            msg = {"role":"user", "content":prompt}
+        case SummaryMethodEnum.refine:
+            # summarize each document with the previous summary as context
+            # and concatenate them
+            summaries = []
+            for i, doc in enumerate(documents):
+                if i == 0:
+                    prompt = SUMMARY_REFINE_PROMPT.format(context="", text=doc)
+                else:
+                    prompt = SUMMARY_REFINE_PROMPT.format(
+                        context=summaries[i - 1],
+                        text=doc,
+                    )
+                doc_msg = {"role":"user", "content":prompt}
+                response = chat_fn([doc_msg], chatmodel.model, **kwargs)
+                if chatmodel.engine == EngineEnum.openai:
+                    summary = response.choices[0].message.content
+                else:
+                    summary = "\n".join([
+                        block.text for block in response.content if block.type == "text"
+                    ])
+                summaries.append(summary)
+            concat_summary = "\n".join(summaries)
+            prompt = SUMMARY_PROMPT.format(text=concat_summary)
+            msg = {"role":"user", "content":prompt}
+        case _:
+            raise ValueError(method)
+    return msg
 
 def summarize(
     documents: list[str | Element | LCDocument],
     chatmodel: ChatModelParams,
     method: str = SummaryMethodEnum.stuffing,
     **kwargs: dict,
-):
+) -> str:
+    """Summarize text using the specified model and method.
+
+    Parameters
+    ----------
+    documents : list[str  |  Element  |  LCDocument]
+        The list of documents to summarize.
+    chatmodel : ChatModelParams
+        The engine and model to use for summarization.
+    method : str, optional
+        The summarization method, by default `stuffing`.
+    kwargs : dict, optional
+        For the LLM. By default, temperature = 0 and max_tokens = 1000.
+
+    Returns
+    -------
+    str
+        The summarized text.
+
+    Raises
+    ------
+    ValueError
+        If chatmodel.engine is not `openai`, `anthropic`, or `langchain`.
+
+    """
+    # hard limit on the number of chunks to be summarized, for cost and rate limits
+    max_summary_chunks = 200
+    documents = documents[:max_summary_chunks]
     match chatmodel.engine:
         case EngineEnum.openai:
-            return summarize_openai(documents, chatmodel.model, method, **kwargs)
+            client = kwargs.pop("client", OpenAI())
+            msg = get_summary_message(
+                documents,
+                chatmodel,
+                method,
+                client=client,
+                **kwargs,
+            )
+            response = chat_openai([msg], chatmodel.model, client=client, **kwargs)
+            return response.choices[0].message.content.strip()
         case EngineEnum.anthropic:
-            return summarize_anthropic(documents, chatmodel.model, method, **kwargs)
+            client = kwargs.pop("client", anthropic.Anthropic())
+            msg = get_summary_message(
+                documents,
+                chatmodel,
+                method,
+                client=client,
+                **kwargs,
+            )
+            response = chat_anthropic([msg], chatmodel.model, client=client, **kwargs)
+            return "\n".join([
+                block.text for block in response.content if block.type == "text"
+            ])
         case EngineEnum.langchain:
             return summarize_langchain(documents, chatmodel.model, method, **kwargs)
     raise ValueError(chatmodel.engine)
 
-def summarize_openai(
-    documents: list[str | Element],
-    chatmodel: ChatModelParams,
-    method: str,
-    **kwargs: dict,
-):
-    pass
-
-def summarize_anthropic(
-    documents: list[str | Element],
-    chatmodel: ChatModelParams,
-    method: str,
-    **kwargs: dict,
-):
-    pass
-
 def summarize_langchain(
     documents: list[LCDocument],
-    chatmodel: ChatModelParams,
+    model: str,
     method: str,
     **kwargs: dict,
-):
-    pass
+) -> str:
+    """Summarize the documents using a chain.
+
+    Parameters
+    ----------
+    documents : list[LCDocument]
+        The list of documents to summarize.
+    model : str
+        The model to use for summarization.
+    method : str
+        The summarization method.
+    kwargs : dict, optional
+        For the LLM. By default, temperature = 0 and max_tokens = 1000.
+
+    Returns
+    -------
+    str
+        The summarized text.
+
+    Raises
+    ------
+    ValueError
+        If method is not `stuffing`, `map_reduce`, or `refine`.
+
+    """
+    chain_type = None
+    match method:
+        case SummaryMethodEnum.stuffing:
+            chain_type="stuff"
+        case SummaryMethodEnum.map_reduce:
+            chain_type="map_reduce"
+        case SummaryMethodEnum.refine:
+            chain_type="refine"
+    if chain_type is None:
+        raise ValueError(method)
+    chain = load_summarize_chain(
+        get_langchain_chat_model(model, **kwargs),
+        chain_type=chain_type,
+    )
+    result = chain.invoke({"input_documents": documents})
+    return result["output_text"].strip()
+
+def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLLM:
+    """Load a LangChain BaseLLM.
+
+    Currently only supports `gpt-3.5-turbo-instruct`.
+
+    Parameters
+    ----------
+    model : str
+        The name of the LLM to load.
+    kwargs : dict
+        For the LLM. By default, temperature = 0 and max_tokens = 1000.
+
+    Returns
+    -------
+    BaseLLM
+        The loaded LLM.
+
+    Raises
+    ------
+    ValueError
+        if `model` is not one of the supported LLMs.
+
+    """
+    if model != OpenAIModelEnum.gpt_3_5_instruct:
+        raise ValueError(model)
+    temperature = kwargs.pop("temperature", 0.0)
+    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
+    return LangChainOpenAI(
+        model_name=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        **kwargs,
+    )
