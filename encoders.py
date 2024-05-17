@@ -14,7 +14,11 @@ from models import EncoderParams, OpenAIModelEnum
 if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
 
-
+OPENAI_MODELS = {
+    OpenAIModelEnum.embed_ada_2,
+    OpenAIModelEnum.embed_small,
+    OpenAIModelEnum.embed_large,
+}
 
 def get_langchain_embedding_model(encoder: EncoderParams) -> Embeddings:
     """Get the LangChain class for a given embedding model.
@@ -31,7 +35,7 @@ def get_langchain_embedding_model(encoder: EncoderParams) -> Embeddings:
         The class representing the embedding model for use in LangChain
 
     """
-    if encoder.name in OpenAIModelEnum:
+    if encoder.name in OPENAI_MODELS:
         dim = encoder.dim if encoder.name != OpenAIModelEnum.embed_ada_2 else None
         return OpenAIEmbeddings(model=encoder.name, dimensions=dim)
     return HuggingFaceHubEmbeddings(model=encoder.name)
@@ -77,7 +81,7 @@ def embed_strs(text: list[str], encoder: EncoderParams) -> list:
         A list of lists of floats representing the embedded text
 
     """
-    if encoder.name in OpenAIModelEnum:
+    if encoder.name in OPENAI_MODELS:
         return embed_strs_openai(text, encoder)
     raise ValueError(encoder.name)
 

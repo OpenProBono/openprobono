@@ -178,7 +178,7 @@ class HiveModelEnum(str, Enum):
 
 @unique
 class OpenAIModelEnum(str, Enum):
-    """Enumeration class representing different OpenAI chat models."""
+    """Enumeration class representing different OpenAI models."""
 
     gpt_3_5 = "gpt-3.5-turbo-0125"
     gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
