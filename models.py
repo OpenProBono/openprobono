@@ -195,8 +195,10 @@ class OpenAIChatModel(str, Enum):
     """Enumeration class representing different OpenAI chat models."""
 
     GPT_3_5 = "gpt-3.5-turbo-0125"
+    GPT_3_5_1106 = "gpt-3.5-turbo-1106"
     GPT_4 = "gpt-4"
     GPT_4_TURBO = "gpt-4-turbo-preview"
+    GPT_4_1106 = "gpt-4-turbo-1106-preview"
 
 @unique
 class OpenAIModerationModel(str, Enum):

@@ -121,12 +121,12 @@ def chat_openai(
 ) -> ChatCompletion:
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    #temperature = kwargs.pop("temperature", 0.0)
+    temperature = kwargs.pop("temperature", 0.0)
     return client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
-        temperature=0.0,
+        temperature=temperature,
         **kwargs,
     )
 

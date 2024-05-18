@@ -1,16 +1,12 @@
 import unittest
+import os
 
 import db
 
-
+TEST_API_KEY = os.environ["OPB_TEST_API_KEY"]
 class ApiKeyTests(unittest.TestCase):
-    def test_anotherKey(self):
-        key = "xyz"
-        self.assertFalse(db.admin_check(key))
-        self.assertTrue(db.api_key_check(key))
-
     def test_validKey(self):
-        key = "gradio"
+        key = TEST_API_KEY
         self.assertFalse(db.admin_check(key))
         self.assertTrue(db.api_key_check(key))
 
