@@ -81,7 +81,6 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id, "engine": bot.chat_model.engine},
     )
-    langfuse_handler = langfuse_context.get_current_langchain_handler()
 
     async def task(p):
         # definition of llm used for bot
@@ -89,8 +88,7 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         # Create an agent executor by passing in the agent and tools
         agent_executor = AgentExecutor(agent=agent, tools=toolset, verbose=False, return_intermediate_steps=False)
         # TODO: make sure opb bot works
-        ret = await agent_executor.ainvoke({"input": p, "chat_history": chat_history},
-                                            config={"callbacks": [langfuse_handler]})
+        ret = await agent_executor.ainvoke({"input": p, "chat_history": chat_history})
         q.put(job_done)
         return ret
 

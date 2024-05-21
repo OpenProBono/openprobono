@@ -13,7 +13,6 @@ import requests
 from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
-from langchain.chains.summarize import load_summarize_chain
 from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.milvus import Milvus
@@ -25,8 +24,6 @@ from langchain_core.runnables import (
     RunnableSerializable,
 )
 from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_openai.llms import OpenAI as LangChainOpenAI
 from langfuse.callback import CallbackHandler
 from langfuse.decorators import observe
 from pymilvus import (
@@ -42,6 +39,7 @@ from unstructured.partition.auto import partition
 
 import encoders
 import prompts
+from chat_models import get_langchain_chat_model, summarize
 from db import load_vdb, store_vdb
 from models import EncoderParams, MilvusMetadataEnum
 
@@ -89,20 +87,12 @@ def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_siz
     documents = text_splitter.split_documents(documents)
 
     # summarize
-    chain = load_summarize_chain(LangChainOpenAI(temperature=0), chain_type="map_reduce")
-    result = chain.invoke({"input_documents": documents[:200]}, config={"callbacks": [langfuse_handler]})
+    summary = summarize(documents, "map_reduce")
     for doc in documents:
-        doc.metadata["ai_summary"] = result["output_text"].strip()
+        doc.metadata["ai_summary"] = summary
 
     # upload
-    ids = langchain_db(SESSION_DATA).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
-                                             connection_args=connection_args)
-    num_docs = len(documents)
-    if num_docs != len(ids):
-        return {
-            "message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {summary} but "
-                       f"got {len(ids)}"}
-    return {"message": f"Success: uploaded {summary} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+    return upload_documents(SESSION_DATA, documents)
 
 
 def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 10000,
@@ -118,19 +108,12 @@ def collection_upload_str(reader: str, collection: str, source: str, max_chunk_s
     documents = text_splitter.split_documents(documents)
 
     # summarize
-    chain = load_summarize_chain(LangChainOpenAI(temperature=0), chain_type="map_reduce")
-    result = chain.invoke({"input_documents": documents[:200]}, config={"callbacks": [langfuse_handler]})
+    summary = summarize(documents, "map_reduce")
     for doc in documents:
-        doc.metadata["ai_summary"] = result["output_text"].strip()
+        doc.metadata["ai_summary"] = summary
 
     # upload
-    ids = langchain_db(collection).add_documents(documents=documents, embedding=OpenAIEmbeddings(),
-                                            connection_args=connection_args)
-    num_docs = len(documents)
-    if num_docs != len(ids):
-        return {
-            "message": f"Failure: expected to upload {num_docs} chunk{'s' if num_docs > 1 else ''} for {source} but got {len(ids)}"}
-    return {"message": f"Success: uploaded {source} as {num_docs} chunk{'s' if num_docs > 1 else ''}"}
+    return upload_documents(collection, documents)
 
 
 def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False):
@@ -539,7 +522,7 @@ def qa_chain(collection_name: str, k: int = 4,
 
     """
     db = langchain_db(collection_name)
-    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+    llm = get_langchain_chat_model(model="gpt-3.5-turbo", temperature=0)
     llm_with_tool = llm.bind_tools(
         [prompts.CitedAnswer],
         tool_choice="CitedAnswer",
@@ -839,10 +822,9 @@ def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chun
     documents = text_splitter.split_documents(documents)
 
     # summarize
-    chain = load_summarize_chain(LangChainOpenAI(temperature=0), chain_type="map_reduce")
-    result = chain.invoke({"input_documents": documents[:200]})
+    summary = summarize(documents, "map_reduce")
     for doc in documents:
-        doc.metadata["ai_summary"] = result["output_text"].strip()
+        doc.metadata["ai_summary"] = summary
 
     # upload
     return upload_documents(SESSION_DATA, documents)
