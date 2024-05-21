@@ -34,18 +34,17 @@ from pymilvus import (
     connections,
     utility,
 )
-from unstructured.chunking.title import chunk_by_title
 from unstructured.partition.auto import partition
 
 import encoders
 import prompts
 from chat_models import get_langchain_chat_model, summarize
+from chunking import chunk_elements_by_title
 from db import load_vdb, store_vdb
 from models import EncoderParams, MilvusMetadataEnum
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
-    from unstructured.documents.elements import Element
 
 langfuse_handler = CallbackHandler(public_key=os.environ["LANGFUSE_PUBLIC_KEY"], secret_key=os.environ["LANGFUSE_SECRET_KEY"])
 
@@ -70,51 +69,6 @@ vdb_log.addHandler(my_handler)
 project_id = "h2o-gpt"
 location = "us"  # Format is "us" or "eu"
 processor_id = "c99e554bb49cf45d"
-
-
-# processor_display_name = "my" # Must be unique per project, e.g.: "My Processor"
-
-def session_upload_str(reader: str, session_id: str, summary: str, max_chunk_size: int = 1000,
-                       chunk_overlap: int = 150):
-    documents = [
-        Document(
-            page_content=page,
-            metadata={"source": summary, "page": page_number, "session_id": session_id, "user_summary": summary},
-        )
-        for page_number, page in enumerate([reader], start=1)
-    ]
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
-    documents = text_splitter.split_documents(documents)
-
-    # summarize
-    summary = summarize(documents, "map_reduce")
-    for doc in documents:
-        doc.metadata["ai_summary"] = summary
-
-    # upload
-    return upload_documents(SESSION_DATA, documents)
-
-
-def collection_upload_str(reader: str, collection: str, source: str, max_chunk_size: int = 10000,
-                          chunk_overlap: int = 1500):
-    documents = [
-        Document(
-            page_content=page,
-            metadata={"source": source},
-        )
-        for page_number, page in enumerate([reader], start=1)
-    ]
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
-    documents = text_splitter.split_documents(documents)
-
-    # summarize
-    summary = summarize(documents, "map_reduce")
-    for doc in documents:
-        doc.metadata["ai_summary"] = summary
-
-    # upload
-    return upload_documents(collection, documents)
-
 
 def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False):
     print("site: ", site)
@@ -145,14 +99,19 @@ def scrape(site: str, old_urls: list[str], common_elements: list[str], collectio
         elements = partition(url=site)
     except:
         elements = partition(url=site, content_type="text/html")
-    e_text = ""
-    for el in elements:
-        el = str(el)
-        if el not in common_elements:
-            e_text += el + "\n\n"
-    print("elements: ", e_text)
+    filtered_elements = [
+        element for element in elements if str(element) not in common_elements
+    ]
+    print("elements: ", "\n\n".join([str(element) for element in filtered_elements]))
     print("site: ", site)
-    collection_upload_str(e_text, collection, site)
+    # chunk
+    texts, metadatas = chunk_elements_by_title(filtered_elements, 10000, 2500, 500)
+    # summarize
+    summary = summarize(texts, "map_reduce")
+    for i in range(len(metadatas)):
+        metadatas[i]["summary"] = summary
+    # upload
+    upload_data_json(texts, metadatas, collection)
     return [urls, elements]
 
 
@@ -276,6 +235,7 @@ def load_vdb_param(
         case _:
             raise ValueError(param_name)
 
+
 def create_collection(
     name: str,
     encoder: EncoderParams | None = None,
@@ -385,6 +345,7 @@ def create_collection(
         COLLECTION_PARAMS[name]["fields"] = db_fields
     return coll
 
+
 def langchain_db(collection_name: str) -> Milvus:
     """Get an instance of the database for use in LangChain.
 
@@ -406,6 +367,7 @@ def langchain_db(collection_name: str) -> Milvus:
         connection_args=connection_args,
         auto_id=True,
     )
+
 
 def query_check(collection_name: str, query: str, k: int, session_id: str = "") -> dict:
     """Check query parameters.
@@ -437,6 +399,7 @@ def query_check(collection_name: str, query: str, k: int, session_id: str = "") 
     if not session_id and collection_name == SESSION_DATA:
         msg["message"] = "Failure: session_id not found"
     return msg
+
 
 @observe()
 def query(collection_name: str, query: str,
@@ -502,6 +465,7 @@ def query(collection_name: str, query: str,
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
+
 def qa_chain(collection_name: str, k: int = 4,
              session_id: str = "") -> RunnableSerializable:
     """Create a QA chain.
@@ -562,6 +526,7 @@ def qa_chain(collection_name: str, k: int = 4,
         .pick(["cited_answer", "docs"])
     )
 
+
 @observe()
 def qa(collection_name: str, query: str,
        k: int = 4, session_id: str = "") -> dict:
@@ -604,7 +569,8 @@ def qa(collection_name: str, query: str,
         },
     }
 
-def file_upload(file: UploadFile, session_id: str) -> dict:
+
+def file_upload(file: UploadFile, session_id: str, summary: str | None = None) -> dict:
     """Upload a file to a collection.
 
     Parameters
@@ -613,6 +579,8 @@ def file_upload(file: UploadFile, session_id: str) -> dict:
         The file to upload
     session_id : str
         The session associated with the file
+    summary: str, optional
+        A summary of the file written by the user, by default None.
 
     Returns
     -------
@@ -620,58 +588,36 @@ def file_upload(file: UploadFile, session_id: str) -> dict:
         With a `message`, and `num_chunks` if success
 
     """
+    # extract text
     elements = partition(file=file.file, metadata_filename=file.filename)
-    result = upload_elements(elements, SESSION_DATA, session_id)
-    if result["message"] == "Success":
-        result["message"] = f"Success: uploaded {file.filename}"
-    return result
+    if summary is not None:
+        for i in range(len(elements)):
+            elements[i].metadata["summary"] = summary
+    # chunk text
+    texts, metadatas = chunk_elements_by_title(elements)
+    # add session id to metadata
+    for i in range(len(metadatas)):
+        metadatas[i]["session_id"] = session_id
+    # upload
+    return upload_data_json(texts, metadatas, SESSION_DATA)
 
-def upload_elements(
-        elements: list[Element],
-        collection_name: str,
-        session_id: str = "",
-    ) -> dict:
-    """Upload elements to a collection.
 
-    Parameters
-    ----------
-    elements : list[Element]
-        The elements to upload
-    collection_name : str
-        The collection where the elements will be uploaded
-    session_id : str, optional
-        The session associated with the elements, by default ""
-
-    Returns
-    -------
-    dict
-        With a `message`, and `num_chunks` if success
-
-    """
-    chunks = chunk_by_title(
-        elements,
-        max_characters=2500,
-        new_after_n_chars=1000,
-        overlap=250,
-    )
-    batch_size = 1000
-    texts, metadatas = [], []
-    num_chunks = len(chunks)
-    for i in range(num_chunks):
-        texts.append(chunks[i].text)
-        metadatas.append(chunks[i].metadata.to_dict())
+def upload_data_json(
+    texts: list[str],
+    metadatas: list[dict],
+    collection_name: str,
+    batch_size: int = 1000,
+):
     vectors = encoders.embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     data = [vectors, texts, metadatas]
     collection = Collection(collection_name)
     pks = []
-    for i in range(0, len(chunks), batch_size):
+    for i in range(0, len(texts), batch_size):
         batch_vector = data[0][i: i + batch_size]
         batch_text = data[1][i: i + batch_size]
         batch_metadata = data[2][i: i + batch_size]
         batch = [batch_vector, batch_text, batch_metadata]
         current_batch_size = len(batch[0])
-        if session_id:
-            batch.append([session_id] * current_batch_size)
         res = collection.insert(batch)
         pks += res.primary_keys
         if res.insert_count != current_batch_size:
@@ -688,19 +634,19 @@ def upload_elements(
             if bad_deletes:
                 logging.error(
                     "dangling data",
-                    extra={"session_id": session_id, "pks": bad_deletes},
+                    extra={"pks": bad_deletes},
                 )
                 bad_insert += (
                     "We were unable to delete some of your partially uploaded data. "
                     "This has been logged, and your data will eventually be deleted. "
                     "If you would like more information, please email "
-                    "contact@openprobono.com and mention your session_id: "
-                    f"{session_id}."
+                    "contact@openprobono.com."
                 )
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
-    return {"message": "Success", "num_chunks": num_chunks}
+    return {"message": "Success"}
+
 
 def upload_documents(collection_name: str, documents: list[Document]):
     encoder = load_vdb_param(collection_name, "encoder")
@@ -713,6 +659,7 @@ def upload_documents(collection_name: str, documents: list[Document]):
     if num_docs != len(ids):
         return {"message": f"Failure: expected to upload {num_docs} chunks but got {len(ids)}"}
     return {"message": f"Success: uploaded {num_docs} chunks"}
+
 
 def get_documents(collection_name: str, expr: str) -> list[Document]:
     """Get chunks from a Milvus Collection as a list of LangChain Documents.
@@ -789,6 +736,7 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     q_iter.close()
     return {"message": "Success", "result": hits}
 
+
 def delete_expr(collection_name: str, expr: str) -> dict:
     """Delete database entries according to a boolean expression.
 
@@ -828,6 +776,7 @@ def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chun
 
     # upload
     return upload_documents(SESSION_DATA, documents)
+
 
 def session_source_summaries(session_id: str, batch_size: int = 1000):
     coll = Collection(SESSION_DATA)

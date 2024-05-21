@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import anthropic
 import requests
 from langchain.chains.summarize import load_summarize_chain
+from langchain_core.documents import Document as LCDocument
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
@@ -33,7 +34,6 @@ if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
     from anthropic.types.beta.tools import ToolsBetaMessage
     from langchain.llms.base import BaseLanguageModel
-    from langchain_core.documents import Document as LCDocument
     from openai.types.chat import ChatCompletion
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
@@ -437,7 +437,7 @@ def summarize(
     raise ValueError(chatmodel.engine)
 
 def summarize_langchain(
-    documents: list[LCDocument],
+    documents: list[str | LCDocument],
     method: str,
     model: str,
     **kwargs: dict,
@@ -446,7 +446,7 @@ def summarize_langchain(
 
     Parameters
     ----------
-    documents : list[LCDocument]
+    documents : list[str | LCDocument]
         The list of documents to summarize.
     method : str
         The summarization method.
@@ -461,6 +461,9 @@ def summarize_langchain(
         The summarized text.
 
     """
+    # convert to Documents if strs were given
+    if isinstance(documents[0], str):
+        documents = [LCDocument(page_content=doc) for doc in documents]
     chain_type = method if method != SummaryMethodEnum.stuffing else "stuff"
     chain = load_summarize_chain(
         get_langchain_chat_model(model, **kwargs),

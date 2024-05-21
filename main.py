@@ -23,7 +23,6 @@ from milvusdb import (
     file_upload,
     session_source_summaries,
     session_upload_ocr,
-    upload_documents,
 )
 from models import (
     BotRequest,
@@ -34,7 +33,6 @@ from models import (
     InitializeSession,
     get_uuid_id,
 )
-from pdfs import summarized_chunks_pdf
 
 
 # this is to ensure tracing with langfuse
@@ -319,7 +317,7 @@ def create_bot(
 
 
 @api.post("/upload_file", tags=["User Upload"])
-def upload_file(file: UploadFile, session_id: str) -> dict:
+def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -> dict:
     """File upload by user.
 
     Parameters
@@ -328,7 +326,8 @@ def upload_file(file: UploadFile, session_id: str) -> dict:
         file to upload.
     session_id : str
         the session to associate the file with.
-
+    summary: str, optional
+        A summary of the file written by the user, by default None.
     Returns
     -------
     dict
@@ -336,7 +335,7 @@ def upload_file(file: UploadFile, session_id: str) -> dict:
 
     """
     try:
-        return file_upload(file, session_id)
+        return file_upload(file, session_id, summary)
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
 
@@ -362,7 +361,7 @@ def upload_files(files: list[UploadFile],
 
     """
     if not summaries:
-        summaries = [file.filename for file in files]
+        summaries = [None] * len(files)
     elif len(files) != len(summaries):
         return {
             "message": f"Failure: did not find equal numbers of files and summaries, "
@@ -371,8 +370,7 @@ def upload_files(files: list[UploadFile],
 
     failures = []
     for i, file in enumerate(files):
-        docs = summarized_chunks_pdf(file, session_id, summaries[i])
-        result = upload_documents(SESSION_DATA, docs)
+        result = file_upload(file, session_id, summaries[i])
         if result["message"].startswith("Failure"):
             failures.append(
                 f"Upload #{i + 1} of {len(files)} failed. "
