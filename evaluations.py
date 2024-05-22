@@ -1,4 +1,4 @@
-"""Run evaluation methods on agents and chains."""
+"""Run evaluation methods on agents and chains. Written by Nick Colvin."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

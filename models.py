@@ -19,6 +19,8 @@ class SearchMethodEnum(str, Enum):
     dynamic_serpapi = "dynamic_serpapi"
     google = "google"
     courtlistener = "courtlistener"
+    courtroom5 = "courtroom5"
+    dynamic_courtroom5 = "dynamic_courtroom5"
 
 
 class SearchTool(BaseModel):
@@ -167,9 +169,11 @@ class OpenAIModelEnum(str, Enum):
     """Enumeration class representing different OpenAI models."""
 
     gpt_3_5 = "gpt-3.5-turbo-0125"
+    gpt_3_5_1106 = "gpt-3.5-turbo-1106"
     gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
     gpt_4 = "gpt-4"
     gpt_4_turbo = "gpt-4-turbo-preview"
+    gpt_4_1106 = "gpt-4-turbo-1106-preview"
     mod_stable = "text-moderation-stable"
     mod_latest = "text-moderation-latest"
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down

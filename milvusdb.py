@@ -450,6 +450,8 @@ def delete_expr(collection_name: str, expr: str) -> dict:
 # application level features
 
 def upload_courtlistener(collection_name: str, oo: dict) -> dict:
+    if "text" not in oo or not oo["text"]:
+        return {"message": "Failure: no opinion text found"}
     # chunk
     texts = chunk_str(oo["text"], 10000, 1000)
     # summarize
@@ -466,14 +468,14 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     oo["ai_summary"] = summary
     metadatas = [oo] * len(texts)
     # upload
-    upload_data_json(texts, metadatas, collection_name)
+    return upload_data_json(texts, metadatas, collection_name)
 
 
 def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
     create_collection(collection_name, description=description)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
-    strs, metadatas = chunk_elements_by_title(prev_elements, 10000, 2500, 500)
+    strs, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
@@ -487,7 +489,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
             new_elements = [
                 element for element in cur_elements if element not in prev_elements
             ]
-            strs, metadatas = chunk_elements_by_title(new_elements, 10000, 2500, 500)
+            strs, metadatas = chunk_elements_by_title(new_elements, 3000, 1000, 300)
             ai_summary = summarize(strs, "map_reduce")
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
@@ -514,6 +516,8 @@ def upload_site(collection_name: str, url: str) -> dict[str, str]:
 
     """
     elements = scrape(url)
+    if len(elements) == 0:
+        return {"message": f"Failure: no elements found at {url}"}
     strs, metadatas = chunk_elements_by_title(elements, 10000, 2500, 500)
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:

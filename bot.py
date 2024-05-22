@@ -1,21 +1,28 @@
-from __future__ import annotations
-
+"""Defines the bot engines. The meaty stuff."""
 import json
 from queue import Queue
 from typing import TYPE_CHECKING, Any
 
 import langchain
 from anthropic import Anthropic
+from anthropic.types.beta.tools import ToolsBetaContentBlock
 from anyio.from_thread import start_blocking_portal
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import OpenAI
+from openai.types.chat import ChatCompletionMessageToolCall
 
 import chat_models
 from milvusdb import session_source_summaries
-from prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_PROMPT, OPB_BOT_PROMPT
+from models import BotRequest, ChatRequest
+from prompts import (
+    COMBINE_TOOL_OUTPUTS_TEMPLATE,
+    MAX_NUM_TOOLS,
+    MULTIPLE_TOOLS_PROMPT,
+    OPB_BOT_PROMPT,
+)
 from search_tools import (
     run_search_tool,
     search_toolset_creator,
@@ -27,19 +34,35 @@ from vdb_tools import (
 )
 
 if TYPE_CHECKING:
-    from anthropic.types.beta.tools import ToolsBetaContentBlock
-    from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
+    from openai.types.chat import ChatCompletion
 
-    from models import BotRequest, ChatRequest
 
 langchain.debug = True
 
 
-
-
 # OPB bot main function
 @observe(capture_input=False)
-def opb_bot(r: ChatRequest, bot: BotRequest):
+def opb_bot(r: ChatRequest, bot: BotRequest) -> str:
+    """Call bot using langchain engine.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        ChatRequest object, containing the conversation and session data
+    bot : BotRequest
+        BotRequest object, containing the bot data
+
+    Returns
+    -------
+    str
+        The response from the bot
+
+    Raises
+    ------
+    ValueError
+        toolset cannot be empty, needs at least one tool defined
+
+    """
     class MyCallbackHandler(BaseCallbackHandler):
         def __init__(self, query):
             self.q = query
@@ -70,7 +93,8 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
         toolset.append(session_query_tool(r.session_id, source_summaries))
         # system_message += f'The session_query_tool sources have these summaries: {source_summaries}.' #this temporary change for testings
     if len(toolset) == 0:
-        raise ValueError("toolset cannot be empty")
+        error_description = "toolset cannot be empty, needs at least one tool defined"
+        raise ValueError(error_description)
 
     agent = create_openai_tools_agent(bot_llm, toolset, OPB_BOT_PROMPT)
 
@@ -101,12 +125,27 @@ def opb_bot(r: ChatRequest, bot: BotRequest):
             content += next_token
 
 @observe(capture_input=False)
-def openai_bot(r: ChatRequest, bot: BotRequest):
+def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
+    """Call bot using openai engine.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        ChatRequest object, containing the conversation and session data
+    bot : BotRequest
+        BotRequest object, containing the bot data
+
+    Returns
+    -------
+    str
+        The response from the bot
+
+    """
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
     client = OpenAI()
     messages = chat_models.messages(r.history, bot.chat_model.engine)
-    messages.append({"role": "system", "content": MULTIPLE_TOOLS_PROMPT})
+    messages.append({"role": "system", "content": COMBINE_TOOL_OUTPUTS_TEMPLATE})
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     kwargs = {
         "client": client,

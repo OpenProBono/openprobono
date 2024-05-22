@@ -202,7 +202,7 @@ def chat_session(
         return response
 
 
-@api.get("/fetch_session", tags=["Session Chat"])
+@api.post("/fetch_session", tags=["Session Chat"])
 def get_session(
         request: Annotated[
             FetchSession,
@@ -411,7 +411,22 @@ def delete_file(filename: str, session_id: str):
 
 
 @api.post("/delete_files", tags=["Vector Database"])
-def delete_files(filenames: list[str], session_id: str):
+def delete_files(filenames: list[str], session_id: str) -> dict:
+    """Delete multiple files from the database.
+
+    Parameters
+    ----------
+    filenames : list[str]
+        filenames to delete.
+    session_id : str
+        session to delete the file from
+
+    Returns
+    -------
+    dict
+        Success message with number of files deleted.
+
+    """
     for filename in filenames:
         delete_file(filename, session_id)
     return {"message": f"Success: deleted {len(filenames)} files"}
@@ -419,6 +434,19 @@ def delete_files(filenames: list[str], session_id: str):
 
 @api.post("/get_session_files", tags=["Vector Database"])
 def get_session_files(session_id: str) -> dict:
+    """Get names of all files associated with a session.
+
+    Parameters
+    ----------
+    session_id : str
+        session to get files from.
+
+    Returns
+    -------
+    dict
+        Success message with list of filenames.
+
+    """
     source_summaries = session_source_summaries(session_id)
     files = list(source_summaries.keys())
     return {"message": f"Success: found {len(files)} files", "result": files}
@@ -426,6 +454,18 @@ def get_session_files(session_id: str) -> dict:
 
 @api.post("/delete_session_files", tags=["Vector Database"])
 def delete_session_files(session_id: str):
+    """Delete all files associated with a session.
+
+    Parameters
+    ----------
+    session_id : str
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
     return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
 
 

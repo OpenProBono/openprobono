@@ -25,8 +25,8 @@ langfuse = Langfuse()
 # which version of db we are using
 VERSION = "vm12_lang"
 BOT_COLLECTION = "bots"
-conversation_collection = "conversations"
 MILVUS_COLLECTION = "milvus"
+CONVERSATION_COLLECTION = "conversations"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -64,7 +64,10 @@ def admin_check(api_key: str) -> bool:
         true if valid admin key
 
     """
-    return db.collection("api_keys").document(api_key).get()["admin"]
+    result = db.collection("api_keys").document(api_key).get()
+    if result.exists:
+        return result.to_dict()["admin"]
+    return False
 
 def store_conversation(r: ChatRequest, output: str) -> bool:
     """Store the conversation in the database.
@@ -90,11 +93,13 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
     t = firestore.SERVER_TIMESTAMP
     data["timestamp"] = t
 
-    db.collection(conversation_collection + VERSION).document(r.session_id).collection(
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).collection(
         "conversations").document("msg" + str(len(r.history))).set(data)
 
-    db.collection(conversation_collection + VERSION).document(r.session_id).set(
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
         {"last_message_timestamp": t}, merge=True)
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
+        {"api_key": r.api_key}, merge=True)
     return True
 
 
@@ -111,7 +116,7 @@ def set_session_to_bot(session_id: str, bot_id: str) -> bool:
         bool: True if successful, False otherwise
 
     """
-    db.collection(conversation_collection + VERSION).document(session_id).set(
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(session_id).set(
         {"bot_id": bot_id}, merge=True)
     return True
 
@@ -129,7 +134,7 @@ def load_session(r: ChatBySession) -> ChatRequest:
 
     """
     msgs = (
-        db.collection(conversation_collection + VERSION)
+        db.collection(CONVERSATION_COLLECTION + VERSION)
         .document(r.session_id)
         .collection("conversations")
         .order_by("timestamp", direction=firestore.Query.ASCENDING)
@@ -142,7 +147,7 @@ def load_session(r: ChatBySession) -> ChatRequest:
         history.append(msg_pair)
     history.append([r.message, ""])
     metadata = (
-        db.collection(conversation_collection + VERSION).document(r.session_id).get()
+        db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).get()
     )
     return ChatRequest(
         history=history,
@@ -165,7 +170,7 @@ def fetch_session(r: FetchSession) -> ChatRequest:
 
     """
     msgs = (
-        db.collection(conversation_collection + VERSION)
+        db.collection(CONVERSATION_COLLECTION + VERSION)
         .document(r.session_id)
         .collection("conversations")
         .order_by("timestamp", direction=firestore.Query.ASCENDING)

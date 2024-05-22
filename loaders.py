@@ -1,6 +1,7 @@
 """Functions for loading text from files/urls."""
 from __future__ import annotations
 
+import io
 import mimetypes
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,7 @@ from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from unstructured.partition.auto import partition
+from unstructured.partition.pdf import partition_pdf
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
@@ -21,8 +23,13 @@ def partition_uploadfile(file: UploadFile) -> list[Element]:
 
 def scrape(site: str) -> list[Element]:
     try:
-        elements = partition(url=site)
-    except:
+        if site.endswith(".pdf"):
+            r = requests.get(site, timeout=10)
+            elements = partition_pdf(file=io.BytesIO(r.content))
+        else:
+            elements = partition(url=site)
+    except Exception as error:
+        print("Error in regular partition: " + str(error))
         elements = partition(url=site, content_type="text/html")
     return elements
 

@@ -13,7 +13,9 @@ langchain-community
 langchain-experimental
 langchainhub
 langfuse
+libmagic
 openai<2.0.0
+poppler-utils
 pip>=23.3
 pydantic>2.0.0
 python-multipart==0.0.9

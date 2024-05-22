@@ -93,6 +93,7 @@ HIVE_QA_PROMPT = (
     "as if talking to the customer directly."
 )
 
+
 OPB_BOT_PROMPT = ChatPromptTemplate(
     input_variables=["agent_scratchpad", "input"],
     input_types={
@@ -110,3 +111,36 @@ OPB_BOT_PROMPT = ChatPromptTemplate(
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ],
 )
+
+
+#for bot.py
+COMBINE_TOOL_OUTPUTS_TEMPLATE = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
+
+Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
+"""
+
+
+#these are not used currently
+ANSWER_TEMPLATE = """GENERAL INSTRUCTIONS
+    You are a legal expert. Your task is to compose a response to the user's question using the information in the given context.
+
+    CONTEXT:
+    {context}
+
+    USER QUESTION
+    {input}"""
+
+TOOLS_TEMPLATE = """GENERAL INSTRUCTIONS
+    You are a legal expert. Your task is to decide which tools to use to answer a user's question. You can use up to X tools, and you can use tools multiple times with different inputs as well.
+
+    These are the tools which are at your disposal
+    {tools}
+
+    When choosing tools, use this template:
+    {{"tool": "name of the tool", "input": "input given to the tool"}}
+
+    USER QUESTION
+    {input}
+
+    ANSWER FORMAT
+    {{"tools":["<FILL>"]}}"""
