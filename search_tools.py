@@ -184,26 +184,10 @@ def anthropic_tool(t: SearchTool) -> dict:
     }
 
 
-def search_openai_tool(tool: SearchTool, function_args) -> str:
+def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
     function_response = None
     prf = tool.prefix
-    qr = function_args.get("qr")
-    match tool.method:
-        case SearchMethodEnum.serpapi:
-            function_response = serpapi_tool(qr, prf)
-        case SearchMethodEnum.dynamic_serpapi:
-            function_response = dynamic_serpapi_tool(qr, prf)
-        case SearchMethodEnum.google:
-            function_response = google_search_tool(qr, prf)
-        case SearchMethodEnum.courtlistener:
-            function_response = courtlistener_search(qr)
-    return str(function_response)
-
-def search_anthropic_tool(tool: SearchTool, function_args: dict) -> str:
-    function_response = None
-    prompt = tool.prompt
-    prf = tool.prefix
-    qr = function_args["qr"]
+    qr = function_args.get("qr") if engine == EngineEnum.openai else function_args["qr"]
     match tool.method:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)

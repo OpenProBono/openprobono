@@ -469,7 +469,8 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     upload_data_json(texts, metadatas, collection_name)
 
 
-def crawl_upload_site(collection_name: str, url: str) -> list[str]:
+def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
+    create_collection(collection_name, description=description)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
     strs, metadatas = chunk_elements_by_title(prev_elements, 10000, 2500, 500)
@@ -622,18 +623,21 @@ def session_source_summaries(
     coll.load()
     q_iter = coll.query_iterator(
         expr=f"session_id=='{session_id}'",
-        output_fields=["source", "ai_summary", "user_summary"],
+        output_fields=["metadata"],
         batch_size=batch_size,
     )
     source_summaries = {}
     res = q_iter.next()
     while len(res) > 0:
         for item in res:
-            if item["source"] not in source_summaries:
-                source_summaries[item["source"]] = {"ai_summary": item["ai_summary"]}
-                if item["user_summary"] != item["source"]:
-                    source_summary = source_summaries[item["source"]]
-                    source_summary["user_summary"] = item["user_summary"]
+            metadata = item["metadata"]
+            if metadata["source"] not in source_summaries:
+                source_summaries[metadata["source"]] = {
+                    "ai_summary": metadata["ai_summary"],
+                }
+                if "user_summary" in metadata:
+                    source_summary = source_summaries[metadata["source"]]
+                    source_summary["user_summary"] = metadata["user_summary"]
         res = q_iter.next()
     q_iter.close()
     return source_summaries

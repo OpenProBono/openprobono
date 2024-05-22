@@ -39,34 +39,20 @@ class SearchTool(BaseModel):
     prefix: str = ""
 
 
-@unique
-class VDBMethodEnum(str, Enum):
-    """Enumeration class representing different VDB methods."""
-
-    qa = "qa"
-    query = "query"
-
-
 class VDBTool(BaseModel):
     """Model class representing a VDB tool.
 
     Attributes
     ----------
-        method (VDBMethodEnum): The VDB method to be used.
-        name (str): The name of the VDB tool.
         collection_name (str): The collection name for the VDB tool.
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
-        prefix (str): The prefix for the VDB tool.
 
     """
 
-    method: VDBMethodEnum = VDBMethodEnum.qa
-    name: str
     collection_name: str
     k: int
     prompt: str = ""
-    prefix: str = ""
 
 
 class ChatRequest(BaseModel):

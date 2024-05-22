@@ -40,10 +40,10 @@ client = TestClient(main.api)
 
 class ApiTests(unittest.TestCase):
     # in botsvm12_lang
-    test_bot_vdb_id = "2c580482-046e-4118-87dd-4f3abeb391b2"
-    test_bot_search_id = "7ab97742-ec5e-4663-862e-019f57ced68a"
+    test_bot_vdb_id = "29396e1e-d722-4f81-b2a7-c5ee6cdba1ed"
+    test_bot_search_id = "1a41e424-0434-457e-9a9e-2b3c7ed0dccd"
     # in conversationsvm12_lang
-    test_session_vdb_id = "23c66d05-a5c1-4b30-af3a-9c22536d0e49"
+    test_session_vdb_id = "be45df8f-0f4e-466a-9c7b-7ab56b5837c8"
 
     def test_read_root(self):
         response = client.get("/")
@@ -51,11 +51,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {"message": "API is alive"})
 
     def test_create_bot_vdb(self):
-        from milvusdb import US
         from models import BotRequest, VDBTool
         vdb_tool = VDBTool(
-            name="query",
-            collection_name=US,
+            collection_name="USCode",
             k=4,
         )
         test_bot_request = BotRequest(api_key='xyz', vdb_tools=[vdb_tool])

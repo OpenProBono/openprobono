@@ -15,23 +15,22 @@ from langfuse.openai import OpenAI
 
 import chat_models
 from milvusdb import session_source_summaries
-from models import BotRequest, ChatRequest, get_uuid_id
 from prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_PROMPT, OPB_BOT_PROMPT
 from search_tools import (
-    search_anthropic_tool,
-    search_openai_tool,
+    run_search_tool,
     search_toolset_creator,
 )
 from vdb_tools import (
+    run_vdb_tool,
     session_query_tool,
-    vdb_anthropic_tool,
-    vdb_openai_tool,
     vdb_toolset_creator,
 )
 
 if TYPE_CHECKING:
     from anthropic.types.beta.tools import ToolsBetaContentBlock
     from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
+
+    from models import BotRequest, ChatRequest
 
 langchain.debug = True
 
@@ -159,9 +158,17 @@ def openai_tools(
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
             if vdb_tool:
-                tool_response = vdb_openai_tool(vdb_tool, function_args)
+                tool_response = run_vdb_tool(
+                    vdb_tool,
+                    function_args,
+                    bot.chat_model.engine,
+                )
             elif search_tool:
-                tool_response = search_openai_tool(search_tool, function_args)
+                tool_response = run_search_tool(
+                    search_tool,
+                    function_args,
+                    bot.chat_model.engine,
+                )
             else:
                 tool_response = "error: unable to run tool"
             # Step 4: send the info for each function call and function response to
@@ -239,9 +246,17 @@ def anthropic_tools(
             }
             # Step 3: call the function
             if vdb_tool:
-                tool_response = vdb_anthropic_tool(vdb_tool, tool_call.input)
+                tool_response = run_vdb_tool(
+                    vdb_tool,
+                    tool_call.input,
+                    bot.chat_model.engine,
+                )
             elif search_tool:
-                tool_response = search_anthropic_tool(search_tool, tool_call.input)
+                tool_response = run_search_tool(
+                    search_tool,
+                    tool_call.input,
+                    bot.chat_model.engine,
+                )
             else:
                 tool_response = "error: unable to identify tool"
                 tool_response_msg["is_error"] = True

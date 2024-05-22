@@ -33,7 +33,7 @@ def scrape_with_links(
 ) -> tuple[list[str], list[Element]]:
     print("site: ", site)
     r = requests.get(site, timeout=10)
-    site_base = "//".join(site.split("//")[:-1])
+    site_base = "/".join(site.split("/")[:-1])
     # converting the text
     s = BeautifulSoup(r.content, "html.parser")
     urls = []
@@ -55,10 +55,7 @@ def scrape_with_links(
                 old_urls.append(link)
                 urls.append(link)
 
-    try:
-        elements = partition(url=site)
-    except:
-        elements = partition(url=site, content_type="text/html")
+    elements = scrape(site)
     return urls, elements
 
 

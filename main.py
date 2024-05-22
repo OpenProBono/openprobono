@@ -434,4 +434,4 @@ def vectordb_upload_site(site: str, collection_name: str,
         description: str, api_key: str):
     if not admin_check(api_key):
         return {"message": "Failure: API key invalid"}
-    return crawl_upload_site(collection_name, site, description)
+    return crawl_upload_site(collection_name, description, site)

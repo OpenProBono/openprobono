@@ -1,27 +1,18 @@
 from langchain.agents import Tool
 from pymilvus import Collection
 
-from milvusdb import SESSION_DATA, qa, query
-from models import BotRequest, EngineEnum, VDBMethodEnum, VDBTool
+from milvusdb import SESSION_DATA, query
+from models import BotRequest, EngineEnum, VDBTool
 
 
-def qa_tool(tool: VDBTool):
-    async def async_qa(tool: VDBTool, question: str):
-        return qa(tool.collection_name, question, tool.k)
-
-    tool_func = lambda q: qa(tool.collection_name, q, tool.k)
-    tool_co = lambda q: async_qa(tool, q)
-
+def get_tool_description(tool: VDBTool):
     if tool.prompt != "":
-        description = tool.prompt
-    else:
-        description = f"""This tool answers questions by searching for the top {tool.k} results from a database named {tool.collection_name}."""
-        description += f" The database description is: {Collection(tool.collection_name).description}."
-
-    return Tool(name=tool.name,
-                func=tool_func,
-                coroutine=tool_co,
-                description=description)
+        return tool.prompt
+    return (
+        f"This tool queries a database named {tool.collection_name} "
+        f"and returns the top {tool.k} results. "
+        f"The database description is: {Collection(tool.collection_name).description}."
+    )
 
 
 def query_tool(tool: VDBTool):
@@ -31,59 +22,18 @@ def query_tool(tool: VDBTool):
     tool_func = lambda q: query(tool.collection_name, q, tool.k)
     tool_co = lambda q: async_query(tool, q)
 
-    if tool.prompt != "":
-        description = tool.prompt
-    else:
-        description = f"This tool queries a database named {tool.collection_name} and returns the top {tool['k']} results."
-        description += f" The database description is: {Collection(tool.collection_name).description}."
-
-    return Tool(name=tool.name,
+    return Tool(name="query-" + tool.collection_name,
                 func=tool_func,
                 coroutine=tool_co,
-                description=description)
-
-def openai_qa_tool(tool: VDBTool):
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.prompt,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "the question to answer",
-                    },
-                },
-                "required": ["question"],
-            },
-        },
-    }
-
-def anthropic_qa_tool(tool: VDBTool):
-    return {
-        "name": tool.name,
-        "description": tool.prompt,
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": "the question to answer",
-                },
-            },
-            "required": ["question"],
-        },
-    }
+                description=get_tool_description(tool))
 
 
 def openai_query_tool(tool: VDBTool):
     return {
         "type": "function",
         "function": {
-            "name": tool.name,
-            "description": tool.prompt,
+            "name": "query-" + tool.collection_name,
+            "description": get_tool_description(tool),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -97,10 +47,11 @@ def openai_query_tool(tool: VDBTool):
         },
     }
 
+
 def anthropic_query_tool(tool: VDBTool):
     return {
-        "name": tool.name,
-        "description": tool.prompt,
+        "name": "query-" + tool.collection_name,
+        "description": get_tool_description(tool),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -114,47 +65,27 @@ def anthropic_query_tool(tool: VDBTool):
     }
 
 
-def vdb_openai_tool(t: VDBTool, function_args):
+def run_vdb_tool(t: VDBTool, function_args, engine: EngineEnum):
     function_response = None
     collection_name = t.collection_name
     k = t.k
-    if (t.method == VDBMethodEnum.query):
+    if engine == EngineEnum.openai:
         tool_query = function_args.get("query")
-        function_response = query(collection_name, tool_query, k)
-    elif (t.method == VDBMethodEnum.qa):
-        tool_question = function_args.get("question")
-        function_response = qa(collection_name, tool_question, k)
+    else: # anthropic
+        tool_query = function_args["query"]
+    function_response = query(collection_name, tool_query, k)
     return str(function_response)
 
-def vdb_anthropic_tool(t: VDBTool, function_args: dict):
-    function_response = None
-    collection_name = t.collection_name
-    k = t.k
-    if (t.method == VDBMethodEnum.query):
-        tool_query = function_args["query"]
-        function_response = query(collection_name, tool_query, k)
-    elif (t.method == VDBMethodEnum.qa):
-        tool_question = function_args["question"]
-        function_response = qa(collection_name, tool_question, k)
-    return str(function_response)
 
 def vdb_toolset_creator(bot: BotRequest):
     toolset = []
     for t in bot.vdb_tools:
-        if (t.method == VDBMethodEnum.qa):
-            if (bot.chat_model.engine == EngineEnum.langchain):
-                toolset.append(qa_tool(t))
-            elif (bot.chat_model.engine == EngineEnum.openai):
-                toolset.append(openai_qa_tool(t))
-            elif bot.chat_model.engine == EngineEnum.anthropic:
-                toolset.append(anthropic_qa_tool(t))
-        elif (t.method == VDBMethodEnum.query):
-            if (bot.chat_model.engine == EngineEnum.langchain):
-                toolset.append(query_tool(t))
-            elif (bot.chat_model.engine == EngineEnum.openai):
-                toolset.append(openai_query_tool(t))
-            elif bot.chat_model.engine == EngineEnum.anthropic:
-                toolset.append(anthropic_query_tool(t))
+        if (bot.chat_model.engine == EngineEnum.langchain):
+            toolset.append(query_tool(t))
+        elif (bot.chat_model.engine == EngineEnum.openai):
+            toolset.append(openai_query_tool(t))
+        elif bot.chat_model.engine == EngineEnum.anthropic:
+            toolset.append(anthropic_query_tool(t))
     return toolset
 
 
