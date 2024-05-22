@@ -2,29 +2,11 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
 import os
 from json import loads
 from logging.handlers import RotatingFileHandler
-from operator import itemgetter
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
-import requests
-from bs4 import BeautifulSoup
-from google.api_core.client_options import ClientOptions
-from google.cloud import documentai
-from langchain.output_parsers.openai_tools import JsonOutputKeyToolsParser
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores.milvus import Milvus
-from langchain_core.documents import Document
-from langchain_core.runnables import (
-    RunnableLambda,
-    RunnableParallel,
-    RunnablePassthrough,
-    RunnableSerializable,
-)
-from langchain_core.vectorstores import Field, VectorStore, VectorStoreRetriever
-from langfuse.callback import CallbackHandler
 from langfuse.decorators import observe
 from pymilvus import (
     Collection,
@@ -34,23 +16,22 @@ from pymilvus import (
     connections,
     utility,
 )
-from unstructured.partition.auto import partition
 
 import encoders
-import prompts
-from chat_models import get_langchain_chat_model, summarize
-from chunking import chunk_elements_by_title
+from chat_models import summarize
 from db import load_vdb, store_vdb
+from loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links
 from models import EncoderParams, MilvusMetadataEnum
+from splitters import chunk_elements_by_title, chunk_str
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
 
-langfuse_handler = CallbackHandler(public_key=os.environ["LANGFUSE_PUBLIC_KEY"], secret_key=os.environ["LANGFUSE_SECRET_KEY"])
 
 connection_args = loads(os.environ["Milvus"])
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
+
 
 # init logs
 log_formatter = logging.Formatter(
@@ -65,120 +46,6 @@ vdb_log.setLevel(logging.ERROR)
 
 vdb_log.addHandler(my_handler)
 
-
-project_id = "h2o-gpt"
-location = "us"  # Format is "us" or "eu"
-processor_id = "c99e554bb49cf45d"
-
-def scrape(site: str, old_urls: list[str], common_elements: list[str], collection: str, get_links: bool = False):
-    print("site: ", site)
-    r = requests.get(site)
-    site_base = "//".join(site.split("//")[:-1])
-    # converting the text 
-    s = BeautifulSoup(r.content, "html.parser")
-    urls = []
-
-    if get_links:
-        for i in s.find_all("a"):
-            if "href" in i.attrs:
-                href = i.attrs['href']
-
-                if href.startswith("/"):
-                    link = site_base + href
-                elif href.startswith("http"):
-                    link = href
-                else:
-                    link = old_urls[0]
-                    # skip this link
-
-                if link not in old_urls:
-                    old_urls.append(link)
-                    urls.append(link)
-
-    try:
-        elements = partition(url=site)
-    except:
-        elements = partition(url=site, content_type="text/html")
-    filtered_elements = [
-        element for element in elements if str(element) not in common_elements
-    ]
-    print("elements: ", "\n\n".join([str(element) for element in filtered_elements]))
-    print("site: ", site)
-    # chunk
-    texts, metadatas = chunk_elements_by_title(filtered_elements, 10000, 2500, 500)
-    # summarize
-    summary = summarize(texts, "map_reduce")
-    for i in range(len(metadatas)):
-        metadatas[i]["summary"] = summary
-    # upload
-    upload_data_json(texts, metadatas, collection)
-    return [urls, elements]
-
-
-def crawl_and_scrape(site: str, collection: str, description: str):
-    create_collection(collection, description)
-    urls = [site]
-    new_urls, common_elements = scrape(site, urls, [], collection, True)
-    print("new_urls: ", new_urls)
-    while len(new_urls) > 0:
-        cur_url = new_urls.pop()
-        if site == cur_url[:len(site)]:
-            urls.append(cur_url)
-            add_urls, common_elements = scrape(cur_url, urls + new_urls, common_elements, collection)
-            new_urls += add_urls
-    print(urls)
-    return urls
-
-
-def quickstart_ocr(
-        file: UploadFile,
-):
-    if not file.filename.endswith(".pdf"):
-        process_options = documentai.ProcessOptions(
-            ocr_config=documentai.OcrConfig(
-                language_code="en",
-                enable_native_pdf_parsing=True,
-            )
-        )
-    else:
-        process_options = documentai.ProcessOptions(
-            ocr_config=documentai.OcrConfig(
-                language_code="en",
-            )
-        )
-
-    # You must set the `api_endpoint`if you use a location other than "us".
-    opts = ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com")
-
-    client = documentai.DocumentProcessorServiceClient(client_options=opts)
-
-    processor_name = client.processor_path(project_id, location, processor_id)
-
-    # Print the processor information
-    print(f"Processor Name: {processor_name}")
-
-    # Load binary data
-    raw_document = documentai.RawDocument(
-        content=file.file.read(),
-        mime_type=mimetypes.guess_type(file.filename)[0],
-        # Refer to https://cloud.google.com/document-ai/docs/file-types for supported file types
-    )
-
-    # Configure the process request
-    # `processor.name` is the full resource name of the processor, e.g.:
-    # `projects/{project_id}/locations/{location}/processors/{processor_id}`
-    request = documentai.ProcessRequest(name=processor_name, raw_document=raw_document, process_options=process_options)
-
-    result = client.process_document(request=request)
-
-    # For a full list of `Document` object attributes, reference this page:
-    # https://cloud.google.com/document-ai/docs/reference/rest/v1/Document
-    document = result.document
-
-    # Read the text recognition output from the processor
-    print("The document contains the following text:")
-    print(document.text)
-    return document.text
 
 # used to cache collection params from firebase
 COLLECTION_PARAMS = {}
@@ -196,6 +63,8 @@ AUTO_INDEX = {
 }
 SESSION_DATA = "SessionData"
 MAX_K = 16384
+
+# core features
 
 def load_vdb_param(
     collection_name: str,
@@ -346,29 +215,6 @@ def create_collection(
     return coll
 
 
-def langchain_db(collection_name: str) -> Milvus:
-    """Get an instance of the database for use in LangChain.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of the collection to load
-
-    Returns
-    -------
-    Milvus
-        A subclass of LangChain's VectorStore
-
-    """
-    encoder = load_vdb_param(collection_name, "encoder")
-    return Milvus(
-        embedding_function=encoders.get_langchain_embedding_model(encoder),
-        collection_name=collection_name,
-        connection_args=connection_args,
-        auto_id=True,
-    )
-
-
 def query_check(collection_name: str, query: str, k: int, session_id: str = "") -> dict:
     """Check query parameters.
 
@@ -454,10 +300,14 @@ def query(collection_name: str, query: str,
             search_params["expr"] = session_filter
     res = coll.search(**search_params)
     if res:
-        # on success, returns a list containing a single inner list containing result objects
+        # on success, returns a list containing a single inner list containing
+        # result objects
         if len(res) == 1:
             # sort hits by ascending distance
-            hits = sorted([hit.to_dict() for hit in res[0]], key=lambda h: h["distance"])
+            hits = sorted(
+                [hit.to_dict() for hit in res[0]],
+                key=lambda h: h["distance"],
+            )
             # delete pks
             for hit in hits:
                 del hit["id"]
@@ -466,148 +316,31 @@ def query(collection_name: str, query: str,
     return {"message": "Failure: unable to complete search"}
 
 
-def qa_chain(collection_name: str, k: int = 4,
-             session_id: str = "") -> RunnableSerializable:
-    """Create a QA chain.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of a Milvus Collection
-    k : int, optional
-        Return the top k chunks, by default 4
-    session_id : str, optional
-        The session id for filtering session data, by default ""
-
-    Returns
-    -------
-    RunnableSerializable
-        A LangChain Runnable QA chain
-
-    """
-    db = langchain_db(collection_name)
-    llm = get_langchain_chat_model(model="gpt-3.5-turbo", temperature=0)
-    llm_with_tool = llm.bind_tools(
-        [prompts.CitedAnswer],
-        tool_choice="CitedAnswer",
-    )
-    output_parser = JsonOutputKeyToolsParser(key_name="CitedAnswer", return_single=True)
-    metadata_format = load_vdb_param(collection_name, "metadata_format")
-    match metadata_format:
-        case MilvusMetadataEnum.field:
-            output_fields = load_vdb_param(collection_name, "fields")
-        case MilvusMetadataEnum.json:
-            output_fields = ["metadata"]
-        case MilvusMetadataEnum.no_field:
-            output_fields = ["text"]
-
-    def format_docs_with_id(docs: list[Document]) -> str:
-        formatted = [
-            f"Chunk ID: {i}\n" + "\n".join(
-            [f"Chunk {f.capitalize()}: {doc.metadata[f]}" for f in output_fields]) +
-            "\nChunk Text: " + doc.page_content
-            # start=1 because the LLM will switch to 1-indexed IDs if chunks are large
-            for i, doc in enumerate(docs, start=1)
-        ]
-        return "\n\n" + "\n\n".join(formatted)
-
-    doc_format_chain = itemgetter("docs") | RunnableLambda(format_docs_with_id)
-    output_chain = prompts.QA_PROMPT | llm_with_tool | output_parser
-    if session_id:
-        docs = FilteredRetriever(vectorstore=db,
-                                 session_filter=session_id,
-                                 search_kwargs={"k": k})
-    else:
-        docs = db.as_retriever(search_kwargs={"k": k})
-    return (
-        RunnableParallel(question=RunnablePassthrough(), docs=docs)
-        .assign(context=doc_format_chain)
-        .assign(cited_answer=output_chain)
-        .pick(["cited_answer", "docs"])
-    )
-
-
-@observe()
-def qa(collection_name: str, query: str,
-       k: int = 4, session_id: str = "") -> dict:
-    """Run a QA chain to answer the query and return the top k source chunks.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of a Milvus Collection
-    query : str
-        The users query
-    k : int, optional
-        Return the top k chunks, by default 4
-    session_id : str, optional
-        The session id for filtering session data, by default ""
-
-    Returns
-    -------
-    dict
-        With success message, result, and sources or else failure message
-
-    """
-    if query_check(collection_name, query, k, session_id):
-        return query_check(collection_name, query, k, session_id)
-
-    chain = qa_chain(collection_name, k, session_id)
-    result = chain.invoke(query)
-    cited_sources = [
-        # i - 1 because start=1 in format_docs_with_id (see qa_chain)
-        result["docs"][i - 1].metadata
-        for i in set(result["cited_answer"][0]["citations"])
-    ]
-    for src in cited_sources:
-        del src["pk"]
-    return {
-        "message": "Success",
-        "result": {
-            "answer": result["cited_answer"][0]["answer"],
-            "sources": cited_sources,
-        },
-    }
-
-
-def file_upload(file: UploadFile, session_id: str, summary: str | None = None) -> dict:
-    """Upload a file to a collection.
-
-    Parameters
-    ----------
-    file : UploadFile
-        The file to upload
-    session_id : str
-        The session associated with the file
-    summary: str, optional
-        A summary of the file written by the user, by default None.
-
-    Returns
-    -------
-    dict
-        With a `message`, and `num_chunks` if success
-
-    """
-    # extract text
-    elements = partition(file=file.file, metadata_filename=file.filename)
-    if summary is not None:
-        for i in range(len(elements)):
-            elements[i].metadata["summary"] = summary
-    # chunk text
-    texts, metadatas = chunk_elements_by_title(elements)
-    # add session id to metadata
-    for i in range(len(metadatas)):
-        metadatas[i]["session_id"] = session_id
-    # upload
-    return upload_data_json(texts, metadatas, SESSION_DATA)
-
-
 def upload_data_json(
     texts: list[str],
     metadatas: list[dict],
     collection_name: str,
     batch_size: int = 1000,
-):
+) -> dict[str, str]:
+    """Upload data to a collection with json format.
+
+    Parameters
+    ----------
+    texts : list[str]
+        The text to be uploaded.
+    metadatas : list[dict]
+        The metadata of the text to be uploaded.
+    collection_name : str
+        The name of the Milvus collection.
+    batch_size : int, optional
+        The number of records to be uploaded at a time, by default 1000.
+
+    Returns
+    -------
+    dict[str, str]
+        With a `message` indicating success or failure
+
+    """
     vectors = encoders.embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     data = [vectors, texts, metadatas]
     collection = Collection(collection_name)
@@ -646,48 +379,6 @@ def upload_data_json(
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
     return {"message": "Success"}
-
-
-def upload_documents(collection_name: str, documents: list[Document]):
-    encoder = load_vdb_param(collection_name, "encoder")
-    ids = langchain_db(collection_name).add_documents(
-        documents=documents,
-        embedding=encoders.get_langchain_embedding_model(encoder),
-        connection_args=connection_args,
-    )
-    num_docs = len(documents)
-    if num_docs != len(ids):
-        return {"message": f"Failure: expected to upload {num_docs} chunks but got {len(ids)}"}
-    return {"message": f"Success: uploaded {num_docs} chunks"}
-
-
-def get_documents(collection_name: str, expr: str) -> list[Document]:
-    """Get chunks from a Milvus Collection as a list of LangChain Documents.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of a pymilvus.Collection
-    expr : str
-        The boolean expression used to filter chunks
-
-    Returns
-    -------
-    list[Document]
-        Documents representing the filtered chunks from the collection
-
-    """
-    hits = get_expr(collection_name, expr)["result"]
-    return [
-        Document(
-            page_content=hit["text"],
-            metadata={
-                field: hit[field]
-                for field in hit if field != "text"
-            },
-        )
-        for hit in hits
-    ]
 
 
 def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
@@ -756,33 +447,184 @@ def delete_expr(collection_name: str, expr: str) -> dict:
     return {"message": f"Success: deleted {ids.delete_count} chunks"}
 
 
-def session_upload_ocr(file: UploadFile, session_id: str, summary: str, max_chunk_size: int = 1000,
-                       chunk_overlap: int = 150):
-    reader = quickstart_ocr(file)
-    documents = [
-        Document(
-            page_content=page,
-            metadata={"source": file.filename, "page": page_number, "session_id": session_id, "user_summary": summary},
-        )
-        for page_number, page in enumerate([reader], start=1)
-    ]
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=max_chunk_size, chunk_overlap=chunk_overlap)
-    documents = text_splitter.split_documents(documents)
+# application level features
 
+def upload_courtlistener(collection_name: str, oo: dict) -> dict:
+    # chunk
+    texts = chunk_str(oo["text"], 10000, 1000)
     # summarize
-    summary = summarize(documents, "map_reduce")
-    for doc in documents:
-        doc.metadata["ai_summary"] = summary
-
+    summary = summarize(texts, "map_reduce")
+    # metadata
+    del oo["text"]
+    maxlen = 1000
+    keys_to_remove = [
+        key for key in oo
+        if not oo[key] or (isinstance(oo[key], str) and len(oo[key])) > maxlen
+    ]
+    for key in keys_to_remove:
+        del oo[key]
+    oo["ai_summary"] = summary
+    metadatas = [oo] * len(texts)
     # upload
-    return upload_documents(SESSION_DATA, documents)
+    upload_data_json(texts, metadatas, collection_name)
 
 
-def session_source_summaries(session_id: str, batch_size: int = 1000):
+def crawl_upload_site(collection_name: str, url: str) -> list[str]:
+    urls = [url]
+    new_urls, prev_elements = scrape_with_links(url, urls)
+    strs, metadatas = chunk_elements_by_title(prev_elements, 10000, 2500, 500)
+    ai_summary = summarize(strs, "map_reduce")
+    for metadata in metadatas:
+        metadata["ai_summary"] = ai_summary
+    upload_data_json(strs, metadatas, collection_name)
+    print("new_urls: ", new_urls)
+    while len(new_urls) > 0:
+        cur_url = new_urls.pop()
+        if url == cur_url[:len(url)]:
+            urls.append(cur_url)
+            cur_elements = scrape(cur_url)
+            new_elements = [
+                element for element in cur_elements if element not in prev_elements
+            ]
+            strs, metadatas = chunk_elements_by_title(new_elements, 10000, 2500, 500)
+            ai_summary = summarize(strs, "map_reduce")
+            for metadata in metadatas:
+                metadata["ai_summary"] = ai_summary
+            upload_data_json(strs, metadatas, collection_name)
+            prev_elements = cur_elements
+    print(urls)
+    return urls
+
+
+def upload_site(collection_name: str, url: str) -> dict[str, str]:
+    """Scrape, chunk, summarize, and upload a URLs contents to Milvus.
+
+    Parameters
+    ----------
+    collection_name : str
+        Where the chunks will be uploaded.
+    url : str
+        The site to scrape.
+
+    Returns
+    -------
+    dict[str, str]
+        With a `message` indicating success or failure
+
+    """
+    elements = scrape(url)
+    strs, metadatas = chunk_elements_by_title(elements, 10000, 2500, 500)
+    ai_summary = summarize(strs, "map_reduce")
+    for metadata in metadatas:
+        metadata["ai_summary"] = ai_summary
+    return upload_data_json(strs, metadatas, collection_name)
+
+
+def session_upload_ocr(
+    file: UploadFile,
+    session_id: str,
+    summary: str | None = None,
+    max_chunk_size: int = 1000,
+    chunk_overlap: int = 150,
+) -> dict[str, str]:
+    """OCR scan, chunk, summarize, and upload a file to Milvus.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to scan and upload.
+    session_id : str
+        The session associated with the file.
+    summary : str | None, optional
+        A user-written summary of the file, by default None.
+    max_chunk_size : int, optional
+        The max length of a text chunk in chars, by default 1000.
+    chunk_overlap : int, optional
+        The number of chars to overlap between chunks, by default 150.
+
+    Returns
+    -------
+    dict[str, str]
+        With a `message` indicating success or failure
+
+    """
+    reader = quickstart_ocr(file)
+    strs = chunk_str(reader, max_chunk_size, chunk_overlap)
+    ai_summary = summarize(strs, "map_reduce")
+    metadata = {
+        "session_id": session_id,
+        "source": file.filename,
+        "ai_summary": ai_summary,
+    }
+    if summary is not None:
+        metadata["user_summary"] = summary
+    # upload
+    return upload_data_json(strs, [metadata] * len(strs), SESSION_DATA)
+
+
+def file_upload(
+    file: UploadFile,
+    session_id: str,
+    summary: str | None = None,
+) -> dict[str, str]:
+    """Perform an unstructured partition, chunk_by_title, and upload a file to Milvus.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to upload.
+    session_id : str
+        The session associated with the file.
+    summary: str, optional
+        A summary of the file written by the user, by default None.
+
+    Returns
+    -------
+    dict[str, str]
+        With a `message` indicating success or failure
+
+    """
+    # extract text
+    elements = partition_uploadfile(file)
+    if summary is not None:
+        for i in range(len(elements)):
+            elements[i].metadata["user_summary"] = summary
+    # chunk text
+    texts, metadatas = chunk_elements_by_title(elements)
+    # add session id to metadata
+    for i in range(len(metadatas)):
+        metadatas[i]["session_id"] = session_id
+    # upload
+    return upload_data_json(texts, metadatas, SESSION_DATA)
+
+
+def session_source_summaries(
+    session_id: str,
+    batch_size: int = 1000,
+) -> dict[str, dict[str, str]]:
+    """Get AI and user-written summaries of any files from a session.
+
+    Parameters
+    ----------
+    session_id : str
+        The session to search for file summaries.
+    batch_size : int, optional
+        The number of chunks to return from the query iterator at a time,
+        by default 1000.
+
+    Returns
+    -------
+    dict[str, dict[str, str]]
+        {"source": {"ai_summary": "str", "user_summary": "str"}}
+
+    """
     coll = Collection(SESSION_DATA)
     coll.load()
-    q_iter = coll.query_iterator(expr=f"session_id=='{session_id}'",
-                                 output_fields=["source", "ai_summary", "user_summary"], batch_size=batch_size)
+    q_iter = coll.query_iterator(
+        expr=f"session_id=='{session_id}'",
+        output_fields=["source", "ai_summary", "user_summary"],
+        batch_size=batch_size,
+    )
     source_summaries = {}
     res = q_iter.next()
     while len(res) > 0:
@@ -790,25 +632,8 @@ def session_source_summaries(session_id: str, batch_size: int = 1000):
             if item["source"] not in source_summaries:
                 source_summaries[item["source"]] = {"ai_summary": item["ai_summary"]}
                 if item["user_summary"] != item["source"]:
-                    source_summaries[item["source"]]["user_summary"] = item["user_summary"]
+                    source_summary = source_summaries[item["source"]]
+                    source_summary["user_summary"] = item["user_summary"]
         res = q_iter.next()
     q_iter.close()
     return source_summaries
-
-
-class FilteredRetriever(VectorStoreRetriever):
-    vectorstore: VectorStore
-    search_type: str = "similarity"
-    search_kwargs: dict = Field(default_factory=dict)
-    session_filter: str
-
-    def get_relevant_documents(self, query: str) -> List[Document]:
-        docs = []
-        k = self.search_kwargs["k"]
-        # TODO: determine if get_relevant_documents() kwargs param supports filtering by metadata
-        # double k on each call to get_relevant_documents() until there are k filtered documents
-        while len(docs) < k:
-            results = self.vectorstore.as_retriever(search_kwargs={"k": k}).get_relevant_documents(query=query)
-            docs += [doc for doc in results if doc.metadata["session_id"] == self.session_filter and doc not in docs]
-            k = 2 * k
-        return docs[:self.search_kwargs["k"]]

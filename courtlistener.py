@@ -4,9 +4,7 @@ import requests
 from langchain.agents import Tool
 from langfuse.decorators import observe
 
-from chat_models import summarize
-from chunking import chunk_str
-from milvusdb import query, upload_data_json
+from milvusdb import query, upload_courtlistener
 from models import SearchTool
 
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
@@ -100,25 +98,9 @@ def courtlistener_search(q: str, k: int = 3) -> dict:
     Returns:
         the response with relevant info from courtlistener
     """
-    maxlen = 1000
     for result in search(q)["results"][:k]:
         oo = get_opinion(result)
-        # chunk
-        texts = chunk_str(oo["text"], 10000, 1000)
-        # summarize
-        summary = summarize(texts, "map_reduce")
-        # metadata
-        del oo["text"]
-        keys_to_remove = [
-            key for key in oo
-            if not oo[key] or (isinstance(oo[key], str) and len(oo[key])) > maxlen
-        ]
-        for key in keys_to_remove:
-            del oo[key]
-        oo["summary"] = summary
-        metadatas = [oo] * len(texts)
-        # upload
-        upload_data_json(texts, metadatas, courtlistener_collection)
+        upload_courtlistener(courtlistener_collection, oo)
 
     return query(courtlistener_collection, q)
 

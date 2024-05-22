@@ -1,6 +1,8 @@
 """Written by Arman Aydemir. This file contains the main API code for the backend."""
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
-from typing import Annotated, Optional
+from typing import Annotated
 
 import langfuse
 from fastapi import Body, FastAPI, UploadFile
@@ -18,7 +20,7 @@ from db import (
 )
 from milvusdb import (
     SESSION_DATA,
-    crawl_and_scrape,
+    crawl_upload_site,
     delete_expr,
     file_upload,
     session_source_summaries,
@@ -328,6 +330,7 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -
         the session to associate the file with.
     summary: str, optional
         A summary of the file written by the user, by default None.
+
     Returns
     -------
     dict
@@ -384,9 +387,9 @@ def upload_files(files: list[UploadFile],
 
 @api.post("/upload_file_ocr", tags=["User Upload"])
 def vectordb_upload_ocr(file: UploadFile,
-        session_id: str, summary: Optional[str] = None) -> dict:
+        session_id: str, summary: str | None = None) -> dict:
     """Upload a file by user and use OCR to extract info."""
-    return session_upload_ocr(file, session_id, summary if summary else file.filename)
+    return session_upload_ocr(file, session_id, summary if summary else None)
 
 
 @api.post("/delete_file", tags=["Vector Database"])
@@ -431,4 +434,4 @@ def vectordb_upload_site(site: str, collection_name: str,
         description: str, api_key: str):
     if not admin_check(api_key):
         return {"message": "Failure: API key invalid"}
-    return crawl_and_scrape(site, collection_name, description)
+    return crawl_upload_site(collection_name, site, description)

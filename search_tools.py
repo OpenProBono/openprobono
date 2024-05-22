@@ -1,11 +1,13 @@
 import os
+
 import requests
 from langchain.agents import Tool
 from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
-from courtlistener import courtlistener_search, courtlistener_query_tool
-from milvusdb import query, scrape
-from models import BotRequest, EngineEnum, SearchTool, SearchMethodEnum
+
+from courtlistener import courtlistener_query_tool, courtlistener_search
+from milvusdb import query, upload_site
+from models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
@@ -47,7 +49,7 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
             'num': num_results
         }).get_dict())
     for result in response["organic_results"]:
-        scrape(result["link"], [], [], search_collection)
+        upload_site(search_collection, result["link"])
     return query(search_collection, qr)
 
 
