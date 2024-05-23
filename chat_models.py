@@ -400,9 +400,28 @@ def summarize(
         If chatmodel.engine is not `openai`, `anthropic`, or `langchain`.
 
     """
-    # hard limit on the number of chunks to be summarized, for cost and rate limits
+    # hard limit on the number of tokens to be summarized, for cost and rate limits
     max_summary_chunks = 200
+    max_summary_tokens = 150000
     chatmodel = ChatModelParams() if chatmodel is None else chatmodel
+    from encoders import token_count
+    tokens = 0
+    # need an accurate tokenizer for anthropic models, so use gpt_3_5 for now
+    if chatmodel.engine == EngineEnum.anthropic:
+        model = OpenAIModelEnum.gpt_3_5
+    else:
+        model = chatmodel.model
+    # count tokens to find the number of documents to summarize
+    for i, doc in enumerate(documents, start=1):
+        if isinstance(doc, str):
+            tokens += token_count(doc, model)
+        elif isinstance(doc, Element):
+            tokens += token_count(doc.text, model)
+        elif isinstance(doc, LCDocument):
+            tokens += token_count(doc.page_content, model)
+        if tokens > max_summary_tokens:
+            max_summary_chunks = i
+            break
     documents = documents[:max_summary_chunks]
     langfuse_context.update_current_observation(
         input={"method":method, "num_docs":len(documents), **kwargs},

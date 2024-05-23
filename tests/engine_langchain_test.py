@@ -14,7 +14,7 @@ class ApiTests(unittest.TestCase):
     # test_bot_vdb_id = "37394099-4c05-474f-8a35-28bcc4dc68ca"
     # test_session_vdb_id = "0c393d97-a70e-4b2f-b3e8-5c4326e6e10c"
     # in botsvm12_lang
-    test_bot_vdb_id = "2c580482-046e-4118-87dd-4f3abeb391b2"
+    test_bot_vdb_id = "00bf175d-e360-42bb-a58d-4896086ef215"
     test_bot_search_id = "7ab97742-ec5e-4663-862e-019f57ced68a"
     # in conversationsvm12_lang
     # 23c66d05-a5c1-4b30-af3a-9c22536d0e49
@@ -23,7 +23,7 @@ class ApiTests(unittest.TestCase):
     def test_create_bot_vdb_query_US(self):
         from models import BotRequest, VDBTool
 
-        vdb_tool = VDBTool(name="query", collection_name="USCode", k=4)
+        vdb_tool = VDBTool(collection_name="USCode", k=4)
         test_bot_request = BotRequest(api_key=API_KEY, vdb_tools=[vdb_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)
@@ -90,7 +90,7 @@ class ApiTests(unittest.TestCase):
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
-            bot_id=bot_id, 
+            bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
         )

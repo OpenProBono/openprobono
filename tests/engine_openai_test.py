@@ -22,7 +22,7 @@ class ApiTests(unittest.TestCase):
     test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
 
     def test_courtroom5_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
+        from models import BotRequest, ChatModelParams, EngineEnum, InitializeSession
 
         search_tool = {
             "name": "courtroom5",
@@ -118,7 +118,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_exp_opb_model_3_5_1106_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIChatModel
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIModelEnum
 
         gov_search = {
             "name": "government-search",
@@ -134,7 +134,7 @@ class ApiTests(unittest.TestCase):
         }
         test_bot_request = BotRequest(
             api_key=API_KEY,
-            chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIChatModel.GPT_3_5_1106),
+            chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIModelEnum.gpt_3_5_1106),
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
@@ -170,7 +170,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_exp_opb_model_4_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIChatModel
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIModelEnum
 
         gov_search = {
             "name": "government-search",
@@ -186,7 +186,7 @@ class ApiTests(unittest.TestCase):
         }
         test_bot_request = BotRequest(
             api_key=API_KEY,
-            chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIChatModel.GPT_4),
+            chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIModelEnum.gpt_4),
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
