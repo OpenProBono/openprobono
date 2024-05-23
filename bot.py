@@ -72,6 +72,11 @@ def opb_bot(r: ChatRequest, bot: BotRequest) -> str:
 
     if r.history[-1][0].strip() == "":  # TODO: make this a more full check to ensure that the query is relevant
         return "Hi, how can I assist you today?"
+    if chat_models.moderate(r.history[-1][0].strip()):
+        return (
+            "I'm sorry, I can't help you with that. "
+            "Please modify your message and try again."
+        )
 
     q = Queue()
     job_done = object()
@@ -143,6 +148,12 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     """
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
+    if chat_models.moderate(r.history[-1][0].strip()):
+        return (
+            "I'm sorry, I can't help you with that. "
+            "Please modify your message and try again."
+        )
+
     client = OpenAI()
     messages = chat_models.messages(r.history, bot.chat_model.engine)
     messages.append({"role": "system", "content": COMBINE_TOOL_OUTPUTS_TEMPLATE})
@@ -232,6 +243,11 @@ def openai_tools(
 def anthropic_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
+    if chat_models.moderate(r.history[-1][0].strip(), bot.chat_model):
+        return (
+            "I'm sorry, I can't help you with that. "
+            "Please modify your message and try again."
+        )
     messages = chat_models.messages(r.history, bot.chat_model.engine)
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     client = Anthropic()
@@ -258,7 +274,9 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     response = chat_models.chat(messages, bot.chat_model, **kwargs)
     messages.append({"role": response.role, "content": response.content})
     # Step 2: check if the model wanted to call a function
-    tool_calls: list[ToolsBetaContentBlock] = [msg for msg in response.content if msg.type == "tool_use"]
+    tool_calls: list[ToolsBetaContentBlock] = [
+        msg for msg in response.content if msg.type == "tool_use"
+    ]
     return anthropic_tools(messages, tool_calls, bot, **kwargs)
 
 def anthropic_tools(

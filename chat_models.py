@@ -175,8 +175,7 @@ def chat_anthropic(
 
 def moderate(
     message: str,
-    engine: EngineEnum,
-    model: str,
+    chatmodel: ChatModelParams | None = None,
     client: OpenAI | anthropic.Anthropic | None = None,
 ) -> bool:
     """Moderate a message using the specified engine and model.
@@ -185,10 +184,9 @@ def moderate(
     ----------
     message : str
         The message to be moderated.
-    engine : EngineEnum:
-        The moderation engine to use.
-    model : str
-        The moderation model to use.
+    chatmodel : ChatModelParams, optional
+        The engine and model to use for moderation, by default
+        openai and text-moderation-latest.
     client : OpenAI | anthropic.Anthropic, optional
         The client to use for the moderation request. If not specified,
         one will be created.
@@ -204,12 +202,14 @@ def moderate(
         If chatmodel.engine is not `openai` or `anthropic`.
 
     """
-    match engine:
+    if chatmodel is None:
+        chatmodel = ChatModelParams(EngineEnum.openai, OpenAIModelEnum.mod_latest)
+    match chatmodel.engine:
         case EngineEnum.openai:
-            return moderate_openai(message, model, client)
+            return moderate_openai(message, chatmodel.model, client)
         case EngineEnum.anthropic:
-            return moderate_anthropic(message, model, client)
-    msg = f"Unsupported engine: {engine}"
+            return moderate_anthropic(message, chatmodel.model, client)
+    msg = f"Unsupported engine: {chatmodel.engine}"
     raise ValueError(msg)
 
 def moderate_openai(

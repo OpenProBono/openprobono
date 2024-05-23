@@ -112,7 +112,7 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
         while j < num_strings and j - i < max_array_size:
             tokens = token_count(text[j], encoder.name)
             if tokens > max_tokens:
-                msg = f"str is {tokens} tokens but the max is {max_tokens}"
+                msg = f"str at index {j} is {tokens} tokens but the max is {max_tokens}"
                 raise ValueError(msg)
             j += 1
         attempt = 1
