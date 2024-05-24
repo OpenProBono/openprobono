@@ -65,14 +65,11 @@ def anthropic_query_tool(tool: VDBTool):
     }
 
 
-def run_vdb_tool(t: VDBTool, function_args, engine: EngineEnum):
+def run_vdb_tool(t: VDBTool, function_args: dict):
     function_response = None
     collection_name = t.collection_name
     k = t.k
-    if engine == EngineEnum.openai:
-        tool_query = function_args.get("query")
-    else: # anthropic
-        tool_query = function_args["query"]
+    tool_query = function_args["query"]
     function_response = query(collection_name, tool_query, k)
     return str(function_response)
 

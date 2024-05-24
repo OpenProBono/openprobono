@@ -398,14 +398,14 @@ def anthropic_tool(t: SearchTool) -> dict:
     }
 
 
-def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
+def run_search_tool(tool: SearchTool, function_args: dict) -> str:
     """Create a search tool for an openai agent.
 
     Parameters
     ----------
     tool : SearchTool
         The SearchTool object which describes the tool
-    function_args : dict | _type_
+    function_args : dict
         The arguments to pass to the function
     engine : EngineEnum
         The engine providing function_args
@@ -418,7 +418,7 @@ def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
     """
     function_response = None
     prf = tool.prefix
-    qr = function_args.get("qr") if engine == EngineEnum.openai else function_args["qr"]
+    qr = function_args["qr"]
     match tool.method:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
@@ -428,6 +428,10 @@ def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
             function_response = courtlistener_search(qr)
+        case SearchMethodEnum.courtroom5:
+            function_response = courtroom5_search_tool(qr, prf)
+        case SearchMethodEnum.dynamic_courtroom5:
+            function_response = dynamic_courtroom5_search_tool(qr, prf)
     return str(function_response)
 
 

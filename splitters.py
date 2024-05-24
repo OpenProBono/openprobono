@@ -12,7 +12,28 @@ if TYPE_CHECKING:
     from unstructured.documents.elements import Element
 
 
-def chunk_str(text: str, max_chunk_size: int = 2500, chunk_overlap: int = 250):
+def chunk_str(
+    text: str,
+    max_chunk_size: int = 2500,
+    chunk_overlap: int = 250,
+) -> list[str]:
+    """Chunk elements using langchain `RecursiveCharacterTextSplitter`.
+
+    Parameters
+    ----------
+    text : str
+        The string to chunk.
+    max_chunk_size : int, optional
+        The maximum number of characters in a chunk, by default 2500
+    chunk_overlap : int, optional
+        The number of characters shared between consecutive chunks, by default 250
+
+    Returns
+    -------
+    list[str]
+        The chunked string.
+
+    """
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=max_chunk_size,
         chunk_overlap=chunk_overlap,

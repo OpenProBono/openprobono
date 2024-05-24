@@ -208,17 +208,9 @@ def openai_tools(
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
             if vdb_tool:
-                tool_response = run_vdb_tool(
-                    vdb_tool,
-                    function_args,
-                    bot.chat_model.engine,
-                )
+                tool_response = run_vdb_tool(vdb_tool, function_args)
             elif search_tool:
-                tool_response = run_search_tool(
-                    search_tool,
-                    function_args,
-                    bot.chat_model.engine,
-                )
+                tool_response = run_search_tool(search_tool, function_args)
             else:
                 tool_response = "error: unable to run tool"
             # Step 4: send the info for each function call and function response to
@@ -303,17 +295,9 @@ def anthropic_tools(
             }
             # Step 3: call the function
             if vdb_tool:
-                tool_response = run_vdb_tool(
-                    vdb_tool,
-                    tool_call.input,
-                    bot.chat_model.engine,
-                )
+                tool_response = run_vdb_tool(vdb_tool, tool_call.input)
             elif search_tool:
-                tool_response = run_search_tool(
-                    search_tool,
-                    tool_call.input,
-                    bot.chat_model.engine,
-                )
+                tool_response = run_search_tool(search_tool, tool_call.input)
             else:
                 tool_response = "error: unable to identify tool"
                 tool_response_msg["is_error"] = True

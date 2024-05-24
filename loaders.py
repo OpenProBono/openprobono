@@ -18,10 +18,36 @@ if TYPE_CHECKING:
 
 
 def partition_uploadfile(file: UploadFile) -> list[Element]:
+    """Partition an uploaded file into elements.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to partition.
+
+    Returns
+    -------
+    list[Element]
+        The extracted elements.
+
+    """
     return partition(file=file.file, metadata_filename=file.filename)
 
 
 def scrape(site: str) -> list[Element]:
+    """Scrape a site for text and partition it into elements.
+
+    Parameters
+    ----------
+    site : str
+        The URL to scrape.
+
+    Returns
+    -------
+    list[Element]
+        The scraped elements.
+
+    """
     try:
         if site.endswith(".pdf"):
             r = requests.get(site, timeout=10)
@@ -38,6 +64,21 @@ def scrape_with_links(
     site: str,
     old_urls: list[str],
 ) -> tuple[list[str], list[Element]]:
+    """Scrape a site and get any links referenced on the site.
+
+    Parameters
+    ----------
+    site : str
+        The URL to scrape.
+    old_urls : list[str]
+        The list of URLs already visited.
+
+    Returns
+    -------
+    tuple[list[str], list[Element]]
+        URLs, elements
+
+    """
     print("site: ", site)
     r = requests.get(site, timeout=10)
     site_base = "/".join(site.split("/")[:-1])
@@ -66,7 +107,20 @@ def scrape_with_links(
     return urls, elements
 
 
-def quickstart_ocr(file: UploadFile):
+def quickstart_ocr(file: UploadFile) -> str:
+    """Extract text from a file using OCR.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to extract text from.
+
+    Returns
+    -------
+    str
+        The extracted text from the file.
+
+    """
     project_id = "h2o-gpt"
     location = "us"  # Format is "us" or "eu"
     processor_id = "c99e554bb49cf45d"
