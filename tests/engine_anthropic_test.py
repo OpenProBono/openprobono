@@ -20,7 +20,7 @@ class ApiTests(unittest.TestCase):
     test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
 
     def test_courtroom5_anthropic_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, AnthropicChatModel
+        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, AnthropicModelEnum
 
         search_tool = {
             "name": "courtroom5",
@@ -30,7 +30,7 @@ class ApiTests(unittest.TestCase):
         }
         test_bot_request = BotRequest(
             api_key=API_KEY,
-            chat_model=ChatModelParams(engine=EngineEnum.anthropic, model=AnthropicChatModel.CLAUDE_3_OPUS),
+            chat_model=ChatModelParams(engine=EngineEnum.anthropic, model=AnthropicModelEnum.claude_3_opus),
             search_tools=[search_tool],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())

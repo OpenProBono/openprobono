@@ -203,7 +203,10 @@ def moderate(
 
     """
     if chatmodel is None:
-        chatmodel = ChatModelParams(EngineEnum.openai, OpenAIModelEnum.mod_latest)
+        chatmodel = ChatModelParams(
+            engine=EngineEnum.openai,
+            model=OpenAIModelEnum.mod_latest,
+        )
     match chatmodel.engine:
         case EngineEnum.openai:
             return moderate_openai(message, chatmodel.model, client)

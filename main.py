@@ -256,8 +256,6 @@ def create_bot(
                             ],
                             "vdb_tools": [
                                 {
-                                    "name": "USCode_query",
-                                    "method": "query",
                                     "collection_name": "USCode",
                                     "k": 4,
                                     "prompt": "Use to find information about federal laws and regulations.",  # noqa: E501
@@ -289,12 +287,9 @@ def create_bot(
                             ],
                             "vdb_tools": [
                                 {
-                                    "name": "name for tool",
-                                    "method": "which search method to use, must be one of: qa, query",  # noqa: E501
                                     "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",  # noqa: E501
                                     "prompt": "description for agent to know when to use the tool",  # noqa: E501
-                                    "prefix": "a prefix to add to query passed to tool by llm",  # noqa: E501
                                 },
                             ],
                             "chat_model": {
