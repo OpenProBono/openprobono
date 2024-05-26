@@ -43,6 +43,26 @@ def messages(
     history: list[tuple[str | None, str | None]],
     engine: EngineEnum,
 ) -> list[dict] | list[BaseMessage]:
+    """Convert conversation history into the right format for the given engine.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        The conversation history to convert.
+    engine : EngineEnum
+        The engine to use for the conversation.
+
+    Returns
+    -------
+    list[dict] | list[BaseMessage]
+        The converted conversation history.
+
+    Raises
+    ------
+    ValueError
+        If engine is not `openai`, `anthropic`, `hive`, or `langchain`.
+
+    """
     match engine:
         case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.hive:
             return messages_dicts(history)
@@ -53,6 +73,19 @@ def messages(
 def messages_dicts(
     history: list[tuple[str | None, str | None]],
 ) -> list[dict]:
+    """Convert conversation history into dictionary format.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        The original conversation history.
+
+    Returns
+    -------
+    list[dict]
+        The converted conversation history.
+
+    """
     messages = []
     for tup in history:
         if tup[0]:
@@ -64,6 +97,19 @@ def messages_dicts(
 def messages_langchain(
         history: list[tuple[str | None, str | None]],
 ) -> list[BaseMessage]:
+    """Convert conversation history into langchain format.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        The original conversation history.
+
+    Returns
+    -------
+    list[BaseMessage]
+        The converted conversation history.
+
+    """
     messages = []
     for tup in history:
         if tup[0]:
@@ -73,10 +119,32 @@ def messages_langchain(
     return messages
 
 def chat(
-    messages: list,
+    messages: list[dict] | list[BaseMessage],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> (tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage):
+) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage:
+    """Chat with an LLM.
+
+    Parameters
+    ----------
+    messages : list[dict] | list[BaseMessage]
+        The conversation history formatted for the given chat model.
+    chatmodel : ChatModelParams
+        The chat model to use for the conversation.
+    kwargs : dict
+        Keyword arguments for the given chat model.
+
+    Returns
+    -------
+    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage
+        The response from the LLM.
+
+    Raises
+    ------
+    ValueError
+        If the given chat model is not supported.
+
+    """
     match chatmodel.engine:
         case EngineEnum.hive:
             return chat_hive(messages, chatmodel.model, **kwargs)
@@ -90,10 +158,27 @@ def chat(
 
 @observe(as_type="generation")
 def chat_hive(
-    messages: list,
+    messages: list[dict],
     model: str,
     **kwargs: dict,
 ) -> tuple[str, list[str]]:
+    """Chat with an LLM using the hive engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the Hive LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    tuple[str, list[str]]
+        message, chunks
+
+    """
     key = "HIVE_7B_API_KEY" if model == HiveModelEnum.hive_7b else "HIVE_70B_API_KEY"
     system = kwargs.pop("system", HIVE_QA_PROMPT)
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
@@ -130,6 +215,23 @@ def chat_openai(
     model: str,
     **kwargs: dict,
 ) -> ChatCompletion:
+    """Chat with an LLM using the openai engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the OpenAI LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    ChatCompletion
+        The response from the LLM.
+
+    """
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
@@ -147,6 +249,23 @@ def chat_anthropic(
     model: str,
     **kwargs: dict,
 ) -> AnthropicMessage | ToolsBetaMessage:
+    """Chat with an LLM using the anthropic engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the anthropic LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    AnthropicMessage | ToolsBetaMessage
+        The response from the LLM.
+
+    """
     client = kwargs.pop("client", anthropic.Anthropic())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     tools = kwargs.get("tools", [])
