@@ -172,6 +172,7 @@ class OpenAIModelEnum(str, Enum):
     gpt_3_5_1106 = "gpt-3.5-turbo-1106"
     gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
     gpt_4 = "gpt-4"
+    gpt_4_o = "gpt-4o"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
     mod_stable = "text-moderation-stable"
