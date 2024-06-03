@@ -4,7 +4,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-import langfuse
 from fastapi import Body, FastAPI, UploadFile
 
 from bot import anthropic_bot, opb_bot, openai_bot
@@ -38,43 +37,44 @@ from models import (
 
 
 # this is to ensure tracing with langfuse
-@asynccontextmanager
-async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
-    # Operation on startup
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
+#     # Operation on startup
 
-    yield  # wait until shutdown
+#     yield  # wait until shutdown
 
-    # Flush all events to be sent to Langfuse on shutdown and
-    # terminate all Threads gracefully. This operation is blocking.
-    langfuse.flush()
+#     # Flush all events to be sent to Langfuse on shutdown and
+#     # terminate all Threads gracefully. This operation is blocking.
+#     langfuse.flush()
 
 
 def process_chat(r: ChatRequest) -> dict:
-    try:
-        bot = load_bot(r.bot_id)
-        if bot is None:
-            return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+    # try:
+    bot = load_bot(r.bot_id)
+    if bot is None:
+        return {"message": "Failure: No bot found with bot id: " + r.bot_id}
 
-        match bot.chat_model.engine:
-            case EngineEnum.langchain:
-                output = opb_bot(r, bot)
-            case EngineEnum.openai:
-                output = openai_bot(r, bot)
-            case EngineEnum.anthropic:
-                output = anthropic_bot(r, bot)
-            case _:
-                return {"message": f"Failure: invalid bot engine {bot.chat_model.engine}"}
+    match bot.chat_model.engine:
+        case EngineEnum.langchain:
+            output = opb_bot(r, bot)
+        case EngineEnum.openai:
+            output = openai_bot(r, bot)
+        case EngineEnum.anthropic:
+            output = anthropic_bot(r, bot)
+        case _:
+            return {"message": f"Failure: invalid bot engine {bot.chat_model.engine}"}
 
-        # store conversation (and also log the api_key)
-        store_conversation(r, output)
+    # store conversation (and also log the api_key)
+    store_conversation(r, output)
 
-    except Exception as error:
-        return {"message": "Failure: Internal Error: " + str(error)}
+    # except Exception as error:
+    #     error.
+    #     return {"message": "Failure: Internal Error: " + str(error)}
     # return the chat and the bot_id
     return {"message": "Success", "output": output, "bot_id": r.bot_id}
 
 
-api = FastAPI(lifespan=lifespan)
+api = FastAPI()
 
 
 @api.get("/", tags=["General"])

@@ -10,7 +10,7 @@ client = TestClient(main.api)
 
 API_KEY = os.environ["OPB_TEST_API_KEY"]
 
-class ApiTests(unittest.TestCase):
+class TestApi:
     # #_courtroom5_v1
     # test_bot_vdb_id = "37394099-4c05-474f-8a35-28bcc4dc68ca"
     # test_session_vdb_id = "0c393d97-a70e-4b2f-b3e8-5c4326e6e10c"
@@ -36,12 +36,12 @@ class ApiTests(unittest.TestCase):
             search_tools=[search_tool],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
@@ -52,18 +52,18 @@ class ApiTests(unittest.TestCase):
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
-        self.assertTrue("output" in response_json)
-        self.assertTrue(isinstance(response_json["output"], str))
-        self.assertTrue("session_id" in response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
         print(response_json["session_id"])
-        self.assertTrue(isinstance(response_json["session_id"], str))
-        self.assertEqual(len(response_json["session_id"]), 36)
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_openai_bot(self):
         from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
@@ -86,12 +86,12 @@ class ApiTests(unittest.TestCase):
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
@@ -102,20 +102,20 @@ class ApiTests(unittest.TestCase):
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
-        self.assertTrue("output" in response_json)
-        self.assertTrue(isinstance(response_json["output"], str))
-        self.assertTrue("session_id" in response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
         print(response_json["session_id"])
         print("---- OUTPUT ----")
         print(response_json["output"])
-        self.assertTrue(isinstance(response_json["session_id"], str))
-        self.assertEqual(len(response_json["session_id"]), 36)
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_3_5_1106_openai_bot(self):
         from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIModelEnum
@@ -138,12 +138,12 @@ class ApiTests(unittest.TestCase):
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
@@ -154,20 +154,20 @@ class ApiTests(unittest.TestCase):
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
-        self.assertTrue("output" in response_json)
-        self.assertTrue(isinstance(response_json["output"], str))
-        self.assertTrue("session_id" in response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
         print(response_json["session_id"])
         print("---- OUTPUT ----")
         print(response_json["output"])
-        self.assertTrue(isinstance(response_json["session_id"], str))
-        self.assertEqual(len(response_json["session_id"]), 36)
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_4_openai_bot(self):
         from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIModelEnum
@@ -190,12 +190,12 @@ class ApiTests(unittest.TestCase):
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
@@ -206,20 +206,20 @@ class ApiTests(unittest.TestCase):
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
-        self.assertTrue("output" in response_json)
-        self.assertTrue(isinstance(response_json["output"], str))
-        self.assertTrue("session_id" in response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
         print(response_json["session_id"])
         print("---- OUTPUT ----")
         print(response_json["output"])
-        self.assertTrue(isinstance(response_json["session_id"], str))
-        self.assertEqual(len(response_json["session_id"]), 36)
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_google_openai_bot(self):
         from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
@@ -242,12 +242,12 @@ class ApiTests(unittest.TestCase):
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
@@ -258,20 +258,20 @@ class ApiTests(unittest.TestCase):
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
-        self.assertTrue("output" in response_json)
-        self.assertTrue(isinstance(response_json["output"], str))
-        self.assertTrue("session_id" in response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
         print(response_json["session_id"])
         print("---- OUTPUT ----")
         print(response_json["output"])
-        self.assertTrue(isinstance(response_json["session_id"], str))
-        self.assertEqual(len(response_json["session_id"]), 36)
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
 
     def test_dynamic_exp_opb_openai_bot(self):
         from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
@@ -294,12 +294,12 @@ class ApiTests(unittest.TestCase):
             search_tools=[gov_search, case_search],
         )
         response = client.post("/create_bot", json=test_bot_request.model_dump())
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
@@ -310,17 +310,17 @@ class ApiTests(unittest.TestCase):
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         response_json = response.json()
-        self.assertEqual(response_json["message"], "Success")
-        self.assertTrue("bot_id" in response_json)
-        self.assertTrue(isinstance(response_json["bot_id"], str))
-        self.assertEqual(len(response_json["bot_id"]), 36)
-        self.assertTrue("output" in response_json)
-        self.assertTrue(isinstance(response_json["output"], str))
-        self.assertTrue("session_id" in response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
         print(response_json["session_id"])
         print("---- OUTPUT ----")
         print(response_json["output"])
-        self.assertTrue(isinstance(response_json["session_id"], str))
-        self.assertEqual(len(response_json["session_id"]), 36)
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36

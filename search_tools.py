@@ -3,7 +3,6 @@ import os
 
 import requests
 from langchain.agents import Tool
-from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
 
 from courtlistener import courtlistener_search, courtlistener_tool_creator
@@ -38,7 +37,6 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
-@observe()
 def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 3) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
@@ -67,7 +65,6 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 3) -> dict:
     return query(search_collection, qr)
 
 
-@observe()
 def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
     """Query the google search api.
 
@@ -100,7 +97,6 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
                      params=params,
                      headers=headers, timeout=30).json())[0:max_len]
 
-@observe()
 def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
     """Query the custom courtroom5 google search api.
 
@@ -137,7 +133,6 @@ def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
 
 
 # Implement this for regular programatic google search as well.
-@observe()
 def dynamic_courtroom5_search_tool(qr: str, prf: str) -> str:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
@@ -175,7 +170,6 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str) -> str:
         upload_site(search_collection, result["link"])
     return query(search_collection, qr)
 
-@observe()
 def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """Query the serpapi search api.
 

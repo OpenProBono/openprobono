@@ -3,7 +3,6 @@ import os
 
 import requests
 from langchain.agents import Tool
-from langfuse.decorators import observe
 
 from milvusdb import query, upload_courtlistener
 from models import SearchTool
@@ -117,7 +116,6 @@ def get_docket(result: dict) -> dict:
 
 
 # TODO: Need to parallelize this
-@observe()
 def courtlistener_search(q: str, k: int = 3) -> dict:
     """Search courtlistener for a query.
 

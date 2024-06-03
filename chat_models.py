@@ -10,8 +10,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document as LCDocument
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
-from langfuse.decorators import langfuse_context, observe
-from langfuse.openai import OpenAI
+from openai import OpenAI
 from unstructured.documents.elements import Element
 
 from models import (
@@ -88,7 +87,6 @@ def chat(
             msg = "langchain chat function must be implemented manually"
     raise ValueError(msg)
 
-@observe(as_type="generation")
 def chat_hive(
     messages: list,
     model: str,
@@ -141,7 +139,6 @@ def chat_openai(
         **kwargs,
     )
 
-@observe(as_type="generation")
 def chat_anthropic(
     messages: list[dict],
     model: str,
@@ -160,17 +157,17 @@ def chat_anthropic(
         **kwargs,
     )
     # report input, output, model, usage to langfuse
-    usage = {
-        "input": response.usage.input_tokens,
-        "output": response.usage.output_tokens,
-        "total": response.usage.input_tokens + response.usage.output_tokens,
-    }
-    langfuse_context.update_current_observation(
-        input=messages,
-        model=model,
-        output=response.content,
-        usage=usage,
-    )
+    # usage = {
+    #     "input": response.usage.input_tokens,
+    #     "output": response.usage.output_tokens,
+    #     "total": response.usage.input_tokens + response.usage.output_tokens,
+    # }
+    # langfuse_context.update_current_observation(
+    #     input=messages,
+    #     model=model,
+    #     output=response.content,
+    #     usage=usage,
+    # )
     return response
 
 def moderate(
@@ -371,7 +368,6 @@ def get_summary_message(
             raise ValueError(method)
     return msg
 
-@observe(capture_input=False)
 def summarize(
     documents: list[str | Element | LCDocument],
     method: str = SummaryMethodEnum.stuffing,
@@ -426,9 +422,9 @@ def summarize(
             max_summary_chunks = i
             break
     documents = documents[:max_summary_chunks]
-    langfuse_context.update_current_observation(
-        input={"method":method, "num_docs":len(documents), **kwargs},
-    )
+    # langfuse_context.update_current_observation(
+    #     input={"method":method, "num_docs":len(documents), **kwargs},
+    # )
     match chatmodel.engine:
         case EngineEnum.openai:
             client = kwargs.pop("client", OpenAI())

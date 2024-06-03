@@ -7,7 +7,6 @@ from json import loads
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
-from langfuse.decorators import observe
 from pymilvus import (
     Collection,
     CollectionSchema,
@@ -247,7 +246,6 @@ def query_check(collection_name: str, query: str, k: int, session_id: str = "") 
     return msg
 
 
-@observe()
 def query(collection_name: str, query: str,
           k: int = 4, expr: str = "", session_id: str = "") -> dict:
     """Run a query on a given collection.

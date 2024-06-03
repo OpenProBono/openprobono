@@ -5,7 +5,7 @@ from typing import Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
-from langfuse import Langfuse
+from pyparsing import C
 
 from models import (
     BotRequest,
@@ -17,13 +17,13 @@ from models import (
     get_uuid_id,
 )
 
-langfuse = Langfuse()
+# langfuse = Langfuse()
 
 # sdvlp session
 # 1076cca8-a1fa-415a-b5f8-c11da178d224
 
 # which version of db we are using
-VERSION = "vm12_lang"
+VERSION = "_vj1"
 BOT_COLLECTION = "bots"
 MILVUS_COLLECTION = "milvus"
 CONVERSATION_COLLECTION = "conversations"
@@ -86,12 +86,14 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
         r.session_id = get_uuid_id()
 
     data = r.model_dump()
-    data["history"] = len(r.history)
-    data["human"] = r.history[-1][0]
-    data["bot"] = output
+    data["num_msg"] = len(r.history)
+    # data["human"] = r.history[-1][0]
+    # data["bot"] = output
 
     t = firestore.SERVER_TIMESTAMP
     data["timestamp"] = t
+
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(data)
 
     db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).collection(
         "conversations").document("msg" + str(len(r.history))).set(data)

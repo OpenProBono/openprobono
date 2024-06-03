@@ -12,12 +12,12 @@ langchain-openai>0.0.4
 langchain-community
 langchain-experimental
 langchainhub
-langfuse
+langfuse>=2.33.0
 libmagic
-openai<2.0.0
+openai>1.30.2
 poppler-utils
 pip>=23.3
-pydantic>2.0.0
+pydantic>=2.7.1
 python-multipart==0.0.9
 ragas
 requests==2.31.0
