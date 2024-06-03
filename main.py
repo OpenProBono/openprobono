@@ -256,6 +256,7 @@ def create_bot(
                             ],
                             "vdb_tools": [
                                 {
+                                    "name": "uscode-query",
                                     "collection_name": "USCode",
                                     "k": 4,
                                     "prompt": "Use to find information about federal laws and regulations.",  # noqa: E501
@@ -287,6 +288,7 @@ def create_bot(
                             ],
                             "vdb_tools": [
                                 {
+                                    "name": "name for tool",
                                     "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",  # noqa: E501
                                     "prompt": "description for agent to know when to use the tool",  # noqa: E501

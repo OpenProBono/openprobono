@@ -452,6 +452,10 @@ def delete_expr(collection_name: str, expr: str) -> dict:
 def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     if "text" not in oo or not oo["text"]:
         return {"message": "Failure: no opinion text found"}
+    # check if the opinion is already in the collection
+    hits = get_expr(collection_name, f"metadata['id']=={oo['id']}")
+    if hits["result"] and len(hits["result"]) > 0:
+        return {"message": "Success"}
     # chunk
     texts = chunk_str(oo["text"], 10000, 1000)
     # summarize
@@ -465,6 +469,9 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     ]
     for key in keys_to_remove:
         del oo[key]
+    # cited opinions take up a lot of tokens and are included in the text
+    if "opinions_cited" in oo:
+        del oo["opinions_cited"]
     oo["ai_summary"] = summary
     metadatas = [oo] * len(texts)
     # upload

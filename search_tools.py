@@ -6,9 +6,14 @@ from langchain.agents import Tool
 from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
 
-from courtlistener import courtlistener_search, courtlistener_tool_creator
+from courtlistener import (
+    courtlistener_search,
+    courtlistener_tool_args,
+    courtlistener_tool_creator,
+)
 from milvusdb import query, upload_site
 from models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
+from prompts import FILTERED_CASELAW_PROMPT
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
@@ -363,7 +368,7 @@ def openai_tool(t: SearchTool) -> dict:
         The description of tool created to be used by agents
 
     """
-    return {
+    body = {
         "type": "function",
         "function": {
             "name": t.name,
@@ -373,16 +378,36 @@ def openai_tool(t: SearchTool) -> dict:
                 "properties": {
                     "qr": {
                         "type": "string",
-                        "description": "the search text",
+                        "description": "The search text",
                     },
                 },
                 "required": ["qr"],
             },
         },
     }
+    if t.method == SearchMethodEnum.courtlistener:
+        # arg definitions
+        body["function"]["parameters"]["properties"].update(courtlistener_tool_args)
+        # default tool definition
+        if not t.prompt:
+            body["function"]["description"] = FILTERED_CASELAW_PROMPT
+    return body
 
 def anthropic_tool(t: SearchTool) -> dict:
-    return {
+    """Create a tool for anthropic agents to use.
+
+    Parameters
+    ----------
+    t : SearchTool
+        The SearchTool object which describes the tool
+
+    Returns
+    -------
+    dict
+        The description of tool created to be used by agents
+
+    """
+    body = {
         "name": t.name,
         "description": t.prompt,
         "input_schema": {
@@ -396,6 +421,13 @@ def anthropic_tool(t: SearchTool) -> dict:
             "required": ["qr"],
         },
     }
+    if t.method == SearchMethodEnum.courtlistener:
+        # add courtlistener arg definitions
+        body["input_schema"]["properties"].update(courtlistener_tool_args)
+        # default tool definition
+        if not t.prompt:
+            body["description"] = FILTERED_CASELAW_PROMPT
+    return body
 
 
 def run_search_tool(tool: SearchTool, function_args: dict) -> str:
@@ -427,7 +459,20 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
-            function_response = courtlistener_search(qr)
+            tool_jurisdiction, tool_from_date, tool_to_date = None, None, None
+            if "jurisdiction" in function_args:
+                tool_jurisdiction = function_args["jurisdiction"].lower()
+            if "from-date" in function_args:
+                tool_from_date = function_args["from-date"]
+            if "to-date" in function_args:
+                tool_to_date = function_args["to-date"]
+            function_response = courtlistener_search(
+                qr,
+                3,
+                tool_jurisdiction,
+                tool_from_date,
+                tool_to_date,
+            )
         case SearchMethodEnum.courtroom5:
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:

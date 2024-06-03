@@ -46,12 +46,14 @@ class VDBTool(BaseModel):
 
     Attributes
     ----------
+        name (str): The name of the VDB tool.
         collection_name (str): The collection name for the VDB tool.
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
 
     """
 
+    name: str
     collection_name: str
     k: int
     prompt: str = ""

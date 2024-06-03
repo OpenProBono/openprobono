@@ -23,7 +23,7 @@ class ApiTests(unittest.TestCase):
     def test_create_bot_vdb_query_US(self):
         from models import BotRequest, VDBTool
 
-        vdb_tool = VDBTool(collection_name="USCode", k=4)
+        vdb_tool = VDBTool(name="uscode-query", collection_name="USCode", k=4)
         test_bot_request = BotRequest(api_key=API_KEY, vdb_tools=[vdb_tool])
         response = client.post("/create_bot", json=test_bot_request.model_dump())
         self.assertEqual(response.status_code, 200)

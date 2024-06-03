@@ -172,3 +172,11 @@ Score 4: The response is mostly correct, accurate, and factual.
 Score 5: The response is completely correct, accurate, and factual.
 
 ###Feedback:"""
+
+FILTERED_CASELAW_PROMPT = "Use to find case law and optionally filter by a jurisdiction and date range."
+
+VDB_PROMPT = (
+    "This tool queries a database named {collection_name} "
+    "and returns the top {k} results. "
+    "The database description is: {description}."
+)
