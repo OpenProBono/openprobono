@@ -11,6 +11,7 @@ from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
+import openai
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageToolCall
 
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 
 
 langchain.debug = True
+openai.log = "debug"
 
 
 # OPB bot main function

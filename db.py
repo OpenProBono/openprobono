@@ -87,21 +87,15 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
 
     data = r.model_dump()
     data["num_msg"] = len(r.history)
-    # data["human"] = r.history[-1][0]
-    # data["bot"] = output
 
     t = firestore.SERVER_TIMESTAMP
     data["timestamp"] = t
 
     db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(data)
 
-    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).collection(
-        "conversations").document("msg" + str(len(r.history))).set(data)
-
     db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
         {"last_message_timestamp": t}, merge=True)
-    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
-        {"api_key": r.api_key}, merge=True)
+
     return True
 
 

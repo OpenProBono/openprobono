@@ -313,6 +313,14 @@ def query(collection_name: str, query: str,
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
+def source_exists(collection_name: str, source: str) -> bool:
+    collection = Collection(collection_name)
+    q = collection.query(expr= f"metadata['url']=='{source}'")
+    # q = collection.query(expr="id != 1", output_fields=["text", "metadata"])
+    # print(q)
+    # print(q["metadata"])
+
+    return len(q) > 0
 
 def upload_data_json(
     texts: list[str],
@@ -519,6 +527,7 @@ def upload_site(collection_name: str, url: str) -> dict[str, str]:
     strs, metadatas = chunk_elements_by_title(elements, 10000, 2500, 500)
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:
+        metadata["url"] = url
         metadata["ai_summary"] = ai_summary
     return upload_data_json(strs, metadatas, collection_name)
 

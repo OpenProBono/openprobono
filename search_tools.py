@@ -1,4 +1,5 @@
 """The search api functions and search toolset creation. Written by Arman Aydemir."""
+from multiprocessing import process
 import os
 
 import requests
@@ -6,14 +7,15 @@ from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
 from courtlistener import courtlistener_search, courtlistener_tool_creator
-from milvusdb import query, upload_site
+from milvusdb import query, upload_site, source_exists
+import asyncio
 from models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
 COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
-search_collection = "search_collection"
+search_collection = "search_collection_vj1"
 
 def filtered_search(results: dict) -> dict:
     """Filter search results returned by serpapi to only include relevant results.
@@ -60,8 +62,22 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 3) -> dict:
             "q": prf + " " + qr,
             "num": num_results,
         }).get_dict())
+    
+    def process_site(result):
+        print("start organic reuslts   " + result["link"])
+        try:
+            if(not source_exists(search_collection, result["link"])):
+                upload_site(search_collection, result["link"])
+        except:
+            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
+        print("end organic reuslts   " + result["link"])
+
     for result in response["organic_results"]:
-        upload_site(search_collection, result["link"])
+        process_site(result)
+
+    # response["organic_results"] = await asyncio.gather(*[process_site(result) for result in response["organic_results"]])
+       
+    print("do the query berry")
     return query(search_collection, qr)
 
 
