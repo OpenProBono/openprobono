@@ -73,7 +73,7 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 3) -> dict:
     for result in response["organic_results"]:
         process_site(result)
 
-    return query(search_collection, qr)
+    return query(search_collection, qr, k=10)
 
 
 def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:

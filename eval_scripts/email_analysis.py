@@ -1,4 +1,4 @@
-from chat_models import chat, chat_openai
+from chat_models import chat_openai
 from models import OpenAIModelEnum
 import json
 from pathlib import Path

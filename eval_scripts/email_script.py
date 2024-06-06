@@ -50,7 +50,8 @@ def main():
         time.sleep(1)
 
 
-    with Path("states-responses_metadata2_" + str(bot_id) + ".txt").open("w") as f:
+
+    with Path("states-responses_newj6_" + str(bot_id) + ".txt").open("w") as f:
         f.write(json.dumps(responses))
 
 main()

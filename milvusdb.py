@@ -504,7 +504,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
     return urls
 
 
-def upload_site(collection_name: str, url: str) -> dict[str, str]:
+def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_chars=2500, overlap=500) -> dict[str, str]:
     """Scrape, chunk, summarize, and upload a URLs contents to Milvus.
 
     Parameters
@@ -523,7 +523,7 @@ def upload_site(collection_name: str, url: str) -> dict[str, str]:
     elements = scrape(url)
     if len(elements) == 0:
         return {"message": f"Failure: no elements found at {url}"}
-    strs, metadatas = chunk_elements_by_title(elements, 10000, 2500, 500)
+    strs, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:
         # metadata["timestamp"] = firestore.SERVER_TIMESTAMP
