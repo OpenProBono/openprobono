@@ -317,10 +317,7 @@ def query(collection_name: str, query: str,
 
 def source_exists(collection_name: str, source: str) -> bool:
     collection = Collection(collection_name)
-    q = collection.query(expr= f"metadata['url']=='{source}'")
-    # q = collection.query(expr="id != 1", output_fields=["text", "metadata"])
-    # print(q)
-    # print(q["metadata"])
+    q = collection.query(expr=f"metadata['url']=='{source}'")
 
     return len(q) > 0
 

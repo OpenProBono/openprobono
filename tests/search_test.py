@@ -24,7 +24,6 @@ class SearchToolTests(unittest.TestCase):
         prf = "site:*.gov | site:*.edu | site:*scholar.google.com"
         results = search_tools.dynamic_serpapi_tool(qr, prf, num_results=1)
         self.assertTrue(isinstance(results, dict))
-        print(results)
         self.assertTrue(len(results.keys()) != 0)
         
 # TODO: more unit tests

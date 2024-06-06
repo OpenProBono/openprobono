@@ -64,20 +64,15 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 3) -> dict:
         }).get_dict())
     
     def process_site(result):
-        print("start organic reuslts   " + result["link"])
         try:
             if(not source_exists(search_collection, result["link"])):
                 upload_site(search_collection, result["link"])
         except:
             print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-        print("end organic reuslts   " + result["link"])
 
     for result in response["organic_results"]:
         process_site(result)
 
-    # response["organic_results"] = await asyncio.gather(*[process_site(result) for result in response["organic_results"]])
-       
-    print("do the query berry")
     return query(search_collection, qr)
 
 
