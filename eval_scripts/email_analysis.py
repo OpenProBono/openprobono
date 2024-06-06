@@ -1,5 +1,5 @@
 from chat_models import chat, chat_openai
-from models import ChatModelParams, OpenAIModelEnum
+from models import OpenAIModelEnum
 import json
 from pathlib import Path
 
@@ -80,10 +80,10 @@ eval1 = evaluate_answers(responses[0], questions)
 eval2 = evaluate_answers(responses[1], questions)
 
 
-with Path("eval-of-" + files_to_compare[0] + ".txt").open("w") as f:
+with Path("eval-of-" + files_to_compare[0]).open("w") as f:
     f.write(json.dumps(eval1))
 
-with Path("eval-of-" + files_to_compare[1] + ".txt").open("w") as f:
+with Path("eval-of-" + files_to_compare[1]).open("w") as f:
     f.write(json.dumps(eval2))
 
 # for score1, score2 in zip(eval1, eval2):

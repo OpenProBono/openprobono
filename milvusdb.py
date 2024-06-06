@@ -5,6 +5,7 @@ import logging
 import os
 from json import loads
 from logging.handlers import RotatingFileHandler
+import time
 from typing import TYPE_CHECKING
 
 from pymilvus import (
@@ -308,6 +309,7 @@ def query(collection_name: str, query: str,
             )
             # delete pks
             for hit in hits:
+                del hit["entity"]["metadata"]["orig_elements"]
                 del hit["id"]
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
@@ -527,6 +529,8 @@ def upload_site(collection_name: str, url: str) -> dict[str, str]:
     strs, metadatas = chunk_elements_by_title(elements, 10000, 2500, 500)
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:
+        # metadata["timestamp"] = firestore.SERVER_TIMESTAMP
+        metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
     return upload_data_json(strs, metadatas, collection_name)

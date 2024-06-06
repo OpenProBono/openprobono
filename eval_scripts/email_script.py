@@ -1,11 +1,8 @@
 import time
 from pathlib import Path
 import json
-from json import loads
-import firebase_admin
-from firebase_admin import credentials, firestore
 from main import chat
-from models import BotRequest, ChatRequest
+from models import ChatRequest
 import os
 
 # bot_id = "2f294354-2101-42ac-a9a2-2e16da92e240" #dynamic courtroom5 search
@@ -53,7 +50,7 @@ def main():
         time.sleep(1)
 
 
-    with Path("states-responsesdynaj4a_" + str(bot_id) + ".txt").open("w") as f:
+    with Path("states-responses_metadata2_" + str(bot_id) + ".txt").open("w") as f:
         f.write(json.dumps(responses))
 
 main()
