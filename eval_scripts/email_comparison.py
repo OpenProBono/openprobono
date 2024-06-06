@@ -12,8 +12,15 @@ for file in files_to_compare:
         with Path(file).open() as f:
             responses.append(json.loads(f.read()))
 
-print(responses)
-
+score_card = [0,0]
 for result1, result2 in zip(responses[0], responses[1]):
-    print(result1[3] + "  ----- " + result2[3])
-    print("===============")
+    if(result1[3] != result2[3]):
+        print(result1[3] + "  ----- " + result2[3])
+        if(result1[3] > result2[3]):
+            score_card[0] += 1
+        if(result1[3] < result2[3]):
+            score_card[1] += 1
+        print(result1[1])
+        print("===============")
+
+print(score_card)

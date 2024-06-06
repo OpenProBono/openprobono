@@ -79,41 +79,8 @@ for file in files_to_compare:
 eval1 = evaluate_answers(responses[0], questions)
 eval2 = evaluate_answers(responses[1], questions)
 
-
 with Path("eval-of-" + files_to_compare[0]).open("w") as f:
     f.write(json.dumps(eval1))
 
 with Path("eval-of-" + files_to_compare[1]).open("w") as f:
     f.write(json.dumps(eval2))
-
-# for score1, score2 in zip(eval1, eval2):
-#     print(score1)
-#     print("^ For first model")
-#     print(score2)
-#     print("^ For second model")
-#     print("===============")
-
-# for state, response1, response2 in zip(states, responses[0], responses[1]):
-#     state = state.strip()
-#     # print(state)
-#     # print(response1)
-#     # print(response2)
-
-#     print(state + " done")
-#     prompt = "Compare these two responses to the question. Respond with which option is better and one sentence on why. If you think they are equal, respond with 'equal'."
-
-#     messages = [
-#     {
-#         "content": "The question: " + question.format(state=state) + "\n\nResponse 1: " + response1 + "\n\nResponse 2: " + response2,
-#         "role": "user"
-#     },
-#     {
-#         "content": prompt,
-#         "role": "system"
-#     }]
-
-    
-
-#     response = chat_openai(messages, OpenAIModelEnum.gpt_4_turbo)
-#     print(response)
-#     print("THIS IS RESPONSE")
