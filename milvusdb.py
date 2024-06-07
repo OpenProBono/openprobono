@@ -49,19 +49,9 @@ vdb_log.addHandler(my_handler)
 
 # used to cache collection params from firebase
 COLLECTION_PARAMS = {}
-
-SEARCH_PARAMS = {
-    "anns_field": "vector",
-    "param": {}, # can customize index params assuming you know index type
-    "output_fields": ["text"],
-}
-
-# AUTOINDEX is only supported through Zilliz, not standalone Milvus
-AUTO_INDEX = {
-    "index_type": "AUTOINDEX",
-    "metric_type": "IP",
-}
+# for storing session data
 SESSION_DATA = "SessionData"
+# limit for number of results in queries
 MAX_K = 16384
 
 # core features
@@ -201,7 +191,12 @@ def create_collection(
     # create collection
     coll = Collection(name=name, schema=schema)
     # create index for vector field
-    coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
+    # AUTOINDEX is only supported through Zilliz, not standalone Milvus
+    auto_index = {
+        "index_type": "AUTOINDEX",
+        "metric_type": "IP",
+    }
+    coll.create_index("vector", index_params=auto_index, index_name="auto_index")
 
     # save params in firebase
     store_vdb(name, encoder, metadata_format, db_fields)
@@ -276,13 +271,18 @@ def query(collection_name: str, query: str,
 
     coll = Collection(collection_name)
     coll.load()
-    search_params = SEARCH_PARAMS
     encoder = load_vdb_param(collection_name, "encoder")
-    search_params["data"] = encoders.embed_strs(
+    data = encoders.embed_strs(
         [query],
         encoder,
     )
-    search_params["limit"] = k
+    search_params = {
+        "anns_field": "vector",
+        "param": {}, # can customize index params assuming you know index type
+        "output_fields": ["text"],
+        "data": data,
+        "limit": k,
+    }
     metadata_format = load_vdb_param(collection_name, "metadata_format")
     match metadata_format:
         case MilvusMetadataEnum.json:
@@ -292,12 +292,9 @@ def query(collection_name: str, query: str,
     if expr:
         search_params["expr"] = expr
     if session_id:
-        session_filter = f"session_id=='{session_id}'"
-        # append to existing filter expr or create new filter
         if expr:
-            search_params["expr"] += f" and {session_filter}"
-        else:
-            search_params["expr"] = session_filter
+            expr += " and "
+        expr += f"session_id=='{session_id}'"
     res = coll.search(**search_params)
     if res:
         # on success, returns a list containing a single inner list containing

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from langchain.llms.base import BaseLanguageModel
     from openai.types.chat import ChatCompletion
 
-HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
+HIVE_TASK_URL = "https://api.thehive.ai/api/v2/task/sync"
 MAX_TOKENS = 1000
 
 def messages(
@@ -204,7 +204,7 @@ def chat_hive(
             "prompt_history": messages[:-1],
         },
     }
-    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=30)
+    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=90)
     response_json = response.json()
     output = response_json["status"][0]["response"]["output"][0]
     message = output["choices"][0]["message"]

@@ -58,20 +58,15 @@ def generate_chapter_elements():
 
 
 # for loading eval data from a milvus Collection
-def vdb_source_documents(collection_name: str, source: str):
+def vdb_source_documents(collection_name: str, source: str) -> list[Text]:
     expr = f"metadata['url']=='{source}'"
     hits = get_expr(collection_name, expr)["result"]
-    for i in range(len(hits)):
-        hits[i]["url"] = hits[i]["metadata"]["url"]
-        hits[i]["page_number"] = hits[i]["metadata"]["page_number"]
-        del hits[i]["pk"]
-        del hits[i]["metadata"]
     return [
         Text(
             text=hit["text"],
             metadata=ElementMetadata(
                 url=source,
-                page_number=hit["page_number"],
+                page_number=hit["metadata"]["page_number"],
             ),
         ) for hit in hits
     ]
