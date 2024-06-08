@@ -1,7 +1,7 @@
 import unittest
 import os
 
-import db
+from app import db
 
 TEST_API_KEY = os.environ["OPB_TEST_API_KEY"]
 class ApiKeyTests(unittest.TestCase):
@@ -14,7 +14,6 @@ class ApiKeyTests(unittest.TestCase):
         key = "abc"
         self.assertFalse(db.admin_check(key))
         self.assertFalse(db.api_key_check(key))
-
 
 if __name__ == "__main__":
     unittest.main()

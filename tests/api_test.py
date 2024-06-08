@@ -2,7 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-import main
+import app.main as main
 
 client = TestClient(main.api)
 
@@ -23,7 +23,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {"message": "API is alive"})
 
     def test_fetch_session(self):
-        from models import FetchSession
+        from app.models import FetchSession
         test_fetch_session = FetchSession(api_key='axyz', session_id=self.test_session_vdb_id)
         response = client.post("/fetch_session", json=test_fetch_session.model_dump())
         self.assertEqual(response.status_code, 200)
