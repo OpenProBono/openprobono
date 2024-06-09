@@ -55,8 +55,9 @@ def evaluate_answers(
     return results
 
 files_to_compare = [
-    "states-responses_metadata2_401d8762-b0c7-450b-8f41-13d41fae37c2.txt",
-    "states-responses_j8_q_k10401d8762-b0c7-450b-8f41-13d41fae37c2.txt"
+    # "states-responses_metadata2_401d8762-b0c7-450b-8f41-13d41fae37c2.txt",
+    "states-responses.txt"
+    # "states-responses_j8_q_k3_dyserp_nr10401d8762-b0c7-450b-8f41-13d41fae37c2.txt"
 ]
 
 question = (
@@ -77,10 +78,13 @@ for file in files_to_compare:
             responses.append(json.loads(f.read()))
 
 eval1 = evaluate_answers(responses[0], questions)
-eval2 = evaluate_answers(responses[1], questions)
+
 
 with Path("app/eval/eval-of-" + files_to_compare[0]).open("w") as f:
     f.write(json.dumps(eval1))
 
-with Path("app/eval/eval-of-" + files_to_compare[1]).open("w") as f:
-    f.write(json.dumps(eval2))
+
+# eval2 = evaluate_answers(responses[1], questions)
+
+# with Path("app/eval/eval-of-" + files_to_compare[1]).open("w") as f:
+#     f.write(json.dumps(eval2))
