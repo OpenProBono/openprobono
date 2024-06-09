@@ -83,7 +83,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
 
     client = OpenAI()
     messages = r.history
-    messages.append({"role": "system", "content": COMBINE_TOOL_OUTPUTS_TEMPLATE})
+    messages.append({"role": "system", "content": bot.system_prompt})
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     kwargs = {
         "client": client,

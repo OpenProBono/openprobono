@@ -5,6 +5,8 @@ from typing import List
 
 from pydantic import BaseModel
 
+from app.prompts import COMBINE_TOOL_OUTPUTS_TEMPLATE
+
 
 def get_uuid_id() -> str:
     """Get a string UUID4 ID."""
@@ -207,7 +209,7 @@ class BotRequest(BaseModel):
 
     Attributes
     ----------
-        user_prompt (str): The user prompt.
+        system_prompt (str): The system prompt.
         message_prompt (str): The message prompt.
         model (str): The model to be used.
         search_tools (List[SearchTool]): The list of search tools.
@@ -217,7 +219,7 @@ class BotRequest(BaseModel):
 
     """
 
-    user_prompt: str = ""
+    system_prompt: str = COMBINE_TOOL_OUTPUTS_TEMPLATE
     message_prompt: str = ""
     search_tools: List[SearchTool] = []
     vdb_tools: List[VDBTool] = []
