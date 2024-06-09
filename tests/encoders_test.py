@@ -3,8 +3,8 @@ import unittest
 
 from langchain_openai import OpenAIEmbeddings
 
-import encoders
-from models import EncoderParams
+import app.encoders as encoders
+from app.models import EncoderParams
 
 
 class EncoderTests(unittest.TestCase):

@@ -398,7 +398,7 @@ def summarize(
     max_summary_chunks = 200
     max_summary_tokens = 150000
     chatmodel = ChatModelParams() if chatmodel is None else chatmodel
-    from encoders import token_count
+    from app.encoders import token_count
     tokens = 0
     # need an accurate tokenizer for anthropic models, so use gpt_3_5 for now
     if chatmodel.engine == EngineEnum.anthropic:
