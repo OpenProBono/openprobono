@@ -2,11 +2,9 @@
 import json
 from typing import TYPE_CHECKING
 
-from cv2 import merge
 import langchain
 from anthropic import Anthropic
 from anthropic.types.beta.tools import ToolsBetaContentBlock
-from collections import defaultdict
 from langfuse.decorators import observe
 import openai
 from openai import OpenAI

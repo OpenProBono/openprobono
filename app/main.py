@@ -269,8 +269,8 @@ def create_bot(
                         "summary": "Description and Tips",
                         "description": "full descriptions",
                         "value": {
-                            "user_prompt": "prompt to use for the bot, this is appended to the regular prompt",  # noqa: E501
-                            "message_prompt": "prompt to use for the bot, this is appended each message",  # noqa: E501
+                            "system_prompt": "prompt to use for the bot, replaces the default prompt",  # noqa: E501
+                            "message_prompt": "prompt to use for the bot, this is appended for each message, default is none",  # noqa: E501
                             "search_tools": [
                                 {
                                     "name": "name for tool",
