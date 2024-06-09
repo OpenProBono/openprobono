@@ -26,9 +26,11 @@ from models import (
 from prompts import (
     HIVE_QA_PROMPT,
     MODERATION_PROMPT,
-    SUMMARY_MAP_PROMPT,
-    SUMMARY_PROMPT,
-    SUMMARY_REFINE_PROMPT,
+)
+from summarization import (
+    summarize_map_reduce_msg,
+    summarize_refine_msg,
+    summarize_stuffing_msg,
 )
 
 if TYPE_CHECKING:
@@ -180,11 +182,17 @@ def chat_hive(
         message, chunks
 
     """
-    key = "HIVE_7B_API_KEY" if model == HiveModelEnum.hive_7b else "HIVE_70B_API_KEY"
+    use_embedding = kwargs.pop("use_embedding", False)
     system = kwargs.pop("system", HIVE_QA_PROMPT)
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
     top_p = kwargs.pop("top_p", 0.95)
+    if use_embedding:
+        key = "HIVE_7B_NORAG" if model == HiveModelEnum.hive_7b else "HIVE_70B_NORAG"
+    elif model == HiveModelEnum.hive_7b:
+        key = "HIVE_7B_API_KEY"
+    else:
+        key = "HIVE_70B_API_KEY"
     headers = {
         "Accept": "application/json",
         "Authorization": f"Token {os.environ[key]}",
@@ -441,52 +449,11 @@ def get_summary_message(
     # summarize by method
     match method:
         case SummaryMethodEnum.stuffing:
-            # concatenate the documents into a single document
-            text = "\n".join(documents)
-            prompt = SUMMARY_PROMPT.format(text=text)
-            msg = {"role":"user", "content":prompt}
+            msg = summarize_stuffing_msg(documents)
         case SummaryMethodEnum.map_reduce:
-            # summarize each document (map) and concatenate the summaries (reduce)
-            summaries = []
-            for doc in documents:
-                prompt = SUMMARY_MAP_PROMPT.format(text=doc)
-                doc_msg = {"role":"user", "content":prompt}
-                # response is ChatCompletion if openai or AnthropicMessage if anthropic
-                response = chat_fn([doc_msg], chatmodel.model, **kwargs)
-                if chatmodel.engine == EngineEnum.openai:
-                    summary = response.choices[0].message.content
-                else:
-                    summary = "\n".join([
-                        block.text for block in response.content if block.type == "text"
-                    ])
-                summaries.append(summary)
-            concat_summary = "\n".join(summaries)
-            prompt = SUMMARY_PROMPT.format(text=concat_summary)
-            msg = {"role":"user", "content":prompt}
+            msg = summarize_map_reduce_msg(documents, chatmodel, chat_fn, **kwargs)
         case SummaryMethodEnum.refine:
-            # summarize each document with the previous summary as context
-            # and concatenate them
-            summaries = []
-            for i, doc in enumerate(documents):
-                if i == 0:
-                    prompt = SUMMARY_REFINE_PROMPT.format(context="", text=doc)
-                else:
-                    prompt = SUMMARY_REFINE_PROMPT.format(
-                        context=summaries[i - 1],
-                        text=doc,
-                    )
-                doc_msg = {"role":"user", "content":prompt}
-                response = chat_fn([doc_msg], chatmodel.model, **kwargs)
-                if chatmodel.engine == EngineEnum.openai:
-                    summary = response.choices[0].message.content
-                else:
-                    summary = "\n".join([
-                        block.text for block in response.content if block.type == "text"
-                    ])
-                summaries.append(summary)
-            concat_summary = "\n".join(summaries)
-            prompt = SUMMARY_PROMPT.format(text=concat_summary)
-            msg = {"role":"user", "content":prompt}
+            msg = summarize_refine_msg(documents, chatmodel, chat_fn, **kwargs)
         case _:
             raise ValueError(method)
     return msg

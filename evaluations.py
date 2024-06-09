@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from datasets import Dataset, load_dataset
 from unstructured.documents.elements import ElementMetadata, Text
 from unstructured.partition.auto import partition
 
@@ -124,19 +125,26 @@ def evaluate_agent(
     return feedbacks, scores
 
 
-def legalbench_ruleqa() -> tuple[list[str], list[str]]:
-    """Load questions and answers from legalbench ruleQA.
+def legalbench(subset: str) -> Dataset:
+    """Load a subset of data from legalbench.
+
+    Parameters
+    ----------
+    subset : str
+        The subset of legalbench to load.
 
     Returns
     -------
-    tuple[list[str], list[str]]
-        questions, answers
+    Dataset
+        The subset of data from legalbench.
 
     """
-    # load ruleqa
-    ruleqa = pd.read_csv("data/legalbench-ruleqa.csv")
-    questions, answers = zip(*ruleqa[["text", "answer"]].to_numpy().tolist())
-    return list(questions), list(answers)
+    return load_dataset(
+        "nguha/legalbench",
+        subset,
+        split="test",
+        trust_remote_code=True,
+    )
 
 
 def litigation_state_emails() -> list[str]:
@@ -221,67 +229,113 @@ def evaluate_answer(
     return feedback, score
 
 
-def elo_evaluation():
-    """Compare generated answers with true answers between every pair of models for each question."""
-    import pandas as pd
+def compare_evaluation(
+    models: list[str],
+    model_evals: list[pd.DataFrame],
+    compare_path: str,
+) -> None:
+    """Compare generated answers with true answers between every pair of models.
+
+    Parameters
+    ----------
+    models : list[str]
+        The models to compare.
+    model_evals : list[pd.DataFrame]
+        The results of the evaluation for each model.
+    compare_path : str
+        The path to load/store the comparison results.
+
+    """
     from tqdm.auto import tqdm
 
-    from prompts import COMPARISON_PROMPT_2
+    from prompts import COMPARISON_PROMPT
 
-    gpt_35 = "gpt-35"
-    gpt_4o = "gpt-4o"
-    hive_7b = "hive-7b"
-    hive_70b = "hive-70b"
-    claude = "claude-sonnet"
-
-    results_gpt35 = pd.read_json("data/gpt-35.json", orient='records')
-    results_gpt4o = pd.read_json("data/gpt-4o.json", orient='records')
-    results_hive7b = pd.read_json("data/hive-7b.json", orient='records')
-    results_hive70b = pd.read_json("data/hive-70b.json", orient='records')
-    results_claude = pd.read_json("data/claude-sonnet.json", orient='records')
-    models_results = [
-        {"model": gpt_35, "results": results_gpt35},
-        {"model": gpt_4o, "results": results_gpt4o},
-        {"model": hive_7b, "results": results_hive7b},
-        {"model": hive_70b, "results": results_hive70b},
-        {"model": claude, "results": results_claude},
+    evaluators = [
+        ChatModelParams(engine="openai"),
+        ChatModelParams(engine="openai", model="gpt-4o"),
     ]
+    questions = model_evals[0]["question"]
 
-    evaluators = [ChatModelParams(engine="openai"), ChatModelParams(engine="openai", model="gpt-4o")]
-    questions = results_gpt35["question"]
+    # Load the comparison results if they exist.
+    if Path(compare_path).exists():
+        with Path(compare_path).open() as f:
+            results = json.load(f)
+    else:
+        results = {}
 
-    elo_path = "data/elo.json"
-    with Path(elo_path).open() as f:
-        elo_results = json.load(f)
+    # Evaluate every pair of models.
     for evaluator in evaluators:
         print("Evaluating with ", evaluator.model)
-        if evaluator.model not in elo_results:
-            elo_results[evaluator.model] = {}
-        for i in range(len(models_results)):
-            model_a = models_results[i]
-            true_answer = model_a["results"]["true_answer"]
-            answer_a = model_a["results"]["generated_answer"]
-            print(" Model A: ", model_a["model"])
-            for j in range(i + 1, len(models_results)):
-                model_b = models_results[j]
-                answer_b = model_b["results"]["generated_answer"]
-                matchup = f"{model_a['model']} vs. {model_b['model']}"
-                print(f"  Model B: {model_b['model']}")
-                if matchup not in elo_results[evaluator.model]:
-                    elo_results[evaluator.model][matchup] = []
+        if evaluator.model not in results:
+            results[evaluator.model] = {}
+        for i in range(len(models)):
+            model_a = models[i]
+            true_answer = model_evals[i]["true_answer"]
+            answer_a = model_evals[i]["generated_answer"]
+            print(" Model A: ", model_a)
+            for j in range(i + 1, len(models)):
+                model_b = models[j]
+                answer_b = model_evals[j]["generated_answer"]
+                matchup = f"{model_a} vs. {model_b}"
+                print("  Model B: ", model_b)
+                if matchup not in results[evaluator.model]:
+                    results[evaluator.model][matchup] = []
                 for k, question in tqdm(enumerate(questions)):
-                    if question in [output["question"] for output in elo_results[evaluator.model][matchup]]:
+                    # skip completed comparisons
+                    if question in [
+                        output["question"]
+                        for output in results[evaluator.model][matchup]
+                    ]:
                         continue
-                    eval_prompt = COMPARISON_PROMPT_2.format(question=question, true_answer=true_answer[k], answer_a=answer_a[k], answer_b=answer_b[k])
-                    eval_response = llm_chat([{"role":"system", "content":eval_prompt}], evaluator)
-                    eval_result = eval_response.choices[0].message.content
-                    feedback, result = (item.strip() for item in eval_result.split("[RESULT]"))
-                    feedback = feedback.split("Feedback:")[-1].strip()
-                    elo_results[evaluator.model][matchup].append({"question": question, "feedback": feedback, "result": result})
-                    with Path(elo_path).open("w") as f:
-                        json.dump(elo_results, f)
 
-def elo_win_matrix(matchups: dict[str, list[dict[str, str]]], models: list[str]) -> list[list[float]]:
+                    eval_prompt = COMPARISON_PROMPT.format(
+                        question=question,
+                        true_answer=true_answer[k],
+                        answer_a=answer_a[k],
+                        answer_b=answer_b[k],
+                    )
+                    eval_response = llm_chat(
+                        [{"role":"system", "content":eval_prompt}],
+                        evaluator,
+                    )
+                    eval_result = eval_response.choices[0].message.content
+                    feedback, result = (
+                        item.strip() for item in eval_result.split("[RESULT]")
+                    )
+                    feedback = feedback.split("Feedback:")[-1].strip()
+                    results[evaluator.model][matchup].append(
+                        {"question": question, "feedback": feedback, "result": result},
+                    )
+                    # save the results
+                    with Path(compare_path).open("w") as f:
+                        json.dump(results, f)
+
+    # Plot the comparison results.
+    for evaluator in results:
+        print("Plotting ", evaluator, " evaluations")
+        compare_win_matrix_plot(results[evaluator], evaluator)
+
+
+def compare_win_matrix(
+    matchups: dict[str, list[dict[str, str]]],
+    models: list[str],
+) -> list[list[float]]:
+    """Calculate win matrix from matchups.
+
+    Parameters
+    ----------
+    matchups : dict[str, list[dict[str, str]]]
+        The matchups to compare. E.g.
+        {"A vs. B": [{"question": "...", "feedback": "...", "result": "..."}]}.
+    models : list[str]
+        The models to compare.
+
+    Returns
+    -------
+    list[list[float]]
+        The win rate matrix
+
+    """
     matrix = [[0] * len(models) for _ in range(len(models))]
     for matchup in matchups:
         matchup_models = matchup.split(" vs. ")
@@ -290,19 +344,45 @@ def elo_win_matrix(matchups: dict[str, list[dict[str, str]]], models: list[str])
         results = matchups[matchup]
         num_ties = 0
         for result in results:
-            if result["result"] == "A" or result["result"] == "Answer A" or "answer a" in result["result"].lower() or "better answer is a" in result["result"].lower():
+            if result["result"] == "A" or result["result"] == "Answer A" or \
+                "answer a" in result["result"].lower() or \
+                    "better answer is a" in result["result"].lower():
+
                 matrix[models.index(model_a)][models.index(model_b)] += 1
-            elif "equal" in result["result"].lower() or "neither" in result["result"].lower() or "tie" in result["result"].lower() or "both" in result["result"].lower():
+            elif "tie" in result["result"].lower() or \
+                "equal" in result["result"].lower() or \
+                    "neither" in result["result"].lower():
+
                 num_ties += 1
-            elif result["result"] != "B" and result["result"] != "Answer B" and "answer b" not in result["result"].lower():
-                print("idk what im looking at")
-                print(result)
-                print(matchup)
-        matrix[models.index(model_a)][models.index(model_b)] /= (len(results) - num_ties)
-        matrix[models.index(model_b)][models.index(model_a)] = 1 - matrix[models.index(model_a)][models.index(model_b)]
+            elif result["result"] != "B" and result["result"] != "Answer B" \
+                and "answer b" not in result["result"].lower():
+
+                print(f"unknown result for matchup {matchup}: {result}")
+
+        # divide number of wins by number of results to get a's win rate
+        matrix[models.index(model_a)][models.index(model_b)] /= len(results)
+        # model b win rate = 1 - model a's - tie rate
+        model_a_win_rate = matrix[models.index(model_a)][models.index(model_b)]
+        tie_rate = num_ties / len(results)
+        model_b_win_rate = 1 - model_a_win_rate - tie_rate
+        matrix[models.index(model_b)][models.index(model_a)] = model_b_win_rate
     return matrix
 
-def elo_win_matrix_plot(matchups: dict[str, list[dict[str, str]]], evaluator: str):
+
+def compare_win_matrix_plot(
+    matchups: dict[str, list[dict[str, str]]],
+    evaluator: str,
+) -> None:
+    """Plot the win matrix from matchups.
+
+    Parameters
+    ----------
+    matchups : dict[str, list[dict[str, str]]]
+        The matchups to compare.
+    evaluator : str
+        The evaluator to plot.
+
+    """
     # get the list of models in the matchups
     models = []
     for matchup in matchups:
@@ -313,7 +393,7 @@ def elo_win_matrix_plot(matchups: dict[str, list[dict[str, str]]], evaluator: st
             models.append(matchup_models[1])
 
     # create a sample matrix (2D array)
-    matrix = elo_win_matrix(matchups, models)
+    matrix = compare_win_matrix(matchups, models)
 
     # assume 'matrix' is your 2D array (matrix)
     _, ax = plt.subplots()
@@ -331,13 +411,6 @@ def elo_win_matrix_plot(matchups: dict[str, list[dict[str, str]]], evaluator: st
     # set the tick labels for rows and columns
     ax.set_xticklabels(models)
     ax.set_yticklabels(models)
-    ax.set_title(f"ELO Win Rate Matrix - {evaluator} evaluator")
+    ax.set_title(f"Win Rate Matrix - {evaluator} evaluator")
 
     plt.show()
-
-# elo_path = "data/elo.json"
-# with Path(elo_path).open() as f:
-#     elo_results = json.load(f)
-#     for evaluator in elo_results:
-#         print("Plotting ", evaluator, " evaluations")
-#         elo_win_matrix_plot(elo_results[evaluator], evaluator)
