@@ -1,4 +1,5 @@
 *
+!Dockerfile
 !*.py
 !*.ipynb
 !requirements.txt
