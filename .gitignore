@@ -3,4 +3,5 @@
 !*.ipynb
 !requirements.txt
 !tests/
-!eval_scripts/
+!app/
+!app/eval
