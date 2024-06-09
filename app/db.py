@@ -5,6 +5,7 @@ from typing import Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
+from requests import session
 
 from app.models import (
     BotRequest,
@@ -164,21 +165,16 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         ChatRequest: The chat request object with data from firestore
 
     """
-    msgs = (
+    session_data = (
         db.collection(CONVERSATION_COLLECTION + VERSION)
-        .document(r.session_id)
-        .collection("conversations")
-        .order_by("timestamp", direction=firestore.Query.ASCENDING)
-        .get()
-    ) #loading all the messages from database
-    history = []
-    for msg in msgs: #turning messages from db into a history list
-        conversation = msg.to_dict()
-        msg_pair = [conversation["human"], conversation["bot"]]
-        history.append(msg_pair)
+        .document(r.session_id).get()
+    ) #loading session data from db
+
+    session_data = session_data.to_dict()
+
     return ChatRequest( #building the actual ChatRequest object
-        history=history,
-        bot_id=msgs[0].to_dict()["bot_id"],
+        history=session_data["history"],
+        bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
     )

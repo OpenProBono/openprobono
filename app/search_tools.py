@@ -64,6 +64,7 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 10) -> dict:
     def process_site(result):
         try:
             if(not source_exists(search_collection, result["link"])):
+                print("Uploading site: " + result["link"])
                 upload_site(search_collection, result["link"])
         except Exception as error:
             print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])

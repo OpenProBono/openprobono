@@ -149,7 +149,7 @@ def init_session(
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
     cr = ChatRequest(
-        history=[[request.message, ""]],
+        history=[{"role": "user", "content": request.message}],
         bot_id=request.bot_id,
         session_id=session_id,
         api_key=request.api_key,
