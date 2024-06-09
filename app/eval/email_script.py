@@ -51,7 +51,7 @@ def main():
 
 
 
-    with Path("states-responses_j8_q_k10" + str(bot_id) + ".txt").open("w") as f:
+    with Path("states-responses_j8_q_k10_dyserp_nr10" + str(bot_id) + ".txt").open("w") as f:
         f.write(json.dumps(responses))
 
 main()
