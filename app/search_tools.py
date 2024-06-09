@@ -108,7 +108,7 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
                      params=params,
                      headers=headers, timeout=30).json())[0:max_len]
 
-def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
+def courtroom5_search_tool(qr: str, prf: str='', max_len: int = 6400) -> str:
     """Query the custom courtroom5 google search api.
 
     Whitelisted sites defined by search cx key.
@@ -144,7 +144,7 @@ def courtroom5_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
 
 
 # Implement this for regular programatic google search as well.
-def dynamic_courtroom5_search_tool(qr: str, prf: str) -> str:
+def dynamic_courtroom5_search_tool(qr: str, prf: str='') -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
     Whitelisted sites defined by search cx key.
@@ -177,8 +177,19 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str) -> str:
                     headers=headers,
                     timeout=30,
                 ).json()
+    
+    def process_site(result):
+        try:
+            if(not source_exists(search_collection, result["link"])):
+                print("Uploading site: " + result["link"])
+                upload_site(search_collection, result["link"])
+        except Exception as error:
+            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
+            print("The error was: " + str(error))
+
     for result in response["items"]:
-        upload_site(search_collection, result["link"])
+        process_site(result)
+
     return query(search_collection, qr)
 
 def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
@@ -433,6 +444,10 @@ def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
             function_response = courtlistener_search(qr)
+        case SearchMethodEnum.courtroom5:
+            function_response = courtroom5_search_tool(qr, prf)
+        case SearchMethodEnum.dynamic_courtroom5:
+            function_response = dynamic_courtroom5_search_tool(qr, prf)
     return str(function_response)
 
 

@@ -1,3 +1,4 @@
+from re import search
 import unittest
 
 import app.search_tools as search_tools
@@ -26,6 +27,18 @@ class SearchToolTests(unittest.TestCase):
         self.assertTrue(isinstance(results, dict))
         self.assertTrue(len(results.keys()) != 0)
         
+    def test_courtroom5_search(self):
+        qr = "Wyoming rule for designating email address for service in litigation"
+        results = search_tools.courtroom5_search_tool(qr)
+        self.assertTrue(isinstance(results, str))
+        self.assertTrue(len(results) != 0)
+
+    def test_dynamic_courtroom5_search(self):
+        qr = "Wyoming rule for designating email address for service in litigation"
+        results = search_tools.dynamic_courtroom5_search_tool(qr)
+        self.assertTrue(isinstance(results, dict))
+        self.assertTrue(len(results.keys()) != 0)
+
 # TODO: more unit tests
 if __name__ == "__main__":
     unittest.main()
