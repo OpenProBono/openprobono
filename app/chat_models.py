@@ -131,7 +131,6 @@ def chat_openai(
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
-        stream=True,
         **kwargs,
     )
 

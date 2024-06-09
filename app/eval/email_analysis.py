@@ -1,5 +1,5 @@
-from chat_models import chat_openai
-from models import OpenAIModelEnum
+from app.chat_models import chat_openai
+from app.models import OpenAIModelEnum
 import json
 from pathlib import Path
 
@@ -55,8 +55,8 @@ def evaluate_answers(
     return results
 
 files_to_compare = [
-    "states-responsesdaaa_401d8762-b0c7-450b-8f41-13d41fae37c9.txt",
-    "states-responsesdynaj4a_401d8762-b0c7-450b-8f41-13d41fae37c2.txt"
+    "states-responses_metadata2_401d8762-b0c7-450b-8f41-13d41fae37c2.txt",
+    "states-responses_j8_q_k10401d8762-b0c7-450b-8f41-13d41fae37c2.txt"
 ]
 
 question = (
@@ -64,23 +64,23 @@ question = (
     "related to designating an email address for service in litigation?"
 )
 states = []
-if Path("states").is_file():
-    with Path("states").open() as f:
+if Path("app/eval/states").is_file():
+    with Path("app/eval/states").open() as f:
         states = f.readlines()
 
 questions = [question.format(state=state) for state in states]
 
 responses = []
 for file in files_to_compare:
-    if Path(file).is_file():
-        with Path(file).open() as f:
+    if Path("app/eval/" + file).is_file():
+        with Path("app/eval/" + file).open() as f:
             responses.append(json.loads(f.read()))
 
 eval1 = evaluate_answers(responses[0], questions)
 eval2 = evaluate_answers(responses[1], questions)
 
-with Path("eval-of-" + files_to_compare[0]).open("w") as f:
+with Path("app/eval/eval-of-" + files_to_compare[0]).open("w") as f:
     f.write(json.dumps(eval1))
 
-with Path("eval-of-" + files_to_compare[1]).open("w") as f:
+with Path("app/eval/eval-of-" + files_to_compare[1]).open("w") as f:
     f.write(json.dumps(eval2))

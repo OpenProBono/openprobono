@@ -94,62 +94,18 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     }
 
     # response is a ChatCompletion object
-    print("START COMPLETION")
+    print("CALL LLM INITIAL")
     response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
-    full_delta_dict_collection = []
-    for chunk in response:
-        # if(chunk.choices[0].delta.tool_calls):
-        full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
-
-            # for call in chunk.choices[0].delta.tool_calls:
-            #     if(call.index not in tool_calls):
-            #         tool_calls[call.index] = {}
-
-                
-            #     if(call.id is not None): #if it exists in the chunk
-            #         if("id" in tool_calls[call.index]): #if its been set already, append
-            #             tool_calls[call.index]["id"] += call.id
-            #         else:
-            #             tool_calls[call.index]["id"] = call.id 
-
-            #     if(call.type is not None):
-            #         if("type" in tool_calls[call.index]):
-            #             tool_calls[call.index]["type"] += call.type
-            #         else:
-            #             tool_calls[call.index]["type"] = call.type
-
-
-            #     if("function" not in tool_calls[call.index]):
-            #         tool_calls[call.index]["function"] = {}
-
-            #     if(call.function.name is not None):
-            #         if("name" in tool_calls[call.index]["function"]):
-            #             tool_calls[call.index]["function"]["name"] += call.funciton.name
-            #         else:
-            #             tool_calls[call.index]["function"]["name"] = call.function.name
-
-            #     if(call.function.arguments is not None):
-            #         if("arguments" in tool_calls[call.index]["function"]):
-            #             tool_calls[call.index]["function"]["arguments"] += call.function.arguments
-            #         else:
-            #             tool_calls[call.index]["function"]["arguments"] = call.function.arguments
-        # else:
-        #     collected_content.append(chunk.choices[0].delta.content)
             
-    # print(response.usage.to_dict())
-    # print("tokens used^^^")
+    print(response.usage.to_dict())
+    print("tokens used^^^")
+    response_message = response.choices[0].message
+    tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
-    current_dict = full_delta_dict_collection[0]
-    for i in range(1, len(full_delta_dict_collection)):
-        merge_dicts_stream_openai_completion(current_dict, full_delta_dict_collection[i])
-        
-    tool_calls = [ChatCompletionMessageToolCall.model_validate(tool_call) for tool_call in current_dict["tool_calls"]]
-    if len(tool_calls) > 0:
-        messages.append(tool_calls)
+    if tool_calls:
+        messages.append(response_message.model_dump(exclude={"function_call"}))
         response_message = openai_tools(messages, tool_calls, bot, **kwargs)
-        return response_message.content
-    else:
-        return current_dict["content"]
+    return response_message.content
 
 def openai_tools(
     messages: list[dict],
@@ -161,6 +117,7 @@ def openai_tools(
     while tool_calls and tools_used < MAX_NUM_TOOLS:
         # TODO: run tool calls in parallel
         for tool_call in tool_calls:
+            print("RUN TOOL")
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
             vdb_tool = next(
@@ -200,16 +157,11 @@ def openai_tools(
             )  # extend conversation with function response
             tools_used += 1
         # get a new response from the model where it can see the function response
+        print("CALL LLM WITH TOOL RESPONSES")
         response = chat_models.chat(messages, bot.chat_model, **kwargs)
-        full_delta_dict_collection = []
-        for chunk in response:
-            full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
-        current_dict = full_delta_dict_collection[0]
-        for i in range(1, len(full_delta_dict_collection)):
-            merge_dicts_stream_openai_completion(current_dict, full_delta_dict_collection[i])
-        print(current_dict.usage.to_dict())
+        print(response.usage.to_dict())
         print("tokens used^^^")
-        response_message = current_dict
+        response_message = response.choices[0].message
         messages.append(response_message)
         tool_calls = response_message.tool_calls
     return response_message
