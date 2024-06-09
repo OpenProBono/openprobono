@@ -1,6 +1,6 @@
 import unittest
 
-import models
+import app.models as models
 
 class UUIDTests(unittest.TestCase):
     uuid = models.get_uuid_id()

@@ -2,7 +2,7 @@ import unittest
 import os
 from fastapi.testclient import TestClient
 
-import main
+import app.main as main
 
 client = TestClient(main.api)
 
@@ -20,7 +20,7 @@ class ApiTests(unittest.TestCase):
     test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
 
     def test_courtroom5_anthropic_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, AnthropicModelEnum
+        from app.models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, AnthropicModelEnum
 
         search_tool = {
             "name": "courtroom5",

@@ -2,9 +2,11 @@
 import json
 from typing import TYPE_CHECKING
 
+from cv2 import merge
 import langchain
 from anthropic import Anthropic
 from anthropic.types.beta.tools import ToolsBetaContentBlock
+from collections import defaultdict
 from langfuse.decorators import observe
 import openai
 from openai import OpenAI
@@ -14,6 +16,7 @@ import app.chat_models as chat_models
 from app.models import BotRequest, ChatRequest
 from app.prompts import (
     COMBINE_TOOL_OUTPUTS_TEMPLATE,
+    NEW_TEST_TEMPLATE,
     MAX_NUM_TOOLS,
     MULTIPLE_TOOLS_PROMPT,
 )
@@ -33,6 +36,25 @@ if TYPE_CHECKING:
 langchain.debug = True
 openai.log = "debug"
 
+def merge_dicts_stream_openai_completion(dict1, dict2):
+    for key in dict2:
+        if key in dict1:
+            if isinstance(dict1[key], dict) and isinstance(dict2[key], dict):
+                merge_dicts_stream_openai_completion(dict1[key], dict2[key])
+            elif isinstance(dict1[key], list) and isinstance(dict2[key], list):
+                for item in dict2[key]:
+                    item_index= item["index"]
+                    del item["index"]
+                    if(item_index < len(dict1[key])):
+                       if("index" in dict1[key][item_index]):
+                           del dict1[key][item_index]["index"]
+                       merge_dicts_stream_openai_completion(dict1[key][item_index], item)
+                    else:
+                        dict1[key].append(item)
+            else:
+                dict1[key] += dict2[key]
+        else:
+            dict1[key] = dict2[key]
 
 @observe(capture_input=True)
 def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
@@ -67,21 +89,67 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         "client": client,
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
-        #"session_id": r.session_id,
+        #"session_id": r.session_id, 
         "temperature": 0,
     }
 
     # response is a ChatCompletion object
+    print("START COMPLETION")
     response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
-    print(response.usage.to_dict())
-    print("tokens used^^^")
-    response_message = response.choices[0].message
-    tool_calls = response_message.tool_calls
+    full_delta_dict_collection = []
+    for chunk in response:
+        # if(chunk.choices[0].delta.tool_calls):
+        full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
+
+            # for call in chunk.choices[0].delta.tool_calls:
+            #     if(call.index not in tool_calls):
+            #         tool_calls[call.index] = {}
+
+                
+            #     if(call.id is not None): #if it exists in the chunk
+            #         if("id" in tool_calls[call.index]): #if its been set already, append
+            #             tool_calls[call.index]["id"] += call.id
+            #         else:
+            #             tool_calls[call.index]["id"] = call.id 
+
+            #     if(call.type is not None):
+            #         if("type" in tool_calls[call.index]):
+            #             tool_calls[call.index]["type"] += call.type
+            #         else:
+            #             tool_calls[call.index]["type"] = call.type
+
+
+            #     if("function" not in tool_calls[call.index]):
+            #         tool_calls[call.index]["function"] = {}
+
+            #     if(call.function.name is not None):
+            #         if("name" in tool_calls[call.index]["function"]):
+            #             tool_calls[call.index]["function"]["name"] += call.funciton.name
+            #         else:
+            #             tool_calls[call.index]["function"]["name"] = call.function.name
+
+            #     if(call.function.arguments is not None):
+            #         if("arguments" in tool_calls[call.index]["function"]):
+            #             tool_calls[call.index]["function"]["arguments"] += call.function.arguments
+            #         else:
+            #             tool_calls[call.index]["function"]["arguments"] = call.function.arguments
+        # else:
+        #     collected_content.append(chunk.choices[0].delta.content)
+            
+    # print(response.usage.to_dict())
+    # print("tokens used^^^")
     # Step 2: check if the model wanted to call a function
-    if tool_calls:
-        messages.append(response_message.model_dump(exclude={"function_call"}))
+    current_dict = full_delta_dict_collection[0]
+    for i in range(1, len(full_delta_dict_collection)):
+        merge_dicts_stream_openai_completion(current_dict, full_delta_dict_collection[i])
+        
+    tool_calls = [ChatCompletionMessageToolCall.model_validate(tool_call) for tool_call in current_dict["tool_calls"]]
+    if len(tool_calls) > 0:
+        messages.append(tool_calls)
         response_message = openai_tools(messages, tool_calls, bot, **kwargs)
-    return response_message.content
+        return response_message.content
+    else:
+        return current_dict["content"]
 
 def openai_tools(
     messages: list[dict],
@@ -133,9 +201,15 @@ def openai_tools(
             tools_used += 1
         # get a new response from the model where it can see the function response
         response = chat_models.chat(messages, bot.chat_model, **kwargs)
-        print(response.usage.to_dict())
+        full_delta_dict_collection = []
+        for chunk in response:
+            full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
+        current_dict = full_delta_dict_collection[0]
+        for i in range(1, len(full_delta_dict_collection)):
+            merge_dicts_stream_openai_completion(current_dict, full_delta_dict_collection[i])
+        print(current_dict.usage.to_dict())
         print("tokens used^^^")
-        response_message = response.choices[0].message
+        response_message = current_dict
         messages.append(response_message)
         tool_calls = response_message.tool_calls
     return response_message

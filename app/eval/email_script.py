@@ -29,8 +29,8 @@ def main():
         "related to designating an email address for service in litigation?"
     )
     states = []
-    if Path("states").is_file():
-        with Path("states").open() as f:
+    if Path("app/eval/states").is_file():
+        with Path("app/eval/states").open() as f:
             states = f.readlines()
 
     responses = []
@@ -51,7 +51,7 @@ def main():
 
 
 
-    with Path("states-responses_j8_q_k10_dyserp_nr10" + str(bot_id) + ".txt").open("w") as f:
+    with Path("states-responses_j8_q_k10_dyserp_nr5" + str(bot_id) + ".txt").open("w") as f:
         f.write(json.dumps(responses))
 
 main()

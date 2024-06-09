@@ -1,10 +1,9 @@
-import unittest
 import os
 
 from fastapi.testclient import TestClient
-from sympy import O
 
-import main
+import app.main as main
+from app.models import BotRequest, ChatModelParams, EngineEnum, InitializeSession, OpenAIModelEnum
 
 client = TestClient(main.api)
 
@@ -22,7 +21,6 @@ class TestApi:
     test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
 
     def test_courtroom5_openai_bot(self):
-        from models import BotRequest, ChatModelParams, EngineEnum, InitializeSession
 
         search_tool = {
             "name": "courtroom5",
@@ -66,7 +64,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
 
         gov_search = {
             "name": "government-search",
@@ -118,7 +115,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_3_5_1106_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIModelEnum
 
         gov_search = {
             "name": "government-search",
@@ -170,7 +166,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_4_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum, OpenAIModelEnum
 
         gov_search = {
             "name": "government-search",
@@ -222,7 +217,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_google_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
 
         gov_search = {
             "name": "government-search",
@@ -274,7 +268,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_dynamic_exp_opb_openai_bot(self):
-        from models import BotRequest, InitializeSession, ChatModelParams, EngineEnum
 
         gov_search = {
             "name": "government-search",

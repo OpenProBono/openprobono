@@ -1,6 +1,6 @@
 import unittest
 
-import search_tools
+import app.search_tools as search_tools
 
 
 class SearchToolTests(unittest.TestCase):
