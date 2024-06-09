@@ -36,7 +36,6 @@ def main():
     responses = []
     for state in states:
         state = state.strip()
-        # if("Connecticut" in state):
         print(state)
         request = ChatRequest(
             history=[{"role": "user", "content": question.format(state=state)}],
@@ -51,7 +50,7 @@ def main():
 
 
 
-    with Path("states-responses_j8_q_k3_dyserp_nr5" + str(bot_id) + ".txt").open("w") as f:
+    with Path("states-responses_j8_q_k3_dyserp_nr10" + str(bot_id) + ".txt").open("w") as f:
         f.write(json.dumps(responses))
 
 main()
