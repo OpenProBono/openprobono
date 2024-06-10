@@ -13,8 +13,6 @@ from openai.types.chat import ChatCompletionMessageToolCall
 import app.chat_models as chat_models
 from app.models import BotRequest, ChatRequest
 from app.prompts import (
-    COMBINE_TOOL_OUTPUTS_TEMPLATE,
-    NEW_TEST_TEMPLATE,
     MAX_NUM_TOOLS,
     MULTIPLE_TOOLS_PROMPT,
 )
@@ -33,26 +31,6 @@ if TYPE_CHECKING:
 
 langchain.debug = True
 openai.log = "debug"
-
-def merge_dicts_stream_openai_completion(dict1, dict2):
-    for key in dict2:
-        if key in dict1:
-            if isinstance(dict1[key], dict) and isinstance(dict2[key], dict):
-                merge_dicts_stream_openai_completion(dict1[key], dict2[key])
-            elif isinstance(dict1[key], list) and isinstance(dict2[key], list):
-                for item in dict2[key]:
-                    item_index= item["index"]
-                    del item["index"]
-                    if(item_index < len(dict1[key])):
-                       if("index" in dict1[key][item_index]):
-                           del dict1[key][item_index]["index"]
-                       merge_dicts_stream_openai_completion(dict1[key][item_index], item)
-                    else:
-                        dict1[key].append(item)
-            else:
-                dict1[key] += dict2[key]
-        else:
-            dict1[key] = dict2[key]
 
 @observe(capture_input=True)
 def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
