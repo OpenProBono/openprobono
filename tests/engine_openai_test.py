@@ -1,7 +1,6 @@
 import os
 
 from fastapi.testclient import TestClient
-from requests import session
 
 import app.main as main
 from app.models import BotRequest, ChatBySession, ChatModelParams, EngineEnum, InitializeSession, OpenAIModelEnum
@@ -11,18 +10,7 @@ client = TestClient(main.api)
 API_KEY = os.environ["OPB_TEST_API_KEY"]
 
 class TestApi:
-    # #_courtroom5_v1
-    # test_bot_vdb_id = "37394099-4c05-474f-8a35-28bcc4dc68ca"
-    # test_session_vdb_id = "0c393d97-a70e-4b2f-b3e8-5c4326e6e10c"
-    # in botsvm12_lang
-    test_bot_vdb_id = "2c580482-046e-4118-87dd-4f3abeb391b2"
-    test_bot_search_id = "7ab97742-ec5e-4663-862e-019f57ced68a"
-    # in conversationsvm12_lang
-    # 23c66d05-a5c1-4b30-af3a-9c22536d0e49
-    test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
-
     def test_courtroom5_openai_bot(self):
-
         search_tool = {
             "name": "courtroom5",
             "method": "courtroom5",
@@ -65,7 +53,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_openai_bot(self):
-
         gov_search = {
             "name": "government-search",
             "method": "serpapi",
@@ -116,7 +103,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_3_5_1106_openai_bot(self):
-
         gov_search = {
             "name": "government-search",
             "method": "serpapi",
@@ -167,7 +153,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_4_openai_bot(self):
-
         gov_search = {
             "name": "government-search",
             "method": "serpapi",
@@ -218,7 +203,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_google_openai_bot(self):
-
         gov_search = {
             "name": "government-search",
             "method": "google",
@@ -269,7 +253,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_dynamic_exp_opb_openai_bot(self):
-
         gov_search = {
             "name": "government-search",
             "method": "dynamic_serpapi",
@@ -320,7 +303,6 @@ class TestApi:
         assert len(response_json["session_id"]) == 36
 
     def test_exp_opb_model_3_5_1106_openai_bot_with_follow_up(self):
-
         gov_search = {
             "name": "government-search",
             "method": "serpapi",
@@ -392,3 +374,33 @@ class TestApi:
         print(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
+
+    def test_custom_system_prompt(self):
+        bot_id = "custom_system_prompt"
+        test_initialize_session = InitializeSession(
+            api_key=API_KEY,
+            bot_id=bot_id,
+            message="Hi",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        response_json = response.json()
+        print(response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
+        print(response_json["session_id"])
+        print("---- OUTPUT ----")
+        print(response_json["output"])
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
+
+        assert "woof" in response_json["output"].lower() or "bark" in response_json["output"].lower() #response like a dog
+
+        # for msg in response_json["history"]:
+        #     if(msg["role"] == "system"):
+        #         assert msg["content"] == "This is a custom system prompt. Respond like you are a dog."

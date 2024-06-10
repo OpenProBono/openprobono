@@ -84,6 +84,8 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
     if r.session_id is None or r.session_id == "":
         r.session_id = get_uuid_id()
 
+    r.history.append({"role": "bot", "content": output})
+
     data = r.model_dump()
     data["num_msg"] = len(r.history)
 
