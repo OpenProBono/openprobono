@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Body, FastAPI, UploadFile
+from fastapi import Body, FastAPI
 
 from app.bot import anthropic_bot, openai_bot
 from app.db import (
-    admin_check,
     api_key_check,
     fetch_session,
     load_bot,
@@ -15,14 +14,6 @@ from app.db import (
     set_session_to_bot,
     store_bot,
     store_conversation,
-)
-from app.milvusdb import (
-    SESSION_DATA,
-    crawl_upload_site,
-    delete_expr,
-    file_upload,
-    session_source_summaries,
-    session_upload_ocr,
 )
 from app.models import (
     BotRequest,

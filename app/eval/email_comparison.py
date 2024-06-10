@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from unittest import result
 
 files_to_compare = [
     "app/eval/eval-of-" + "states-responsesdaaa_401d8762-b0c7-450b-8f41-13d41fae37c9.txt.txt",

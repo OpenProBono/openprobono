@@ -89,6 +89,22 @@ def openai_tools(
     bot: BotRequest,
     **kwargs: dict,
 ):
+    """Handle tool calls in the conversation for OpenAI engine
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation messages
+    tool_calls : list[ChatCompletionMessageToolCall]
+        List of tool calls
+    bot : BotRequest
+        BotRequest object
+
+    Returns
+    -------
+    ChatCompletionMessage
+        The response message from the bot, should be final response.
+    """
     tools_used = 0
     while tool_calls and tools_used < MAX_NUM_TOOLS:
         # TODO: run tool calls in parallel
