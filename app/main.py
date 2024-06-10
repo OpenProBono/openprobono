@@ -1,11 +1,13 @@
 """Written by Arman Aydemir. This file contains the main API code for the backend."""
 from __future__ import annotations
 
+import os
 from typing import Annotated
 
 from fastapi import Body, FastAPI
+from fastapi.responses import StreamingResponse
 
-from app.bot import anthropic_bot, openai_bot
+from app.bot import anthropic_bot, openai_bot, openai_bot_stream
 from app.db import (
     api_key_check,
     fetch_session,
@@ -35,7 +37,17 @@ from app.models import (
 #     # Flush all events to be sent to Langfuse on shutdown and
 #     # terminate all Threads gracefully. This operation is blocking.
 #     langfuse.flush()
+api_key = os.environ.get("OPB_TEST_API_KEY")
 
+def process_chat_stream(r: ChatRequest):
+    bot = load_bot(r.bot_id)
+    if bot is None:
+        return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+
+    if(bot.chat_model.engine != EngineEnum.openai):
+        raise Exception("Invalid bot engine for streaming")
+
+    return openai_bot_stream(r, bot)
 
 def process_chat(r: ChatRequest) -> dict:
     # try:
@@ -82,8 +94,8 @@ def chat(
                                        "used}",
                         "value": {
                             "history": [{"role": "user", "content": "hi"}],
-                            "bot_id": "some bot id",
-                            "api_key": "xyz",
+                            "bot_id": "custom_4o_dynamic",
+                            "api_key": api_key,
                         },
                     },
                 },
@@ -136,6 +148,40 @@ def init_session(
         }
     except:
         return response
+
+@api.post("/initialize_session_chat_stream", tags=["Init Session"], response_model=str)
+def init_session_stream(
+        request: Annotated[
+            InitializeSession,
+            Body(
+                openapi_examples={
+                    "init session": {
+                        "summary": "initialize a session",
+                        "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
+                                       "used, session_id: the session_id which was created",
+                        "value": {
+                            "message": "hi",
+                            "bot_id": "custom_4o_dynamic",
+                            "api_key": api_key,
+                        },
+                    },
+                },
+            ),
+        ]) -> dict:
+    """Initialize a new session with a message."""
+    if not api_key_check(request.api_key):
+        return {"message": "Invalid API Key"}
+
+    session_id = get_uuid_id()
+    set_session_to_bot(session_id, request.bot_id)
+    cr = ChatRequest(
+        history=[{"role": "user", "content": request.message}],
+        bot_id=request.bot_id,
+        session_id=session_id,
+        api_key=request.api_key,
+    )
+    return StreamingResponse(process_chat_stream(cr), media_type="text/event-stream")
+
 
 
 @api.post("/chat_session", tags=["Session Chat"])

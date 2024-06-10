@@ -20,7 +20,7 @@ from app.models import ChatRequest
 # db = firestore.client()
 
 
-def main():
+def main() -> None:
     bot_id = "401d8762-b0c7-450b-8f41-13d41fae37c2" #gpt4o dynamic
 
     api_key = os.environ.get("OPB_TEST_API_KEY")

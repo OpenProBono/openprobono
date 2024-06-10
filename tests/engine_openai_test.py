@@ -404,3 +404,17 @@ class TestApi:
         # for msg in response_json["history"]:
         #     if(msg["role"] == "system"):
         #         assert msg["content"] == "This is a custom system prompt. Respond like you are a dog."
+
+    def test_streaming(self):
+        bot_id = "custom_4o_dynamic"
+        test_initialize_session = InitializeSession(
+            api_key=API_KEY,
+            bot_id=bot_id,
+            message="Hi",
+        )
+        response = client.post(
+            "/initialize_session_chat_stream", json=test_initialize_session.model_dump(),
+        )
+        print(response)
+        # for chunk in response:
+        #     print(chunk)
