@@ -208,6 +208,7 @@ def chat_openai_stream(
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
+    print("--------ahiaa")
     return client.chat.completions.create(
         model=model,
         messages=messages,

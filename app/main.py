@@ -180,6 +180,7 @@ def init_session_stream(
         session_id=session_id,
         api_key=request.api_key,
     )
+    print("streaming response here")
     return StreamingResponse(process_chat_stream(cr), media_type="text/event-stream")
 
 

@@ -2,8 +2,15 @@ import os
 
 from fastapi.testclient import TestClient
 
-import app.main as main
-from app.models import BotRequest, ChatBySession, ChatModelParams, EngineEnum, InitializeSession, OpenAIModelEnum
+from app import main
+from app.models import (
+    BotRequest,
+    ChatBySession,
+    ChatModelParams,
+    EngineEnum,
+    InitializeSession,
+    OpenAIModelEnum,
+)
 
 client = TestClient(main.api)
 
@@ -410,11 +417,10 @@ class TestApi:
         test_initialize_session = InitializeSession(
             api_key=API_KEY,
             bot_id=bot_id,
-            message="Hi",
+            message="what is the rule in Florida related to designating an email address for service in litigation?",
         )
+        print(test_initialize_session.model_dump())
         response = client.post(
             "/initialize_session_chat_stream", json=test_initialize_session.model_dump(),
         )
         print(response)
-        # for chunk in response:
-        #     print(chunk)

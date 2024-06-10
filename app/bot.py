@@ -1,5 +1,6 @@
 """Defines the bot engines. The meaty stuff."""
 import json
+from json import tool
 from typing import TYPE_CHECKING
 
 import langchain
@@ -9,6 +10,7 @@ from anthropic.types.beta.tools import ToolsBetaContentBlock
 from langfuse.decorators import observe
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageToolCall
+from sympy import use
 
 from app import chat_models
 from app.models import BotRequest, ChatRequest
@@ -53,35 +55,36 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
             dict1[key] = dict2[key]
 
 def call_openai_llm(messages: list, bot: BotRequest, **kwargs):
-    print("CALL LLM INITIAL")
-    response: ChatCompletion = chat_models.chat_openai_stream(messages, bot.chat_model, **kwargs)
+    print("CALL openai LLM INITIAL")
+    no_yield = True
+    while(no_yield):
+        response: ChatCompletion = chat_models.chat_openai_stream(messages, bot.chat_model.model, **kwargs)
 
-    full_delta_dict_collection = []
-    no_yield = False
-    for chunk in response:
-        if(chunk.choices[0].delta.tool_calls or no_yield):
-            no_yield = True
-            full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
-        else:
-            chunk_content = chunk.choices[0].delta.content
-            if(chunk_content):
-                yield chunk.choices[0].delta.content
+        full_delta_dict_collection = []
+        no_yield = False
+        for chunk in response:
+            if(chunk.choices[0].delta.tool_calls or no_yield):
+                no_yield = True
+                full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
+            else:
+                chunk_content = chunk.choices[0].delta.content
+                if(chunk_content):
+                    yield chunk.choices[0].delta.content
 
 
-    if(no_yield):
-        current_dict = full_delta_dict_collection[0]
-        for i in range(1, len(full_delta_dict_collection)):
-            merge_dicts_stream_openai_completion(current_dict, full_delta_dict_collection[i])
+        if(no_yield):
+            yield "Calling tools & Processing \n"
+            current_dict = full_delta_dict_collection[0]
+            for i in range(1, len(full_delta_dict_collection)):
+                merge_dicts_stream_openai_completion(current_dict, full_delta_dict_collection[i])
 
-        tool_calls = [ChatCompletionMessageToolCall.model_validate(tool_call)
-                    for tool_call in current_dict["tool_calls"]]
+            tool_calls = [ChatCompletionMessageToolCall.model_validate(tool_call)
+                        for tool_call in current_dict["tool_calls"]]
 
-        # Step 2: check if the model wanted to call a function
-        if tool_calls:
-            messages.append(current_dict)
-            messages = openai_tools_stream(messages, tool_calls, bot, **kwargs)
-            yield "Calling tools\n"
-            return call_openai_llm(messages, bot, **kwargs)
+            # Step 2: check if the model wanted to call a function
+            if tool_calls:
+                messages.append(current_dict)
+                messages = openai_tools_stream(messages, tool_calls, bot, **kwargs)
 
 
 # @observe(capture_input=True)
@@ -148,51 +151,49 @@ def openai_tools_stream(
         The updated conversation messages with tool responses appended
 
     """
-    tools_used = 0
-    while tool_calls and tools_used < MAX_NUM_TOOLS:
-        # TODO: run tool calls in parallel
-        for tool_call in tool_calls:
-            print("RUN TOOL")
-            function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = next(
-                (t for t in bot.vdb_tools if function_name == t.name),
-                None,
+    print("toaa")
+    print(tool_calls)
+    for tool_call in tool_calls:
+        print("RUN TOOL")
+        function_name = tool_call.function.name
+        function_args = json.loads(tool_call.function.arguments)
+        vdb_tool = next(
+            (t for t in bot.vdb_tools if function_name == t.name),
+            None,
+        )
+        search_tool = next(
+            (t for t in bot.search_tools if function_name == t.name),
+            None,
+        )
+        # Step 3: call the function
+        # Note: the JSON response may not always be valid;
+        # be sure to handle errors
+        if vdb_tool:
+            tool_response = run_vdb_tool(
+                vdb_tool,
+                function_args,
+                bot.chat_model.engine,
             )
-            search_tool = next(
-                (t for t in bot.search_tools if function_name == t.name),
-                None,
+        elif search_tool:
+            tool_response = run_search_tool(
+                search_tool,
+                function_args,
+                bot.chat_model.engine,
             )
-            # Step 3: call the function
-            # Note: the JSON response may not always be valid;
-            # be sure to handle errors
-            if vdb_tool:
-                tool_response = run_vdb_tool(
-                    vdb_tool,
-                    function_args,
-                    bot.chat_model.engine,
-                )
-            elif search_tool:
-                tool_response = run_search_tool(
-                    search_tool,
-                    function_args,
-                    bot.chat_model.engine,
-                )
-            else:
-                tool_response = "error: unable to run tool"
-            # Step 4: send the info for each function call and function response to
-            # the model
-            messages.append(
-                {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": tool_response,
-                },
-            )  # extend conversation with function response
-            tools_used += 1
-        # get a new response from the model where it can see the function response
-        print("CALL LLM WITH TOOL RESPONSES")
+        else:
+            tool_response = "error: unable to run tool"
+        # Step 4: send the info for each function call and function response to
+        # the model
+        messages.append(
+            {
+                "tool_call_id": tool_call.id,
+                "role": "tool",
+                "name": function_name,
+                "content": tool_response,
+            },
+        )  # extend conversation with function response
+    print(messages)
+    print("CALL LLM WITH TOOL RESPONSES")
     return messages
 
 # @observe(capture_input=True)
