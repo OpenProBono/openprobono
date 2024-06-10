@@ -91,31 +91,8 @@ def chat(
                         "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
                                        "used}",
                         "value": {
-                            "history": [["hi!", ""]],
-                            "bot_id": "ae885648-4fc7-4de6-ba81-67cc58c57d4c",
-                            "api_key": "xyz",
-                        },
-                    },
-                    "call a bot using history 2": {
-                        "summary": "call a bot using history 2",
-                        "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
-                                       "used}",
-                        "value": {
-                            "history": [
-                                ["hi!", "Hi, how can I assist you today?"],
-                                ["I need help with something", ""],
-                            ],
-                            "bot_id": "ae885648-4fc7-4de6-ba81-67cc58c57d4c",
-                            "api_key": "xyz",
-                        },
-                    },
-                    "call opb bot": {
-                        "summary": "call opb bot",
-                        "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
-                                       "used}",
-                        "value": {
-                            "history": [["hi!", ""]],
-                            "bot_id": "39e6d5c3-4e3c-4281-93d7-4f7c8db8833b",
+                            "history": [{"role": "user", "content": "hi"}],
+                            "bot_id": "some bot id",
                             "api_key": "xyz",
                         },
                     },
@@ -138,7 +115,7 @@ def init_session(
                                        "used, session_id: the session_id which was created",  # noqa: E501
                         "value": {
                             "message": "hi, I need help",
-                            "bot_id": "83f74a4e-0f8f-4142-b4e7-92a20f688a0b",
+                            "bot_id": "some bot id",
                             "api_key": "xyz",
                         },
                     },

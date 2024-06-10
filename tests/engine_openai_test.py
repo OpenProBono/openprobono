@@ -1,9 +1,10 @@
 import os
 
 from fastapi.testclient import TestClient
+from requests import session
 
 import app.main as main
-from app.models import BotRequest, ChatModelParams, EngineEnum, InitializeSession, OpenAIModelEnum
+from app.models import BotRequest, ChatBySession, ChatModelParams, EngineEnum, InitializeSession, OpenAIModelEnum
 
 client = TestClient(main.api)
 
@@ -302,6 +303,80 @@ class TestApi:
         )
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
+        print(response_json["session_id"])
+        print("---- OUTPUT ----")
+        print(response_json["output"])
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
+
+    def test_exp_opb_model_3_5_1106_openai_bot_with_follow_up(self):
+
+        gov_search = {
+            "name": "government-search",
+            "method": "serpapi",
+            "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com ",
+            "prompt": "Useful for when you need to answer questions or find resources about government and laws. Always cite your sources.",
+        }
+        case_search = {
+            "name": "case-search",
+            "method": "serpapi",
+            "prefix": "site:*case.law | site:*.gov | site:*.edu | site:*courtlistener.com | site:*scholar.google.com ",
+            "prompt": "Use for finding case law. Always cite your sources.",
+        }
+        test_bot_request = BotRequest(
+            api_key=API_KEY,
+            chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIModelEnum.gpt_3_5_1106),
+            search_tools=[gov_search, case_search],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key=API_KEY,
+            bot_id=bot_id,
+            message="What is the rule in Florida related to designating an "
+                    "email address for service in litigation?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert len(response_json["bot_id"]) == 36
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
+        print(response_json["session_id"])
+        print("---- OUTPUT ----")
+        print(response_json["output"])
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
+
+        test_continue_session = ChatBySession(
+            message="What about North Carolina?",
+            session_id=response_json["session_id"],
+            api_key=API_KEY,
+        )
+        response = client.post(
+            "/chat_session", json=test_continue_session.model_dump(),
         )
         assert response.status_code == 200
         response_json = response.json()

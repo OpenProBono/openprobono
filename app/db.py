@@ -128,25 +128,21 @@ def load_session(r: ChatBySession) -> ChatRequest:
         ChatRequest: The chat request object with appended user message
 
     """
-    msgs = (
+    session_data = (
         db.collection(CONVERSATION_COLLECTION + VERSION)
-        .document(r.session_id)
-        .collection("conversations")
-        .order_by("timestamp", direction=firestore.Query.ASCENDING)
-        .get()
-    )
-    history = []
-    for msg in msgs:
-        conversation = msg.to_dict()
-        msg_pair = [conversation["human"], conversation["bot"]]
-        history.append(msg_pair)
-    history.append([r.message, ""])
-    metadata = (
-        db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).get()
-    )
+        .document(r.session_id).get()
+    ) 
+
+    session_data = session_data.to_dict()
+
+    #add user message to history
+    history = session_data["history"]
+    history.append({"role": "user", "content": r.message})
+
+
     return ChatRequest(
         history=history,
-        bot_id=metadata.to_dict()["bot_id"],
+        bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
     )
