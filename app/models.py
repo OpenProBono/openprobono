@@ -1,4 +1,6 @@
 """Written by Arman Aydemir. This file contains the main models/classes."""
+from __future__ import annotations
+
 import uuid
 from enum import Enum, unique
 from typing import List

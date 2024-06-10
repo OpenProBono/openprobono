@@ -1,7 +1,8 @@
-from app.chat_models import chat_openai
-from app.models import OpenAIModelEnum
 import json
 from pathlib import Path
+
+from app.chat_models import chat_openai
+from app.models import OpenAIModelEnum
 
 EVALUATION_SYSTEM_MSG = "You are a fair evaluator language model."
 EVALUATION_PROMPT = """###Task Description:

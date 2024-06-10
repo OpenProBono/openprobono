@@ -3,14 +3,14 @@ import json
 from typing import TYPE_CHECKING
 
 import langchain
+import openai
 from anthropic import Anthropic
 from anthropic.types.beta.tools import ToolsBetaContentBlock
 from langfuse.decorators import observe
-import openai
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageToolCall
 
-import app.chat_models as chat_models
+from app import chat_models
 from app.models import BotRequest, ChatRequest
 from app.prompts import (
     MAX_NUM_TOOLS,
@@ -65,14 +65,14 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         "client": client,
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
-        #"session_id": r.session_id, 
+        #"session_id": r.session_id,
         "temperature": 0,
     }
 
     # response is a ChatCompletion object
     print("CALL LLM INITIAL")
     response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
-            
+
     print(response.usage.to_dict())
     print("tokens used^^^")
     response_message = response.choices[0].message
@@ -89,7 +89,7 @@ def openai_tools(
     bot: BotRequest,
     **kwargs: dict,
 ):
-    """Handle tool calls in the conversation for OpenAI engine
+    """Handle tool calls in the conversation for OpenAI engine.
 
     Parameters
     ----------
@@ -104,6 +104,7 @@ def openai_tools(
     -------
     ChatCompletionMessage
         The response message from the bot, should be final response.
+
     """
     tools_used = 0
     while tool_calls and tools_used < MAX_NUM_TOOLS:

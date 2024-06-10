@@ -25,7 +25,6 @@ from app.models import (
     get_uuid_id,
 )
 
-
 # this is to ensure tracing with langfuse
 # @asynccontextmanager
 # async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
@@ -105,7 +104,7 @@ def init_session(
                     "init session": {
                         "summary": "initialize a session",
                         "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
-                                       "used, session_id: the session_id which was created",  # noqa: E501
+                                       "used, session_id: the session_id which was created",
                         "value": {
                             "message": "hi, I need help",
                             "bot_id": "some bot id",
@@ -118,7 +117,7 @@ def init_session(
     """Initialize a new session with a message."""
     if not api_key_check(request.api_key):
         return {"message": "Invalid API Key"}
-    
+
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
     cr = ChatRequest(
@@ -148,7 +147,7 @@ def chat_session(
                     "call a bot using session": {
                         "summary": "call a bot using session",
                         "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
-                                       "used, session_id: the session_id which was used}",  # noqa: E501
+                                       "used, session_id: the session_id which was used}",
                         "value": {
                             "message": "hi, I need help",
                             "session_id": "some session id",
@@ -161,7 +160,7 @@ def chat_session(
     """Continue a chat session with a message."""
     if not api_key_check(request.api_key):
         return {"message": "Invalid API Key"}
-    
+
     cr = load_session(request)
     response = process_chat(cr)
     try:
@@ -184,7 +183,7 @@ def get_session(
                     "fetch chat history via session": {
                         "summary": "fetch chat history via session",
                         "description": "Returns: {message: 'Success', history: list of messages, bot_id: the bot_id "  # noqa: E501
-                                       "which was used, session_id: the session_id which was used}",  # noqa: E501
+                                       "which was used, session_id: the session_id which was used}",
                         "value": {
                             "session_id": "some session id",
                             "api_key": "xyz",
@@ -220,8 +219,8 @@ def create_bot(
                                 {
                                     "name": "government-search",
                                     "method": "serpapi",
-                                    "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com",  # noqa: E501
-                                    "prompt": "Use to answer questions or find resources about "  # noqa: E501
+                                    "prefix": "site:*.gov | site:*.edu | site:*scholar.google.com",
+                                    "prompt": "Use to answer questions or find resources about "
                                               "government and laws.",
                                 },
                                 {
@@ -234,7 +233,7 @@ def create_bot(
                                 {
                                     "collection_name": "USCode",
                                     "k": 4,
-                                    "prompt": "Use to find information about federal laws and regulations.",  # noqa: E501
+                                    "prompt": "Use to find information about federal laws and regulations.",
                                 },
                             ],
                             "chat_model": {
@@ -248,7 +247,7 @@ def create_bot(
                         "summary": "Description and Tips",
                         "description": "full descriptions",
                         "value": {
-                            "system_prompt": "prompt to use for the bot, replaces the default prompt",  # noqa: E501
+                            "system_prompt": "prompt to use for the bot, replaces the default prompt",
                             "message_prompt": "prompt to use for the bot, this is appended for each message, default is none",  # noqa: E501
                             "search_tools": [
                                 {
@@ -258,14 +257,14 @@ def create_bot(
                                     "prefix": "where to put google search syntax to filter or whitelist results, "  # noqa: E501
                                               "but is also just generally a prefix to add to query passed to tool by "  # noqa: E501
                                               "llm",
-                                    "prompt": "description for agent to know when to use the tool",  # noqa: E501
+                                    "prompt": "description for agent to know when to use the tool",
                                 },
                             ],
                             "vdb_tools": [
                                 {
                                     "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
-                                    "k": "the number of text chunks to return when querying the database",  # noqa: E501
-                                    "prompt": "description for agent to know when to use the tool",  # noqa: E501
+                                    "k": "the number of text chunks to return when querying the database",
+                                    "prompt": "description for agent to know when to use the tool",
                                 },
                             ],
                             "chat_model": {

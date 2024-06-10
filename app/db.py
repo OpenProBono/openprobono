@@ -1,4 +1,6 @@
 """Written by Arman Aydemir. Used to access and store data in the Firestore database."""
+from __future__ import annotations
+
 import os
 from json import loads
 from typing import Optional

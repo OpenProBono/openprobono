@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from json import loads
 from logging.handlers import RotatingFileHandler
-import time
 from typing import TYPE_CHECKING
 
 from pymilvus import (
@@ -17,7 +17,7 @@ from pymilvus import (
     utility,
 )
 
-import app.encoders as encoders
+from app import encoders
 from app.chat_models import summarize
 from app.db import load_vdb, store_vdb
 from app.loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links

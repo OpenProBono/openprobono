@@ -6,7 +6,7 @@ from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
 from app.courtlistener import courtlistener_search
-from app.milvusdb import query, upload_site, source_exists
+from app.milvusdb import query, source_exists, upload_site
 from app.models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
@@ -60,8 +60,8 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 10) -> dict:
             "q": prf + " " + qr,
             "num": num_results,
         }).get_dict())
-    
-    def process_site(result):
+
+    def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"])):
                 print("Uploading site: " + result["link"])
@@ -108,7 +108,7 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
                      params=params,
                      headers=headers, timeout=30).json())[0:max_len]
 
-def courtroom5_search_tool(qr: str, prf: str='', max_len: int = 6400) -> str:
+def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
     """Query the custom courtroom5 google search api.
 
     Whitelisted sites defined by search cx key.
@@ -144,7 +144,7 @@ def courtroom5_search_tool(qr: str, prf: str='', max_len: int = 6400) -> str:
 
 
 # Implement this for regular programatic google search as well.
-def dynamic_courtroom5_search_tool(qr: str, prf: str='') -> dict:
+def dynamic_courtroom5_search_tool(qr: str, prf: str="") -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
     Whitelisted sites defined by search cx key.
@@ -177,8 +177,8 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str='') -> dict:
                     headers=headers,
                     timeout=30,
                 ).json()
-    
-    def process_site(result):
+
+    def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"])):
                 print("Uploading site: " + result["link"])
@@ -451,7 +451,20 @@ def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
     return str(function_response)
 
 
-def search_toolset_creator(bot: BotRequest):
+def search_toolset_creator(bot: BotRequest) -> list:
+    """Create a search toolset for the bot from all the search tools.
+
+    Parameters
+    ----------
+    bot : BotRequest
+        Bot object
+
+    Returns
+    -------
+    list
+        The list of search tools formatted for the bot engine
+
+    """
     toolset = []
     for t in bot.search_tools:
         match bot.chat_model.engine:

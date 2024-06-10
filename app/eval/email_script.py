@@ -1,9 +1,10 @@
+import json
+import os
 import time
 from pathlib import Path
-import json
+
 from app.main import chat
 from app.models import ChatRequest
-import os
 
 # bot_id = "2f294354-2101-42ac-a9a2-2e16da92e240" #dynamic courtroom5 search
 # bot_id = "18443765-4f72-4def-a161-68528223d3a3" #regular courtroom5 search
@@ -41,7 +42,7 @@ def main():
             history=[{"role": "user", "content": question.format(state=state)}],
             bot_id=bot_id,
             api_key=api_key)
-        
+
         response = chat(request)
         print(response)
         responses.append(response["output"])

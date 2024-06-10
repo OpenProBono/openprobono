@@ -42,6 +42,26 @@ def messages(
     history: list[tuple[str | None, str | None]],
     engine: EngineEnum,
 ) -> list[dict] | list[BaseMessage]:
+    """Convert a list of message tuples to a list of messages appropriate for the specified engine.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        the list of message tuples
+    engine : EngineEnum
+        the engine to use for the messages
+
+    Returns
+    -------
+    list[dict] | list[BaseMessage]
+        the list of messages formatted for the specified engine
+
+    Raises
+    ------
+    ValueError
+        If the engine is not supported
+
+    """
     match engine:
         case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.hive:
             return messages_dicts(history)
@@ -50,6 +70,19 @@ def messages(
 def messages_dicts(
     history: list[tuple[str | None, str | None]],
 ) -> list[dict]:
+    """Convert a list of message tuples to a list of messages as dictionaries.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        the list of message tuples
+
+    Returns
+    -------
+    list[dict]
+        the list of messages as dictionaries
+
+    """
     messages = []
     for tup in history:
         if tup[0]:
@@ -61,6 +94,19 @@ def messages_dicts(
 def messages_langchain(
         history: list[tuple[str | None, str | None]],
 ) -> list[BaseMessage]:
+    """Convert a list of message tuples to a list of LangChain messages as BaseMessage objects.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        the list of message tuples
+
+    Returns
+    -------
+    list[BaseMessage]
+        the list of LangChain messages as BaseMessage objects
+
+    """
     messages = []
     for tup in history:
         if tup[0]:
@@ -74,6 +120,21 @@ def chat(
     chatmodel: ChatModelParams,
     **kwargs: dict,
 ) -> (tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage):
+    """Chat with the specified chat model.
+
+    Parameters
+    ----------
+    messages : _type_
+        the messages for the bot.
+    chatmodel : ChatModelParams
+        parameteres defining the chat model
+
+    Returns
+    -------
+    Output
+        the output of the chat, type depends on the engine
+
+    """
     match chatmodel.engine:
         case EngineEnum.hive:
             return chat_hive(messages, chatmodel.model, **kwargs)
@@ -484,8 +545,6 @@ def summarize_langchain(
     return result["output_text"].strip()
 
 def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
-
-    
     """Load a LangChain BaseLanguageModel.
 
     Currently only supports OpenAI models.
