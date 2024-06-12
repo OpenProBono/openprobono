@@ -4,90 +4,21 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from datasets import Dataset, load_dataset
-from unstructured.documents.elements import ElementMetadata, Text
-from unstructured.partition.auto import partition
 
 from chat_models import chat as llm_chat
 from main import chat
-from milvusdb import get_expr
 from models import ChatModelParams, ChatRequest
 from prompts import EVALUATION_PROMPT
 
+if TYPE_CHECKING:
+    import pandas as pd
+
 API_KEY = os.environ["OPB_TEST_API_KEY"]
-
-# for loading eval data by statute
-root_dir = "data/chapter_urls/"
-chapter_names = sorted(os.listdir(root_dir))
-# for loading by chapter
-evalset_urls = "data/NC-court/court-urls"
-chapter_pdf_urls = ""
-if Path(evalset_urls).exists():
-    with Path(evalset_urls).open() as f:
-        chapter_pdf_urls = [line.strip() for line in f.readlines()]
-
-
-def load_statute_urls(chapter_name: str):
-    with Path(root_dir + chapter_name).open() as f:
-        return [line.strip() for line in f.readlines()]
-
-
-def generate_statute_elements():
-    for chapter in chapter_names:
-        statute_urls = load_statute_urls(chapter)
-        for statute_url in statute_urls:
-            elements = partition(statute_url)
-            yield statute_url, elements
-
-
-def resume_statute_elements(chapter_name: str, statute_url: str):
-    resume_chapter = next(iter([chapter for chapter in chapter_names if chapter == chapter_name]), None)
-    resume_chapter_idx = chapter_names.index(resume_chapter) if resume_chapter else 0
-    for i in range(resume_chapter_idx, len(chapter_names)):
-        statute_urls = load_statute_urls(chapter_names[i])
-        resume_statute = next(iter([statute for statute in statute_urls if statute == statute_url]), None)
-        resume_statute_idx = statute_urls.index(resume_statute) if resume_statute else 0
-        for j in range(resume_statute_idx, len(statute_urls)):
-            elements = partition(url=statute_urls[j], content_type="application/pdf")
-            yield statute_url, elements
-
-
-def generate_chapter_elements():
-    for chapter_pdf_url in chapter_pdf_urls:
-        elements = partition(url=chapter_pdf_url, content_type="application/pdf")
-        yield chapter_pdf_url, elements
-
-
-# for loading eval data from a milvus Collection
-def vdb_source_documents(collection_name: str, source: str) -> list[Text]:
-    expr = f"metadata['url']=='{source}'"
-    hits = get_expr(collection_name, expr)["result"]
-    return [
-        Text(
-            text=hit["text"],
-            metadata=ElementMetadata(
-                url=source,
-                page_number=hit["metadata"]["page_number"],
-            ),
-        ) for hit in hits
-    ]
-
-
-def load_statute_elements(collection_name: str):
-    for chapter in chapter_names:
-        statute_urls = load_statute_urls(chapter)
-        for statute_url in statute_urls:
-            yield vdb_source_documents(collection_name, statute_url)
-
-
-def load_chapter_elements(collection_name: str):
-    for chapter_pdf_url in chapter_pdf_urls:
-        yield vdb_source_documents(collection_name, chapter_pdf_url)
-
 
 def evaluate_agent(
     bot_id: str,
