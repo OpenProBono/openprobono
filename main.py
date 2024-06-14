@@ -35,6 +35,7 @@ from models import (
     InitializeSession,
     get_uuid_id,
 )
+from opinion_search import opinion_search
 
 
 # this is to ensure tracing with langfuse
@@ -472,3 +473,22 @@ def vectordb_upload_site(site: str, collection_name: str,
     if not admin_check(api_key):
         return {"message": "Failure: API key invalid"}
     return crawl_upload_site(collection_name, description, site)
+
+
+@api.get("/search_opinions", tags=["Opinion Search"])
+def search_opinions(
+    query: str,
+    api_key: str,
+    jurisdiction: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    k: int = 4,
+) -> dict:
+    if not admin_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    try:
+        results = opinion_search(query, jurisdiction, from_date, to_date, k)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+    else:
+        return {"message": "Success", "results": results}

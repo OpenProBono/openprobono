@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from cap import cap
-from courtlistener import courtlistener_search
+from courtlistener import courtlistener_search, get_cluster, get_court
 
 
 def opinion_search(
@@ -52,6 +52,9 @@ def opinion_search(
     search_hits = search_result["result"]
     # get k closest results from either tool
     hits = []
+    # if there are no results it was probably a bad query date range
+    if not vdb_hits and not search_hits:
+        return hits
     i, j = 0, 0
     while len(hits) < k:
         vdb_dist = vdb_hits[i]["distance"] if i < len(vdb_hits) else 1
@@ -62,4 +65,18 @@ def opinion_search(
         else:
             hits.append(search_hits[j])
             j += 1
+    for hit in hits:
+        if "cluster_id" in hit["entity"]["metadata"]:
+            cluster = get_cluster(hit["entity"]["metadata"])
+            # prefer short name to full name
+            if cluster["case_name"]:
+                case_name = cluster["case_name"]
+            elif cluster["case_name_short"]:
+                case_name = cluster["case_name_short"]
+            else:
+                case_name = cluster["case_name_full"]
+            hit["entity"]["metadata"]["case_name"] = case_name
+        if "court_id" in hit["entity"]["metadata"]:
+            court = get_court(hit["entity"]["metadata"])
+            hit["entity"]["metadata"]["court_name"] = court["full_name"]
     return hits
