@@ -480,14 +480,14 @@ def search_opinions(
     query: str,
     api_key: str,
     jurisdiction: str | None = None,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    after_date: str | None = None,
+    before_date: str | None = None,
     k: int = 4,
 ) -> dict:
     if not admin_check(api_key):
         return {"message": "Failure: API key invalid"}
     try:
-        results = opinion_search(query, jurisdiction, from_date, to_date, k)
+        results = opinion_search(query, jurisdiction, after_date, before_date, k)
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
     else:

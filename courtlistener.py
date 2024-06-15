@@ -15,12 +15,13 @@ if TYPE_CHECKING:
 
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
-base_url = "https://www.courtlistener.com"
-search_url = base_url + "/api/rest/v3/search/?q="
-opinion_url = base_url + "/api/rest/v3/opinions/?id="
-cluster_url = base_url + "/api/rest/v3/clusters/?id="
-docket_url = base_url + "/api/rest/v3/dockets/?id="
-court_url = base_url + "/api/rest/v3/courts/?id="
+base_url = "https://www.courtlistener.com/api/rest/v3"
+search_url = base_url + "/search/?q="
+opinion_url = base_url + "/opinions/?id="
+cluster_url = base_url + "/clusters/?id="
+docket_url = base_url + "/dockets/?id="
+court_url = base_url + "/courts/?id="
+people_url = base_url + "/people/?id="
 
 courtlistener_collection = "courtlistener"
 
@@ -34,17 +35,17 @@ courtlistener_tool_args = {
             "to filter query results by jurisdiction. Use 'US' for federal courts."
         ),
     },
-    "from-date": {
+    "after-date": {
         "type": "string",
         "description": (
-            "The start date for the query date range in YYYY-MM-DD "
+            "The after date for the query date range in YYYY-MM-DD "
             "format."
         ),
     },
-    "to-date": {
+    "before-date": {
         "type": "string",
         "description": (
-            "The end date for the query date range in YYYY-MM-DD "
+            "The before date for the query date range in YYYY-MM-DD "
             "format."
         ),
     },
@@ -230,14 +231,35 @@ def get_court(result: dict) -> dict:
 
     return response.json()["results"][0]
 
+def get_person(result: dict) -> dict:
+    """Get the full person info for a search result from search().
+
+    Parameters
+    ----------
+    result : dict
+        A single result from search()
+
+    Returns
+    -------
+    dict
+        dict containing the Person info
+
+    """
+    author_id = str(result["author_id"])
+    response = requests.get(people_url + author_id,
+                            headers=courtlistener_header,
+                            timeout=courtlistener_timeout)
+
+    return response.json()["results"][0]
+
 # TODO: Need to parallelize this
 @observe()
 def courtlistener_search(
     q: str,
     k: int = 3,
     jurisdiction: str | None = None,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    after_date: str | None = None,
+    before_date: str | None = None,
 ) -> dict:
     """Search courtlistener for a query.
 
@@ -252,10 +274,10 @@ def courtlistener_search(
     jurisdiction : str | None, optional
         The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'US' for federal courts. By default None.
-    from_date : str | None, optional
-        The start date for the query date range in YYYY-MM-DD format, by default None
-    to_date : str | None, optional
-        The end date for the query date range in YYYY-MM-DD format, by default None
+    after_date : str | None, optional
+        The after date for the query date range in YYYY-MM-DD format, by default None
+    before_date : str | None, optional
+        The before date for the query date range in YYYY-MM-DD format, by default None
 
     Returns
     -------
@@ -267,12 +289,12 @@ def courtlistener_search(
     # add options to query string
     if jurisdiction and jurisdiction in jurisdiction_codes:
         query_str += f"&court={jurisdiction_codes[jurisdiction]}"
-    if from_date:
-        dt = from_date.split("-")
+    if after_date:
+        dt = after_date.split("-")
         # needs to be in MM-DD-YYYY format
         query_str += f"&filed_after={dt[1]}-{dt[2]}-{dt[0]}"
-    if to_date:
-        dt = to_date.split("-")
+    if before_date:
+        dt = before_date.split("-")
         # needs to be in MM-DD-YYYY format
         query_str += f"&filed_before={dt[1]}-{dt[2]}-{dt[0]}"
 
@@ -282,16 +304,39 @@ def courtlistener_search(
         opinion["court_id"] = result["court_id"]
         opinion["date_filed"] = result["dateFiled"].split("T")[0]
         opinion["docket_id"] = result["docket_id"]
+        opinion["author_id"] = result["author_id"]
+        opinion["court_name"] = result["court"]
+        opinion["citations"] = result["citation"]
+        # cluster level data: case name
+        cluster = get_cluster(result)
+        # prefer short name to full name
+        if cluster["case_name"]:
+            case_name = cluster["case_name"]
+        elif cluster["case_name_short"]:
+            case_name = cluster["case_name_short"]
+        else:
+            case_name = cluster["case_name_full"]
+        opinion["case_name"] = case_name
+        # person level data: author name
+        author = get_person(result)
+        full_name = ""
+        if author["name_first"]:
+            full_name += author["name_first"]
+        if author["name_middle"]:
+            full_name += (" " if full_name else "") + author["name_middle"]
+        if author["name_last"]:
+            full_name += (" " if full_name else "") + author["name_last"]
+        opinion["author_name"] = full_name
         upload_courtlistener(courtlistener_collection, opinion)
 
-    return courtlistener_query(q, k, jurisdiction, from_date, to_date)
+    return courtlistener_query(q, k, jurisdiction, after_date, before_date)
 
 def courtlistener_query(
     q: str,
     k: int,
     jurisdiction: str | None = None,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    after_date: str | None = None,
+    before_date: str | None = None,
 ) -> dict:
     """Query Courtlistener data.
 
@@ -304,10 +349,10 @@ def courtlistener_query(
     jurisdiction : str | None, optional
         The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'US' for federal courts. By default None.
-    from_date : str | None, optional
-        The start date for the query date range in YYYY-MM-DD format, by default None
-    to_date : str | None, optional
-        The end date for the query date range in YYYY-MM-DD format, by default None
+    after_date : str | None, optional
+        The after date for the query date range in YYYY-MM-DD format, by default None
+    before_date : str | None, optional
+        The before date for the query date range in YYYY-MM-DD format, by default None
 
     Returns
     -------
@@ -319,14 +364,14 @@ def courtlistener_query(
     if jurisdiction and jurisdiction in jurisdiction_codes:
         code_list = jurisdiction_codes[jurisdiction].split(" ")
         expr = f"metadata['court_id'] in {code_list}"
-    if from_date:
+    if after_date:
         if expr:
             expr += " and "
-        expr += f"metadata['date_filed']>='{from_date}'"
-    if to_date:
+        expr += f"metadata['date_filed']>'{after_date}'"
+    if before_date:
         if expr:
             expr += " and "
-        expr += f"metadata['date_filed']<='{to_date}'"
+        expr += f"metadata['date_filed']<'{before_date}'"
     return query(courtlistener_collection, q, k, expr)
 
 def courtlistener_tool_creator(t: SearchTool) -> Tool:
@@ -345,17 +390,17 @@ def courtlistener_tool_creator(t: SearchTool) -> Tool:
     """
     def query_tool(q: str,
         jurisdiction: str | None = None,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        after_date: str | None = None,
+        before_date: str | None = None,
     ) -> dict:
-        return courtlistener_search(q, 3, jurisdiction, from_date, to_date)
+        return courtlistener_search(q, 3, jurisdiction, after_date, before_date)
 
     async def async_query_tool(q: str,
         jurisdiction: str | None = None,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        after_date: str | None = None,
+        before_date: str | None = None,
     ) -> dict:
-        return courtlistener_search(q, 3, jurisdiction, from_date, to_date)
+        return courtlistener_search(q, 3, jurisdiction, after_date, before_date)
 
     name = t.name
     prompt = t.prompt

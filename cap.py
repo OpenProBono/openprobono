@@ -12,16 +12,16 @@ cap_tool_args = {
             "'Ill.', 'N.C.', 'N.M."
         ),
     },
-    "from-date": {
+    "after-date": {
         "type": "string",
         "description": (
-            "The start date for the query date range in YYYY-MM-DD format."
+            "The after date for the query date range in YYYY-MM-DD format."
         ),
     },
-    "to-date": {
+    "before-date": {
         "type": "string",
         "description": (
-            "The end date for the query date range in YYYY-MM-DD format."
+            "The before date for the query date range in YYYY-MM-DD format."
         ),
     },
 }
@@ -31,8 +31,8 @@ def cap(
     q: str,
     k: int,
     jurisdiction: str,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    after_date: str | None = None,
+    before_date: str | None = None,
 ) -> dict:
     """Query CAP data.
 
@@ -44,10 +44,10 @@ def cap(
         How many chunks to return
     jurisdiction : str
         Must be one of: "Ark.", "Ill.", "N.C.", "N.M."
-    from_date : str | None, optional
-        The start date for the query date range in YYYY-MM-DD format, by default None
-    to_date : str | None, optional
-        The end date for the query date range in YYYY-MM-DD format, by default None
+    after_date : str | None, optional
+        The after date for the query date range in YYYY-MM-DD format, by default None
+    before_date : str | None, optional
+        The before date for the query date range in YYYY-MM-DD format, by default None
 
     Returns
     -------
@@ -59,12 +59,12 @@ def cap(
     expr = ""
     if jurisdiction:
         expr += f"jurisdiction_name=='{jurisdiction}'"
-    if from_date:
+    if after_date:
         if expr:
             expr += " and "
-        expr += f"decision_date>='{from_date}'"
-    if to_date:
+        expr += f"decision_date>'{after_date}'"
+    if before_date:
         if expr:
             expr += " and "
-        expr += f" and decision_date<='{to_date}'"
+        expr += f" and decision_date<'{before_date}'"
     return query(collection_name, q, k, expr)

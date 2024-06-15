@@ -459,19 +459,19 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
-            tool_jurisdiction, tool_from_date, tool_to_date = None, None, None
+            tool_jurisdiction, tool_after_date, tool_before_date = None, None, None
             if "jurisdiction" in function_args:
                 tool_jurisdiction = function_args["jurisdiction"].lower()
-            if "from-date" in function_args:
-                tool_from_date = function_args["from-date"]
-            if "to-date" in function_args:
-                tool_to_date = function_args["to-date"]
+            if "after-date" in function_args:
+                tool_after_date = function_args["after-date"]
+            if "before-date" in function_args:
+                tool_before_date = function_args["before-date"]
             function_response = courtlistener_search(
                 qr,
                 3,
                 tool_jurisdiction,
-                tool_from_date,
-                tool_to_date,
+                tool_after_date,
+                tool_before_date,
             )
         case SearchMethodEnum.courtroom5:
             function_response = courtroom5_search_tool(qr, prf)

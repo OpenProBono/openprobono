@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from cap import cap
-from courtlistener import courtlistener_search, get_cluster, get_court
+from courtlistener import courtlistener_search
 
 
 def opinion_search(
     query: str,
     jurisdiction: str | None = None,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    after_date: str | None = None,
+    before_date: str | None = None,
     k: int = 10,
 ) -> list[dict]:
     """Search CAP and courtlistener collections for relevant opinions.
@@ -20,10 +20,10 @@ def opinion_search(
         The users query
     jurisdiction : str | None
         The jurisdiction to filter by, by default None
-    from_date : str | None
-        The earliest date to filter by, by default None
-    to_date : str | None
-        The latest date to filter by, by default None
+    after_date : str | None
+        The after date to filter by, by default None
+    before_date : str | None
+        The before date to filter by, by default None
     k : int
         The number of results to return, by default 10
 
@@ -45,10 +45,16 @@ def opinion_search(
     if jurisdiction == "nm":
         cap_juris = "N.M."
     if cap_juris:
-        vdb_result = cap(query, k, cap_juris, from_date, to_date)
+        vdb_result = cap(query, k, cap_juris, after_date, before_date)
         vdb_hits = vdb_result["result"]
     # get courtlistener results
-    search_result = courtlistener_search(query, k, jurisdiction, from_date, to_date)
+    search_result = courtlistener_search(
+        query,
+        k,
+        jurisdiction,
+        after_date,
+        before_date,
+    )
     search_hits = search_result["result"]
     # get k closest results from either tool
     hits = []
@@ -65,18 +71,4 @@ def opinion_search(
         else:
             hits.append(search_hits[j])
             j += 1
-    for hit in hits:
-        if "cluster_id" in hit["entity"]["metadata"]:
-            cluster = get_cluster(hit["entity"]["metadata"])
-            # prefer short name to full name
-            if cluster["case_name"]:
-                case_name = cluster["case_name"]
-            elif cluster["case_name_short"]:
-                case_name = cluster["case_name_short"]
-            else:
-                case_name = cluster["case_name_full"]
-            hit["entity"]["metadata"]["case_name"] = case_name
-        if "court_id" in hit["entity"]["metadata"]:
-            court = get_court(hit["entity"]["metadata"])
-            hit["entity"]["metadata"]["court_name"] = court["full_name"]
     return hits

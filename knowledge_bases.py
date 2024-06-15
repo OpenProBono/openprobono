@@ -10,7 +10,8 @@ from unstructured.chunking.title import chunk_by_title
 from unstructured.documents.elements import Element, ElementMetadata, Text
 from unstructured.partition.auto import partition
 
-from milvusdb import get_expr, upload_data_json
+from encoders import embed_strs
+from milvusdb import get_expr, load_vdb_param, upload_data_json
 
 
 class KnowledgeBase(Protocol):
@@ -61,6 +62,7 @@ class KnowledgeBase(Protocol):
             Whether or not the database was populated successfully.
 
         """
+        encoder = load_vdb_param(collection_name, "encoder")
         for _, elements in self.generate_elements():
             chunks = chunk_by_title(
                 elements,
@@ -73,7 +75,8 @@ class KnowledgeBase(Protocol):
             for i in range(num_chunks):
                 texts.append(chunks[i].text)
                 metadatas.append(chunks[i].metadata.to_dict())
-            result = upload_data_json(texts, metadatas, collection_name)
+            vectors = embed_strs(texts, encoder)
+            result = upload_data_json(collection_name, vectors, texts, metadatas)
             if result["message"] != "Success":
                 return False
         return True
@@ -103,6 +106,8 @@ class KnowledgeBase(Protocol):
         """
         expr = f"metadata['url']=='{source}'"
         hits = get_expr(collection_name, expr)["result"]
+        for hit in hits:
+            del hit["vector"]
         return [
             Text(
                 text=hit["text"],
@@ -155,7 +160,12 @@ class KnowledgeBaseNC(KnowledgeBase):
         chunk_softmax: int,
         overlap: int,
     ) -> bool:
-        super().populate_database()
+        return super().populate_database(
+            collection_name,
+            chunk_hardmax,
+            chunk_softmax,
+            overlap,
+        )
 
     def load_chapter_elements(
         self: KnowledgeBaseNC,

@@ -28,27 +28,27 @@ def cap_tool(tool: VDBTool) -> Tool:
         tool: VDBTool,
         q: str,
         jurisdiction: str,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        after_date: str | None = None,
+        before_date: str | None = None,
     ) -> dict:
-        return cap(q, tool.k, jurisdiction, from_date, to_date)
+        return cap(q, tool.k, jurisdiction, after_date, before_date)
 
     def tool_func(
         tool: VDBTool,
         q: str,
         jurisdiction: str,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        after_date: str | None = None,
+        before_date: str | None = None,
     ) -> dict:
-        return cap(q, tool.k, jurisdiction, from_date, to_date)
+        return cap(q, tool.k, jurisdiction, after_date, before_date)
     def tool_co(
         tool: VDBTool,
         q: str,
         jurisdiction: str,
-        from_date: str | None = None,
-        to_date: str | None = None,
+        after_date: str | None = None,
+        before_date: str | None = None,
     ) -> dict:
-        return async_cap(tool, q, jurisdiction, from_date, to_date)
+        return async_cap(tool, q, jurisdiction, after_date, before_date)
 
     prompt = tool.prompt if tool.prompt else FILTERED_CASELAW_PROMPT
     return Tool(name=tool.name,
@@ -211,17 +211,17 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
     tool_query = function_args["query"]
     if collection_name == cap_collection:
         tool_jurisdiction = function_args["jurisdiction"]
-        tool_from_date, tool_to_date = None, None
-        if "from-date" in function_args:
-            tool_from_date = function_args["from-date"]
-        if "to-date" in function_args:
-            tool_to_date = function_args["to-date"]
+        tool_after_date, tool_before_date = None, None
+        if "after-date" in function_args:
+            tool_after_date = function_args["after-date"]
+        if "before-date" in function_args:
+            tool_before_date = function_args["before-date"]
         function_response = cap(
             tool_query,
             k,
             tool_jurisdiction,
-            tool_from_date,
-            tool_to_date,
+            tool_after_date,
+            tool_before_date,
         )
     else:
         function_response = query(collection_name, tool_query, k)
