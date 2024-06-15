@@ -499,15 +499,11 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     expr = f"metadata['id']=={oo['id']}"
     hits = get_expr(collection_name, expr)
     if hits["result"] and len(hits["result"]) > 0:
+        # check if opinion in collection does not have citations
         # TODO(Nick) remove this and do the rest manually later
-        # check if opinion in collection does not have case, court, and author names
         if "citations" not in hits["result"][0]["metadata"]:
             # upsert data with added metadata
             for hit in hits["result"]:
-                hit["metadata"]["case_name"] = oo["case_name"]
-                hit["metadata"]["court_name"] = oo["court_name"]
-                hit["metadata"]["author_id"] = oo["author_id"]
-                hit["metadata"]["author_name"] = oo["author_name"]
                 hit["metadata"]["citations"] = oo["citations"]
             upsert_expr_json(collection_name, expr, hits["result"])
         return {"message": "Success"}

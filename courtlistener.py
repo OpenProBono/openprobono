@@ -304,29 +304,33 @@ def courtlistener_search(
         opinion["court_id"] = result["court_id"]
         opinion["date_filed"] = result["dateFiled"].split("T")[0]
         opinion["docket_id"] = result["docket_id"]
-        opinion["author_id"] = result["author_id"]
         opinion["court_name"] = result["court"]
         opinion["citations"] = result["citation"]
-        # cluster level data: case name
-        cluster = get_cluster(result)
-        # prefer short name to full name
-        if cluster["case_name"]:
-            case_name = cluster["case_name"]
-        elif cluster["case_name_short"]:
-            case_name = cluster["case_name_short"]
+        if result["caseName"]:
+            opinion["case_name"] = result["caseName"]
         else:
-            case_name = cluster["case_name_full"]
-        opinion["case_name"] = case_name
+            # cluster level data: case name
+            cluster = get_cluster(result)
+            # prefer short name to full name
+            if cluster["case_name"]:
+                case_name = cluster["case_name"]
+            elif cluster["case_name_short"]:
+                case_name = cluster["case_name_short"]
+            else:
+                case_name = cluster["case_name_full"]
+            opinion["case_name"] = case_name
         # person level data: author name
-        author = get_person(result)
-        full_name = ""
-        if author["name_first"]:
-            full_name += author["name_first"]
-        if author["name_middle"]:
-            full_name += (" " if full_name else "") + author["name_middle"]
-        if author["name_last"]:
-            full_name += (" " if full_name else "") + author["name_last"]
-        opinion["author_name"] = full_name
+        if result["author_id"]:
+            opinion["author_id"] = result["author_id"]
+            author = get_person(result)
+            full_name = ""
+            if author["name_first"]:
+                full_name += author["name_first"]
+            if author["name_middle"]:
+                full_name += (" " if full_name else "") + author["name_middle"]
+            if author["name_last"]:
+                full_name += (" " if full_name else "") + author["name_last"]
+            opinion["author_name"] = full_name
         upload_courtlistener(courtlistener_collection, opinion)
 
     return courtlistener_query(q, k, jurisdiction, after_date, before_date)
