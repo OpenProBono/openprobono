@@ -57,6 +57,7 @@ class VDBTool(BaseModel):
     """
 
     collection_name: str
+    name: str
     k: int
     prompt: str = ""
 

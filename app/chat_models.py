@@ -192,31 +192,9 @@ def chat_openai(
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
-        stream=False,
         **kwargs,
     )
 
-def chat_openai_stream(
-    messages: list[dict],
-    model: str,
-    **kwargs: dict,
-) -> ChatCompletion:
-    print(messages)
-    print(model)
-    print(kwargs)
-    print("--------hiaa")
-    client = kwargs.pop("client", OpenAI())
-    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    temperature = kwargs.pop("temperature", 0.0)
-    print("--------ahiaa")
-    return client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        stream=True,
-        **kwargs,
-    )
 
 def chat_anthropic(
     messages: list[dict],

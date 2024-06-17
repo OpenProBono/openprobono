@@ -309,7 +309,8 @@ def query(collection_name: str, query: str,
             )
             # delete pks
             for hit in hits:
-                del hit["entity"]["metadata"]["orig_elements"]
+                if "metadata" in hit["entity"] and "orig_elements" in hit["entity"]["metadata"]:
+                    del hit["entity"]["metadata"]["orig_elements"]
                 del hit["id"]
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
