@@ -11,6 +11,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document as LCDocument
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from unstructured.documents.elements import Element
 
@@ -196,10 +197,17 @@ def chat_hive(
     model: str,
     **kwargs: dict,
 ) -> tuple[str, list[str]]:
+    use_embedding = kwargs.pop("use_embedding", False)
     system = kwargs.pop("system", HIVE_QA_PROMPT)
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
     top_p = kwargs.pop("top_p", 0.95)
+    if use_embedding:
+        key = "HIVE_7B_NORAG" if model == HiveModelEnum.hive_7b else "HIVE_70B_NORAG"
+    elif model == HiveModelEnum.hive_7b:
+        key = "HIVE_7B_API_KEY"
+    else:
+        key = "HIVE_70B_API_KEY"
     headers = {
         "Accept": "application/json",
         "Authorization": f"Token {os.environ[key]}",
@@ -219,11 +227,12 @@ def chat_hive(
             "prompt_history": messages[:-1],
         },
     }
+    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=90)
     response_json = response.json()
     output = response_json["status"][0]["response"]["output"][0]
     message = output["choices"][0]["message"]
     chunks = output["augmentations"]
-    return message, chunks
+    return message, chunks  
 
 
 def chat_openai(

@@ -18,9 +18,9 @@ from pymilvus import (
     utility,
 )
 
-from app.encoders import embed_strs
 from app.chat_models import summarize
 from app.db import load_vdb, store_vdb
+from app.encoders import embed_strs
 from app.loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links
 from app.models import EncoderParams, MilvusMetadataEnum
 from app.splitters import chunk_elements_by_title, chunk_str
@@ -589,6 +589,7 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
     if len(elements) == 0:
         return {"message": f"Failure: no elements found at {url}"}
     strs, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
+    vectors = embed_strs(strs, load_vdb_param(collection_name, "encoder"))
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:
         # metadata["timestamp"] = firestore.SERVER_TIMESTAMP

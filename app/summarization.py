@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from models import ChatModelParams, EngineEnum
-from prompts import SUMMARY_MAP_PROMPT, SUMMARY_PROMPT, SUMMARY_REFINE_PROMPT
+from app.models import ChatModelParams, EngineEnum
+from app.prompts import SUMMARY_MAP_PROMPT, SUMMARY_PROMPT, SUMMARY_REFINE_PROMPT
 
 
 def summarize_stuffing_msg(documents: list[str]) -> dict[str, str]:

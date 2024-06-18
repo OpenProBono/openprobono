@@ -3,6 +3,7 @@ import os
 
 import requests
 from langchain.agents import Tool
+from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
 
 from app.courtlistener import (
@@ -152,7 +153,7 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
 
 
 # Implement this for regular programatic google search as well.
-@observe
+@observe()
 def dynamic_courtroom5_search_tool(qr: str, prf: str="") -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
@@ -459,8 +460,6 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         The SearchTool object which describes the tool
     function_args : dict
         The arguments to pass to the function
-    engine : EngineEnum
-        The engine providing function_args
 
     Returns
     -------

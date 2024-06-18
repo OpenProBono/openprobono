@@ -1,7 +1,7 @@
-from re import search
 import unittest
+from re import search
 
-import app.search_tools as search_tools
+from app import search_tools
 
 
 class SearchToolTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class SearchToolTests(unittest.TestCase):
         results = search_tools.dynamic_serpapi_tool(qr, prf, num_results=1)
         self.assertTrue(isinstance(results, dict))
         self.assertTrue(len(results.keys()) != 0)
-        
+
     def test_courtroom5_search(self):
         qr = "Wyoming rule for designating email address for service in litigation"
         results = search_tools.courtroom5_search_tool(qr)

@@ -1,9 +1,9 @@
-import unittest
 import os
+import unittest
 
 from fastapi.testclient import TestClient
 
-import main
+from app import main
 
 client = TestClient(main.api)
 
@@ -21,7 +21,7 @@ class ApiTests(unittest.TestCase):
     test_session_vdb_id = "c703b319-41be-4e7d-b2a0-e546f3bfc49e"
 
     def test_create_bot_vdb_query_US(self):
-        from models import BotRequest, VDBTool
+        from app.models import BotRequest, VDBTool
 
         vdb_tool = VDBTool(name="uscode-query", collection_name="USCode", k=4)
         test_bot_request = BotRequest(api_key=API_KEY, vdb_tools=[vdb_tool])
@@ -34,7 +34,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["bot_id"]), 36)
 
     def test_create_bot_serpapi_search(self):
-        from models import BotRequest
+        from app.models import BotRequest
 
         search_tool = {
             "method": "serpapi",
@@ -53,7 +53,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["bot_id"]), 36)
 
     def test_create_bot_google_search(self):
-        from models import BotRequest
+        from app.models import BotRequest
 
         search_tool = {
             "method": "google",
@@ -71,7 +71,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["bot_id"]), 36)
 
     def test_courtroom5_bot(self):
-        from models import BotRequest, InitializeSession
+        from app.models import BotRequest, InitializeSession
 
         search_tool = {
             "name": "courtroom5",
@@ -111,7 +111,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     # def test_dynamic_courtroom5_bot(self):
-    #     from models import BotRequest, InitializeSession
+    #     from app.models import BotRequest, InitializeSession
 
     #     search_tool = {
     #         "name": "dynamic_courtroom5",
@@ -150,7 +150,7 @@ class ApiTests(unittest.TestCase):
     #     self.assertEqual(len(response_json["session_id"]), 36)
 
     # def test_dynamic_serpapi_bot(self):
-    #     from models import BotRequest, InitializeSession
+    #     from app.models import BotRequest, InitializeSession
 
     #     search_tool = {
     #         "name": "dynamic_serpapi",
@@ -189,7 +189,7 @@ class ApiTests(unittest.TestCase):
     #     self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_courtlistener_bot(self):
-        from models import BotRequest, InitializeSession
+        from app.models import BotRequest, InitializeSession
 
         search_tool = {
             "name": "courtlistener",
@@ -232,7 +232,7 @@ class ApiTests(unittest.TestCase):
     # TODO: determine if session tests should be replicated using 
     # a bot with search tool only, or both
     def test_init_session(self):
-        from models import InitializeSession
+        from app.models import InitializeSession
 
         test_initialize_session = InitializeSession(
             api_key=API_KEY, bot_id=self.test_bot_vdb_id, message="test",
@@ -254,7 +254,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_empty_init(self):
-        from models import InitializeSession
+        from app.models import InitializeSession
 
         test_initialize_session = InitializeSession(
             api_key=API_KEY, bot_id=self.test_bot_vdb_id, message="",
@@ -277,7 +277,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_init_and_continue_session(self):
-        from models import ChatBySession, InitializeSession
+        from app.models import ChatBySession, InitializeSession
 
         test_initialize_session = InitializeSession(
             api_key=API_KEY, bot_id=self.test_bot_vdb_id, message="test"
@@ -316,7 +316,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_chat_session(self):
-        from models import ChatBySession
+        from app.models import ChatBySession
         test_chat_session = ChatBySession(api_key=API_KEY, session_id=self.test_session_vdb_id, message='test')
         response = client.post("/chat_session", json=test_chat_session.model_dump())
         self.assertEqual(response.status_code, 200)
@@ -332,7 +332,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(response_json["session_id"]), 36)
 
     def test_fetch_session(self):
-        from models import FetchSession
+        from app.models import FetchSession
         test_fetch_session = FetchSession(api_key=API_KEY, session_id=self.test_session_vdb_id)
         response = client.post("/fetch_session", json=test_fetch_session.model_dump())
         self.assertEqual(response.status_code, 200)

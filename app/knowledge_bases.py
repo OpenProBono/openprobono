@@ -10,8 +10,8 @@ from unstructured.chunking.title import chunk_by_title
 from unstructured.documents.elements import Element, ElementMetadata, Text
 from unstructured.partition.auto import partition
 
-from encoders import embed_strs
-from milvusdb import get_expr, load_vdb_param, upload_data_json
+from app.encoders import embed_strs
+from app.milvusdb import get_expr, load_vdb_param, upload_data_json
 
 
 class KnowledgeBase(Protocol):

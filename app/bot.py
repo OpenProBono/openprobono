@@ -161,13 +161,11 @@ def openai_tools_stream(
                 tool_response = run_vdb_tool(
                     vdb_tool,
                     function_args,
-                    bot.chat_model.engine,
                 )
             elif search_tool:
                 tool_response = run_search_tool(
                     search_tool,
                     function_args,
-                    bot.chat_model.engine,
                 )
             else:
                 tool_response = "error: unable to run tool"

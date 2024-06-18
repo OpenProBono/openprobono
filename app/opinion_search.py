@@ -1,8 +1,8 @@
 """Search court opinions using CAP and courtlistener data."""
 from __future__ import annotations
 
-from cap import cap
-from courtlistener import courtlistener_search
+from app.cap import cap
+from app.courtlistener import courtlistener_search
 
 
 def opinion_search(

@@ -10,10 +10,9 @@ from langfuse.decorators import observe
 
 from app.milvusdb import query, upload_courtlistener
 from app.models import SearchTool
-from milvusdb import query, upload_courtlistener
 
 if TYPE_CHECKING:
-    from models import SearchTool
+    from app.models import SearchTool
 
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}

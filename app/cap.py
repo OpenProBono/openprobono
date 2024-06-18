@@ -1,7 +1,7 @@
 """A module for interacting with the Caselaw Access Project collection."""
 from __future__ import annotations
 
-from milvusdb import query
+from app.milvusdb import query
 
 cap_collection = "CAP"
 cap_tool_args = {
