@@ -5,6 +5,7 @@ import os
 from typing import TYPE_CHECKING
 
 import anthropic
+import google.generativeai as genai
 import requests
 from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document as LCDocument
@@ -69,9 +70,12 @@ def messages(
     match engine:
         case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.hive:
             return messages_dicts(history)
+        case EngineEnum.google:
+            return messages_gemini(history)
         case EngineEnum.langchain:
             return messages_langchain(history)
     raise ValueError(engine)
+
 
 def messages_dicts(
     history: list[tuple[str | None, str | None]],
@@ -97,6 +101,32 @@ def messages_dicts(
             messages.append({"role": "assistant", "content": tup[1]})
     return messages
 
+
+def messages_gemini(
+    history: list[tuple[str | None, str | None]],
+) -> list[dict]:
+    """Convert conversation history into Gemini API dictionary format.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        The original conversation history.
+
+    Returns
+    -------
+    list[dict]
+        The converted conversation history.
+
+    """
+    messages = []
+    for tup in history:
+        if tup[0]:
+            messages.append({"role": "user", "parts": [tup[0]]})
+        if tup[1]:
+            messages.append({"role": "model", "parts": [tup[1]]})
+    return messages
+
+
 def messages_langchain(
         history: list[tuple[str | None, str | None]],
 ) -> list[BaseMessage]:
@@ -120,6 +150,7 @@ def messages_langchain(
         if tup[1]:
             messages.append(AIMessage(content=tup[1]))
     return messages
+
 
 def chat(
     messages: list[dict] | list[BaseMessage],
@@ -158,6 +189,7 @@ def chat(
         case EngineEnum.langchain:
             msg = "langchain chat function must be implemented manually"
     raise ValueError(msg)
+
 
 @observe(as_type="generation")
 def chat_hive(
@@ -219,6 +251,7 @@ def chat_hive(
     chunks = output["augmentations"]
     return message, chunks
 
+
 def chat_openai(
     messages: list[dict],
     model: str,
@@ -251,6 +284,7 @@ def chat_openai(
         temperature=temperature,
         **kwargs,
     )
+
 
 @observe(as_type="generation")
 def chat_anthropic(
@@ -301,6 +335,42 @@ def chat_anthropic(
     )
     return response
 
+
+def chat_gemini(
+    messages: list[dict],
+    model: str,
+    **kwargs: dict,
+) -> str:
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+
+    # Create the model
+    # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
+    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
+    temperature = kwargs.pop("temperature", 0.0)
+    top_p = kwargs.pop("top_p", 0.95)
+    generation_config = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": 64,
+        "max_output_tokens": max_tokens,
+        "response_mime_type": "text/plain",
+    }
+
+    llm = genai.GenerativeModel(
+        model_name=model,
+        generation_config=generation_config,
+        # safety_settings = Adjust safety settings
+        # See https://ai.google.dev/gemini-api/docs/safety-settings
+    )
+
+    chat_session = llm.start_chat(history=messages)
+    response_text = []
+    for content in messages[-1]["parts"]:
+        response = chat_session.send_message(content)
+        response_text.append(response.text.strip())
+    return "\n".join(response_text)
+
+
 def moderate(
     message: str,
     chatmodel: ChatModelParams | None = None,
@@ -343,6 +413,7 @@ def moderate(
     msg = f"Unsupported engine: {chatmodel.engine}"
     raise ValueError(msg)
 
+
 def moderate_openai(
     message: str,
     model: str = OpenAIModelEnum.mod_latest,
@@ -368,6 +439,7 @@ def moderate_openai(
     client = OpenAI() if client is None else client
     response = client.moderations.create(model=model, input=message)
     return response.results[0].flagged
+
 
 def moderate_anthropic(
     message: str,
@@ -403,6 +475,7 @@ def moderate_anthropic(
         messages=[moderation_msg],
     )
     return "Y" in response.content[-1].text.strip()
+
 
 def get_summary_message(
     documents: list[str | Element],
@@ -457,6 +530,7 @@ def get_summary_message(
         case _:
             raise ValueError(method)
     return msg
+
 
 @observe(capture_input=False)
 def summarize(
@@ -544,6 +618,7 @@ def summarize(
             return summarize_langchain(documents, method, chatmodel.model, **kwargs)
     raise ValueError(chatmodel.engine)
 
+
 def summarize_langchain(
     documents: list[str | LCDocument],
     method: str,
@@ -579,6 +654,7 @@ def summarize_langchain(
     )
     result = chain.invoke({"input_documents": documents})
     return result["output_text"].strip()
+
 
 def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
     """Load a LangChain BaseLanguageModel.

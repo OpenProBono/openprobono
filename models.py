@@ -147,6 +147,7 @@ class EngineEnum(str, Enum):
     openai = "openai"
     hive = "hive"
     anthropic = "anthropic"
+    google = "google"
 
 
 @unique
@@ -156,6 +157,13 @@ class AnthropicModelEnum(str, Enum):
     claude_3_opus = "claude-3-opus-20240229"
     claude_3_sonnet = "claude-3-sonnet-20240229"
     claude_3_haiku = "claude-3-haiku-20240307"
+
+
+@unique
+class GoogleModelEnum(str, Enum):
+    """Enumeration class representing different Google models."""
+
+    gemini_1_5_flash = "gemini-1.5-flash"
 
 
 @unique

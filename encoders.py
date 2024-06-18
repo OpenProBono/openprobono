@@ -162,7 +162,7 @@ def embed_strs_voyage(text: list[str], encoder: EncoderParams) -> list:
         A list of lists of floats representing embedded strings
 
     """
-    max_array_tokens = 120000
+    max_array_tokens = 120000 # large 2 (not instruct) supports 320K tokens
     max_tokens = 16000
     max_array_size = 128
     i = 0
@@ -180,9 +180,10 @@ def embed_strs_voyage(text: list[str], encoder: EncoderParams) -> list:
                 msg = f"str at index {j} is {tokens} tokens but the max is {max_tokens}"
                 raise ValueError(msg)
             # determine if the array is too many tokens
-            if array_tokens + tokens <= max_array_tokens:
-                array_tokens += tokens
-                j += 1
+            if array_tokens + tokens > max_array_tokens:
+                break
+            array_tokens += tokens
+            j += 1
         attempt = 1
         num_attempts = 75
         while attempt < num_attempts:

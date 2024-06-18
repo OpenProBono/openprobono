@@ -5,6 +5,7 @@ anyio==3.7.1
 bs4
 firebase-admin==6.2.0
 google-cloud-documentai
+google-generativeai
 google-search-results==2.4.2
 langchain>0.1.0
 langchainhub
