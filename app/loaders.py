@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import io
 import mimetypes
+import os
+import time
 from typing import TYPE_CHECKING
 
 import requests
 from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
+from pymilvus import Collection
 from unstructured.partition.auto import partition
 from unstructured.partition.pdf import partition_pdf
 
@@ -18,10 +21,36 @@ if TYPE_CHECKING:
 
 
 def partition_uploadfile(file: UploadFile) -> list[Element]:
+    """Partition an uploaded file into elements.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to partition.
+
+    Returns
+    -------
+    list[Element]
+        The extracted elements.
+
+    """
     return partition(file=file.file, metadata_filename=file.filename)
 
 
 def scrape(site: str) -> list[Element]:
+    """Scrape a site for text and partition it into elements.
+
+    Parameters
+    ----------
+    site : str
+        The URL to scrape.
+
+    Returns
+    -------
+    list[Element]
+        The scraped elements.
+
+    """
     try:
         if site.endswith(".pdf"):
             r = requests.get(site, timeout=10)
@@ -38,6 +67,21 @@ def scrape_with_links(
     site: str,
     old_urls: list[str],
 ) -> tuple[list[str], list[Element]]:
+    """Scrape a site and get any links referenced on the site.
+
+    Parameters
+    ----------
+    site : str
+        The URL to scrape.
+    old_urls : list[str]
+        The list of URLs already visited.
+
+    Returns
+    -------
+    tuple[list[str], list[Element]]
+        URLs, elements
+
+    """
     print("site: ", site)
     r = requests.get(site, timeout=10)
     site_base = "/".join(site.split("/")[:-1])
@@ -66,7 +110,20 @@ def scrape_with_links(
     return urls, elements
 
 
-def quickstart_ocr(file: UploadFile):
+def quickstart_ocr(file: UploadFile) -> str:
+    """Extract text from a file using OCR.
+
+    Parameters
+    ----------
+    file : UploadFile
+        The file to extract text from.
+
+    Returns
+    -------
+    str
+        The extracted text from the file.
+
+    """
     project_id = "h2o-gpt"
     location = "us"  # Format is "us" or "eu"
     processor_id = "c99e554bb49cf45d"
@@ -120,3 +177,58 @@ def quickstart_ocr(file: UploadFile):
     print("The document contains the following text:")
     print(document.text)
     return document.text
+
+def transfer_hive(collection_name: str) -> None:
+    """Transfer a collection from Milvus to Hive.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection to transfer.
+
+    """
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Token {os.environ['HIVE_ADD_PROJECT_KEY']}",
+        "Content-Type": "application/json",
+    }
+    coll = Collection(collection_name)
+    coll.load()
+    q_iter = coll.query_iterator(output_fields=["text"])
+    res = q_iter.next()
+    num_batches = 0
+    error = False
+    while len(res) > 0:
+        print(f"processing batch {num_batches}")
+        for i, item in enumerate(res):
+            if i % 100 == 0:
+                print(f" i = {i}")
+            data = {"text_data": item["text"]}
+            attempt = 1
+            num_attempts = 75
+            while attempt < num_attempts:
+                try:
+                    response = requests.post(
+                        "https://api.thehive.ai/api/v2/custom_index/add/sync",
+                        headers=headers,
+                        json=data,
+                        timeout=75,
+                    )
+                    if response.status_code != 200:
+                        print(response.json())
+                        print(f"ERROR: status code = {response.status_code}, current pk = {item['pk']}")
+                        error = True
+                    break
+                except:
+                    time.sleep(1)
+                    attempt += 1
+            if error or attempt == num_attempts:
+                print(f"ERROR REPORTED: attempt = {attempt}")
+                error = True
+                break
+        num_batches += 1
+        if error:
+            print("ERROR REPORTED: exiting")
+            break
+        res = q_iter.next()
+    q_iter.close()

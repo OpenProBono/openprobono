@@ -50,14 +50,15 @@ class VDBTool(BaseModel):
 
     Attributes
     ----------
+        name (str): The name of the VDB tool.
         collection_name (str): The collection name for the VDB tool.
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
 
     """
 
-    collection_name: str
     name: str
+    collection_name: str
     k: int
     prompt: str = ""
 
@@ -130,9 +131,11 @@ class FetchSession(BaseModel):
 class EngineEnum(str, Enum):
     """Enumeration class representing different engine options."""
 
+    langchain = "langchain"
     openai = "openai"
     hive = "hive"
     anthropic = "anthropic"
+    google = "google"
 
 
 @unique
@@ -142,6 +145,13 @@ class AnthropicModelEnum(str, Enum):
     claude_3_opus = "claude-3-opus-20240229"
     claude_3_sonnet = "claude-3-sonnet-20240229"
     claude_3_haiku = "claude-3-haiku-20240307"
+
+
+@unique
+class GoogleModelEnum(str, Enum):
+    """Enumeration class representing different Google models."""
+
+    gemini_1_5_flash = "gemini-1.5-flash"
 
 
 @unique
@@ -168,6 +178,14 @@ class OpenAIModelEnum(str, Enum):
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down
     embed_small = "text-embedding-3-small" # 1536 dimensions, can project down
     embed_ada_2 = "text-embedding-ada-002" # 1536 dimensions, can't project down
+
+
+@unique
+class VoyageModelEnum(str, Enum):
+    """Enumeration class representing different Voyage embedding models."""
+
+    large_2_instruct = "voyage-large-2-instruct" # 16000 context length, 1024 dim
+    law = "voyage-law-2" # 16000 context length, 1024 dim
 
 
 @unique

@@ -5,9 +5,14 @@ import requests
 from langchain.agents import Tool
 from serpapi.google_search import GoogleSearch
 
-from app.courtlistener import courtlistener_search
+from app.courtlistener import (
+    courtlistener_search,
+    courtlistener_tool_args,
+    courtlistener_tool_creator,
+)
 from app.milvusdb import query, source_exists, upload_site
 from app.models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
+from app.prompts import FILTERED_CASELAW_PROMPT
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
@@ -37,6 +42,7 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
+@observe()
 def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 10) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
@@ -108,6 +114,8 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
                      params=params,
                      headers=headers, timeout=30).json())[0:max_len]
 
+
+@observe()
 def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
     """Query the custom courtroom5 google search api.
 
@@ -144,6 +152,7 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
 
 
 # Implement this for regular programatic google search as well.
+@observe
 def dynamic_courtroom5_search_tool(qr: str, prf: str="") -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
@@ -379,7 +388,7 @@ def openai_tool(t: SearchTool) -> dict:
         The description of tool created to be used by agents
 
     """
-    return {
+    body = {
         "type": "function",
         "function": {
             "name": t.name,
@@ -389,16 +398,36 @@ def openai_tool(t: SearchTool) -> dict:
                 "properties": {
                     "qr": {
                         "type": "string",
-                        "description": "the search text",
+                        "description": "The search text",
                     },
                 },
                 "required": ["qr"],
             },
         },
     }
+    if t.method == SearchMethodEnum.courtlistener:
+        # arg definitions
+        body["function"]["parameters"]["properties"].update(courtlistener_tool_args)
+        # default tool definition
+        if not t.prompt:
+            body["function"]["description"] = FILTERED_CASELAW_PROMPT
+    return body
 
 def anthropic_tool(t: SearchTool) -> dict:
-    return {
+    """Create a tool for anthropic agents to use.
+
+    Parameters
+    ----------
+    t : SearchTool
+        The SearchTool object which describes the tool
+
+    Returns
+    -------
+    dict
+        The description of tool created to be used by agents
+
+    """
+    body = {
         "name": t.name,
         "description": t.prompt,
         "input_schema": {
@@ -412,16 +441,23 @@ def anthropic_tool(t: SearchTool) -> dict:
             "required": ["qr"],
         },
     }
+    if t.method == SearchMethodEnum.courtlistener:
+        # add courtlistener arg definitions
+        body["input_schema"]["properties"].update(courtlistener_tool_args)
+        # default tool definition
+        if not t.prompt:
+            body["description"] = FILTERED_CASELAW_PROMPT
+    return body
 
 
-def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
+def run_search_tool(tool: SearchTool, function_args: dict) -> str:
     """Create a search tool for an openai agent.
 
     Parameters
     ----------
     tool : SearchTool
         The SearchTool object which describes the tool
-    function_args : dict | _type_
+    function_args : dict
         The arguments to pass to the function
     engine : EngineEnum
         The engine providing function_args
@@ -434,7 +470,7 @@ def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
     """
     function_response = None
     prf = tool.prefix
-    qr = function_args.get("qr") if engine == EngineEnum.openai else function_args["qr"]
+    qr = function_args["qr"]
     match tool.method:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
@@ -443,7 +479,20 @@ def run_search_tool(tool: SearchTool, function_args, engine: EngineEnum) -> str:
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
-            function_response = courtlistener_search(qr)
+            tool_jurisdiction, tool_after_date, tool_before_date = None, None, None
+            if "jurisdiction" in function_args:
+                tool_jurisdiction = function_args["jurisdiction"].lower()
+            if "after-date" in function_args:
+                tool_after_date = function_args["after-date"]
+            if "before-date" in function_args:
+                tool_before_date = function_args["before-date"]
+            function_response = courtlistener_search(
+                qr,
+                3,
+                tool_jurisdiction,
+                tool_after_date,
+                tool_before_date,
+            )
         case SearchMethodEnum.courtroom5:
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
@@ -468,6 +517,20 @@ def search_toolset_creator(bot: BotRequest) -> list:
     toolset = []
     for t in bot.search_tools:
         match bot.chat_model.engine:
+            case EngineEnum.langchain:
+                match t.method:
+                    case SearchMethodEnum.serpapi:
+                        toolset.append(serpapi_tool_creator(t))
+                    case SearchMethodEnum.dynamic_serpapi:
+                        toolset.append(dynamic_serpapi_tool_creator(t))
+                    case SearchMethodEnum.google:
+                        toolset.append(search_tool_creator(t))
+                    case SearchMethodEnum.courtlistener:
+                        toolset.append(courtlistener_tool_creator(t))
+                    case SearchMethodEnum.courtroom5:
+                        toolset.append(courtroom5_tool_creator(t))
+                    case SearchMethodEnum.dynamic_courtroom5:
+                        toolset.append(dynamic_courtroom5_tool_creator(t))
             case EngineEnum.openai:
                 toolset.append(openai_tool(t))
             case EngineEnum.anthropic:

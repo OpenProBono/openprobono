@@ -8,6 +8,7 @@ from json import loads
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
+from langfuse.decorators import observe
 from pymilvus import (
     Collection,
     CollectionSchema,
@@ -17,7 +18,7 @@ from pymilvus import (
     utility,
 )
 
-from app import encoders
+from app.encoders import embed_strs
 from app.chat_models import summarize
 from app.db import load_vdb, store_vdb
 from app.loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links
@@ -49,19 +50,9 @@ vdb_log.addHandler(my_handler)
 
 # used to cache collection params from firebase
 COLLECTION_PARAMS = {}
-
-SEARCH_PARAMS = {
-    "anns_field": "vector",
-    "param": {}, # can customize index params assuming you know index type
-    "output_fields": ["text"],
-}
-
-# AUTOINDEX is only supported through Zilliz, not standalone Milvus
-AUTO_INDEX = {
-    "index_type": "AUTOINDEX",
-    "metric_type": "IP",
-}
+# for storing session data
 SESSION_DATA = "SessionData"
+# limit for number of results in queries
 MAX_K = 16384
 
 # core features
@@ -90,19 +81,28 @@ def load_vdb_param(
 
     """
     # check if the params are cached
-    if collection_name in COLLECTION_PARAMS:
+    if collection_name in COLLECTION_PARAMS and \
+        param_name in COLLECTION_PARAMS[collection_name]:
+
         return COLLECTION_PARAMS[collection_name][param_name]
+    if collection_name not in COLLECTION_PARAMS:
+        COLLECTION_PARAMS[collection_name] = {}
     param_value = load_vdb(collection_name)[param_name]
     # create the parameter object
     match param_name:
         case "encoder":
-            return EncoderParams(**param_value)
+            COLLECTION_PARAMS[collection_name][param_name] = EncoderParams(
+                **param_value,
+            )
         case "metadata_format":
-            return MilvusMetadataEnum(param_value)
+            COLLECTION_PARAMS[collection_name][param_name] = MilvusMetadataEnum(
+                param_value,
+            )
         case "fields":
-            return param_value
+            COLLECTION_PARAMS[collection_name][param_name] = param_value
         case _:
             raise ValueError(param_name)
+    return COLLECTION_PARAMS[collection_name][param_name]
 
 
 def create_collection(
@@ -201,7 +201,12 @@ def create_collection(
     # create collection
     coll = Collection(name=name, schema=schema)
     # create index for vector field
-    coll.create_index("vector", index_params=AUTO_INDEX, index_name="auto_index")
+    # AUTOINDEX is only supported through Zilliz, not standalone Milvus
+    auto_index = {
+        "index_type": "AUTOINDEX",
+        "metric_type": "IP",
+    }
+    coll.create_index("vector", index_params=auto_index, index_name="auto_index")
 
     # save params in firebase
     store_vdb(name, encoder, metadata_format, db_fields)
@@ -247,8 +252,14 @@ def query_check(collection_name: str, query: str, k: int, session_id: str = "") 
     return msg
 
 
-def query(collection_name: str, query: str,
-          k: int = 4, expr: str = "", session_id: str = "") -> dict:
+@observe()
+def query(
+    collection_name: str,
+    query: str,
+    k: int = 4,
+    expr: str = "",
+    session_id: str = "",
+) -> dict:
     """Run a query on a given collection.
 
     Parameters
@@ -275,13 +286,15 @@ def query(collection_name: str, query: str,
 
     coll = Collection(collection_name)
     coll.load()
-    search_params = SEARCH_PARAMS
     encoder = load_vdb_param(collection_name, "encoder")
-    search_params["data"] = encoders.embed_strs(
-        [query],
-        encoder,
-    )
-    search_params["limit"] = k
+    data = embed_strs([query], encoder)
+    search_params = {
+        "anns_field": "vector",
+        "param": {}, # can customize index params assuming you know index type
+        "output_fields": ["text"],
+        "data": data,
+        "limit": k,
+    }
     metadata_format = load_vdb_param(collection_name, "metadata_format")
     match metadata_format:
         case MilvusMetadataEnum.json:
@@ -291,12 +304,9 @@ def query(collection_name: str, query: str,
     if expr:
         search_params["expr"] = expr
     if session_id:
-        session_filter = f"session_id=='{session_id}'"
-        # append to existing filter expr or create new filter
         if expr:
-            search_params["expr"] += f" and {session_filter}"
-        else:
-            search_params["expr"] = session_filter
+            expr += " and "
+        expr += f"session_id=='{session_id}'"
     res = coll.search(**search_params)
     if res:
         # on success, returns a list containing a single inner list containing
@@ -323,9 +333,10 @@ def source_exists(collection_name: str, source: str) -> bool:
     return len(q) > 0
 
 def upload_data_json(
+    collection_name: str,
+    vectors: list[list[float]],
     texts: list[str],
     metadatas: list[dict],
-    collection_name: str,
     batch_size: int = 1000,
 ) -> dict[str, str]:
     """Upload data to a collection with json format.
@@ -334,8 +345,10 @@ def upload_data_json(
     ----------
     texts : list[str]
         The text to be uploaded.
+    vectors : list[list[float]]
+        The vectors to be uploaded.
     metadatas : list[dict]
-        The metadata of the text to be uploaded.
+        The metadata to be uploaded.
     collection_name : str
         The name of the Milvus collection.
     batch_size : int, optional
@@ -344,10 +357,9 @@ def upload_data_json(
     Returns
     -------
     dict[str, str]
-        With a `message` indicating success or failure
+        With a `message`, `insert_count` on success
 
     """
-    vectors = encoders.embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     data = [vectors, texts, metadatas]
     collection = Collection(collection_name)
     pks = []
@@ -384,7 +396,7 @@ def upload_data_json(
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
-    return {"message": "Success"}
+    return {"message": "Success", "insert_count": res.insert_count}
 
 
 def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
@@ -410,13 +422,12 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     coll = Collection(collection_name)
     coll.load()
     collection_format = load_vdb_param(collection_name, "metadata_format")
+    output_fields = ["vector", "text"]
     match collection_format:
         case MilvusMetadataEnum.field:
-            output_fields = ["text", *load_vdb_param(collection_name, "fields")]
+            output_fields += [*load_vdb_param(collection_name, "fields")]
         case MilvusMetadataEnum.json:
-            output_fields = ["text", "metadata"]
-        case MilvusMetadataEnum.no_field:
-            output_fields = ["text"]
+            output_fields += ["metadata"]
     q_iter = coll.query_iterator(
         expr=expr,
         output_fields=output_fields,
@@ -434,7 +445,7 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     return {"message": "Success", "result": hits}
 
 
-def delete_expr(collection_name: str, expr: str) -> dict:
+def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     """Delete database entries according to a boolean expression.
 
     Parameters
@@ -444,20 +455,66 @@ def delete_expr(collection_name: str, expr: str) -> dict:
     expr : str
         A boolean expression to filter database entries
 
+    Returns
+    -------
+    dict[str, str]
+        Contains `message`, `delete_count` if successful
+
     """
     if not utility.has_collection(collection_name):
         return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
     coll.load()
     ids = coll.delete(expr=expr)
-    return {"message": f"Success: deleted {ids.delete_count} chunks"}
+    return {"message": "Success", "delete_count": ids.delete_count}
 
+def upsert_expr_json(
+    collection_name: str,
+    expr: str,
+    upsert_data: list[dict],
+) -> dict[str, str]:
+    """Upsert database entries according to a boolean expression.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of a pymilvus.Collection
+    expr : str
+        A boolean expression to filter database entries
+    upsert_data : list[dict]
+        A list of dicts containing the data to be upserted into Milvus.
+
+    Returns
+    -------
+    dict[str, str]
+        Contains `message` and `insert_count` if successful.
+
+    """
+    delete_result = delete_expr(collection_name, expr)
+    if delete_result["message"] != "Success":
+        return delete_result
+    vectors = [d["vector"] for d in upsert_data]
+    texts = [d["text"] for d in upsert_data]
+    metadatas = [d["metadata"] for d in upsert_data]
+    return upload_data_json(collection_name, vectors, texts, metadatas)
 
 # application level features
 
 def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     if "text" not in oo or not oo["text"]:
         return {"message": "Failure: no opinion text found"}
+    # check if the opinion is already in the collection
+    expr = f"metadata['id']=={oo['id']}"
+    hits = get_expr(collection_name, expr)
+    if hits["result"] and len(hits["result"]) > 0:
+        # check if opinion in collection does not have citations
+        # TODO(Nick) remove this and do the rest manually later
+        if "citations" not in hits["result"][0]["metadata"]:
+            # upsert data with added metadata
+            for hit in hits["result"]:
+                hit["metadata"]["citations"] = oo["citations"]
+            upsert_expr_json(collection_name, expr, hits["result"])
+        return {"message": "Success"}
     # chunk
     texts = chunk_str(oo["text"], 10000, 1000)
     # summarize
@@ -471,10 +528,14 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     ]
     for key in keys_to_remove:
         del oo[key]
+    # cited opinions take up a lot of tokens and are included in the text
+    if "opinions_cited" in oo:
+        del oo["opinions_cited"]
     oo["ai_summary"] = summary
     metadatas = [oo] * len(texts)
     # upload
-    return upload_data_json(texts, metadatas, collection_name)
+    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
+    return upload_data_json(collection_name, vectors, texts, metadatas)
 
 
 def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
@@ -485,7 +546,9 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
     ai_summary = summarize(strs, "map_reduce")
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
-    upload_data_json(strs, metadatas, collection_name)
+    encoder = load_vdb_param(collection_name, "encoder")
+    vectors = embed_strs(strs, encoder)
+    upload_data_json(collection_name, vectors, strs, metadatas)
     print("new_urls: ", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
@@ -499,7 +562,8 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
             ai_summary = summarize(strs, "map_reduce")
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
-            upload_data_json(strs, metadatas, collection_name)
+            vectors = embed_strs(strs, encoder)
+            upload_data_json(collection_name, vectors, strs, metadatas)
             prev_elements = cur_elements
     print(urls)
     return urls
@@ -531,7 +595,7 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
-    return upload_data_json(strs, metadatas, collection_name)
+    return upload_data_json(collection_name, vectors, strs, metadatas)
 
 
 def session_upload_ocr(
@@ -564,6 +628,7 @@ def session_upload_ocr(
     """
     reader = quickstart_ocr(file)
     strs = chunk_str(reader, max_chunk_size, chunk_overlap)
+    vectors = embed_strs(strs, load_vdb_param(SESSION_DATA, "encoder"))
     ai_summary = summarize(strs, "map_reduce")
     metadata = {
         "session_id": session_id,
@@ -573,7 +638,7 @@ def session_upload_ocr(
     if summary is not None:
         metadata["user_summary"] = summary
     # upload
-    return upload_data_json(strs, [metadata] * len(strs), SESSION_DATA)
+    return upload_data_json(SESSION_DATA, vectors, strs, [metadata] * len(strs))
 
 
 def file_upload(
@@ -605,11 +670,12 @@ def file_upload(
             elements[i].metadata["user_summary"] = summary
     # chunk text
     texts, metadatas = chunk_elements_by_title(elements)
+    vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
     # add session id to metadata
     for i in range(len(metadatas)):
         metadatas[i]["session_id"] = session_id
     # upload
-    return upload_data_json(texts, metadatas, SESSION_DATA)
+    return upload_data_json(SESSION_DATA, vectors, texts, metadatas)
 
 
 def session_source_summaries(

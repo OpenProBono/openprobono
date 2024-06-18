@@ -1,39 +1,143 @@
+"""Vector database functions and toolset creation."""
+from __future__ import annotations
+
 from langchain.agents import Tool
 from pymilvus import Collection
 
+from app.cap import cap, cap_collection, cap_tool_args
 from app.milvusdb import SESSION_DATA, query
 from app.models import BotRequest, EngineEnum, VDBTool
+from app.prompts import FILTERED_CASELAW_PROMPT, VDB_PROMPT
 
 
-def get_tool_description(tool: VDBTool):
-    if tool.prompt != "":
-        return tool.prompt
-    return (
-        f"This tool queries a database named {tool.collection_name} "
-        f"and returns the top {tool.k} results. "
-        f"The database description is: {Collection(tool.collection_name).description}."
+def cap_tool(tool: VDBTool) -> Tool:
+    """Create a tool for filtered queries on the CAP collection.
+
+    Parameters
+    ----------
+    tool : VDBTool
+        Tool parameters
+
+    Returns
+    -------
+    Tool
+        The initialized tool
+
+    """
+    async def async_cap(
+        tool: VDBTool,
+        q: str,
+        jurisdiction: str,
+        after_date: str | None = None,
+        before_date: str | None = None,
+    ) -> dict:
+        return cap(q, tool.k, jurisdiction, after_date, before_date)
+
+    def tool_func(
+        tool: VDBTool,
+        q: str,
+        jurisdiction: str,
+        after_date: str | None = None,
+        before_date: str | None = None,
+    ) -> dict:
+        return cap(q, tool.k, jurisdiction, after_date, before_date)
+    def tool_co(
+        tool: VDBTool,
+        q: str,
+        jurisdiction: str,
+        after_date: str | None = None,
+        before_date: str | None = None,
+    ) -> dict:
+        return async_cap(tool, q, jurisdiction, after_date, before_date)
+
+    prompt = tool.prompt if tool.prompt else FILTERED_CASELAW_PROMPT
+    return Tool(name=tool.name,
+                func=tool_func,
+                coroutine=tool_co,
+                description=prompt)
+
+
+def query_tool(tool: VDBTool) -> Tool:
+    """Create a tool for querying a Milvus collection.
+
+    Parameters
+    ----------
+    tool : VDBTool
+        Tool parameters
+
+    Returns
+    -------
+    Tool
+        The initialized tool
+
+    """
+    if tool.collection_name == cap_collection:
+        return cap_tool(tool)
+
+    async def async_query(tool: VDBTool, q: str) -> dict:
+        return query(tool.collection_name, q, tool.k)
+
+    def tool_func(q: str) -> dict:
+        return query(tool.collection_name, q, tool.k)
+    def tool_co(q: str) -> dict:
+        return async_query(tool, q)
+
+    prompt = tool.prompt if tool.prompt else VDB_PROMPT.format(
+        collection_name=tool.collection_name,
+        k=tool.k,
+        description=Collection(tool.collection_name).description,
+    )
+
+    return Tool(name=tool.name,
+                func=tool_func,
+                coroutine=tool_co,
+                description=prompt)
+
+
+def tool_prompt(tool: VDBTool) -> str:
+    """Create a prompt for the given tool.
+
+    Parameters
+    ----------
+    tool : VDBTool
+        Tool parameters
+
+    Returns
+    -------
+    str
+        The tool prompt
+
+    """
+    # add default prompts
+    if tool.collection_name == cap_collection:
+        return FILTERED_CASELAW_PROMPT
+    return VDB_PROMPT.format(
+        collection_name=tool.collection_name,
+        k=tool.k,
+        description=Collection(tool.collection_name).description,
     )
 
 
-def query_tool(tool: VDBTool):
-    async def async_query(tool: VDBTool, q: str):
-        return query(tool.collection_name, q, tool.k)
+def openai_tool(tool: VDBTool) -> dict:
+    """Create a VDBTool definition for the OpenAI API.
 
-    tool_func = lambda q: query(tool.collection_name, q, tool.k)
-    tool_co = lambda q: async_query(tool, q)
+    Parameters
+    ----------
+    tool : VDBTool
+        Tool parameters
 
-    return Tool(name="query-" + tool.collection_name,
-                func=tool_func,
-                coroutine=tool_co,
-                description=get_tool_description(tool))
+    Returns
+    -------
+    dict
+        The tool definition
 
-
-def openai_query_tool(tool: VDBTool):
-    return {
+    """
+    prompt = tool.prompt if tool.prompt else tool_prompt(tool)
+    body = {
         "type": "function",
         "function": {
-            "name": "query-" + tool.collection_name,
-            "description": get_tool_description(tool),
+            "name": tool.name,
+            "description": prompt,
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -46,12 +150,29 @@ def openai_query_tool(tool: VDBTool):
             },
         },
     }
+    if tool.collection_name == cap_collection:
+        body["function"]["parameters"]["properties"].update(cap_tool_args)
+    return body
 
 
-def anthropic_query_tool(tool: VDBTool):
-    return {
-        "name": "query-" + tool.collection_name,
-        "description": get_tool_description(tool),
+def anthropic_tool(tool: VDBTool) -> dict:
+    """Create a VDBTool definition for the Anthropic API.
+
+    Parameters
+    ----------
+    tool : VDBTool
+        Tool parameters
+
+    Returns
+    -------
+    dict
+        The tool definition
+
+    """
+    prompt = tool.prompt if tool.prompt else tool_prompt(tool)
+    body = {
+        "name": tool.name,
+        "description": prompt,
         "input_schema": {
             "type": "object",
             "properties": {
@@ -63,27 +184,72 @@ def anthropic_query_tool(tool: VDBTool):
             "required": ["query"],
         },
     }
+    if tool.collection_name == cap_collection:
+        body["function"]["parameters"]["properties"].update(cap_tool_args)
+    return body
 
 
-def run_vdb_tool(t: VDBTool, function_args, engine: EngineEnum):
+def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
+    """Run a tool on a vector database.
+
+    Parameters
+    ----------
+    t : VDBTool
+        Tool parameters
+    function_args : dict
+        Any arguments for the tool function
+
+    Returns
+    -------
+    str
+        The response from the tool function
+
+    """
     function_response = None
     collection_name = t.collection_name
     k = t.k
-    if engine == EngineEnum.openai:
-        tool_query = function_args.get("query")
-    else: # anthropic
-        tool_query = function_args["query"]
-    function_response = query(collection_name, tool_query, k)
+    tool_query = function_args["query"]
+    if collection_name == cap_collection:
+        tool_jurisdiction = function_args["jurisdiction"]
+        tool_after_date, tool_before_date = None, None
+        if "after-date" in function_args:
+            tool_after_date = function_args["after-date"]
+        if "before-date" in function_args:
+            tool_before_date = function_args["before-date"]
+        function_response = cap(
+            tool_query,
+            k,
+            tool_jurisdiction,
+            tool_after_date,
+            tool_before_date,
+        )
+    else:
+        function_response = query(collection_name, tool_query, k)
     return str(function_response)
 
 
-def vdb_toolset_creator(bot: BotRequest):
+def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
+    """Create a list of VDBTools from the current chat model.
+
+    Parameters
+    ----------
+    bot : BotRequest
+        The bot definition
+
+    Returns
+    -------
+    list[VDBTool]
+        The list of VDBTools
+
+    """
     toolset = []
     for t in bot.vdb_tools:
-        if (bot.chat_model.engine == EngineEnum.openai):
-            toolset.append(openai_query_tool(t))
+        if (bot.chat_model.engine == EngineEnum.langchain):
+            toolset.append(query_tool(t))
+        elif (bot.chat_model.engine == EngineEnum.openai):
+            toolset.append(openai_tool(t))
         elif bot.chat_model.engine == EngineEnum.anthropic:
-            toolset.append(anthropic_query_tool(t))
+            toolset.append(anthropic_tool(t))
     return toolset
 
 

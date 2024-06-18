@@ -1,10 +1,11 @@
-anthropic==0.26.0
+anthropic==0.25.6
 fastapi>0.105.0
 uvicorn[standard]==0.20.0
 anyio==3.7.1
 bs4
 firebase-admin==6.2.0
 google-cloud-documentai
+google-generativeai
 google-search-results==2.4.2
 langchain>0.1.0
 langchainhub
@@ -26,3 +27,4 @@ sentence-transformers==2.6.1
 serpapi
 pypdf
 unstructured[all-docs]
+voyageai

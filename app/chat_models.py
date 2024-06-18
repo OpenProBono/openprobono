@@ -5,6 +5,7 @@ import os
 from typing import TYPE_CHECKING
 
 import anthropic
+import google.generativeai as genai
 import requests
 from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document as LCDocument
@@ -13,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from openai import OpenAI
 from unstructured.documents.elements import Element
 
+from app.encoders import token_count
 from app.models import (
     AnthropicModelEnum,
     ChatModelParams,
@@ -24,9 +26,11 @@ from app.models import (
 from app.prompts import (
     HIVE_QA_PROMPT,
     MODERATION_PROMPT,
-    SUMMARY_MAP_PROMPT,
-    SUMMARY_PROMPT,
-    SUMMARY_REFINE_PROMPT,
+)
+from app.summarization import (
+    summarize_map_reduce_msg,
+    summarize_refine_msg,
+    summarize_stuffing_msg,
 )
 
 if TYPE_CHECKING:
@@ -35,52 +39,57 @@ if TYPE_CHECKING:
     from langchain.llms.base import BaseLanguageModel
     from openai.types.chat import ChatCompletion
 
-HIVE_TASK_URL = "https://api.thehive.ai/api/v1/task/sync"
+HIVE_TASK_URL = "https://api.thehive.ai/api/v2/task/sync"
 MAX_TOKENS = 1000
 
 def messages(
     history: list[tuple[str | None, str | None]],
     engine: EngineEnum,
 ) -> list[dict] | list[BaseMessage]:
-    """Convert a list of message tuples to a list of messages appropriate for the specified engine.
+    """Convert conversation history into the right format for the given engine.
 
     Parameters
     ----------
     history : list[tuple[str  |  None, str  |  None]]
-        the list of message tuples
+        The conversation history to convert.
     engine : EngineEnum
-        the engine to use for the messages
+        The engine to use for the conversation.
 
     Returns
     -------
     list[dict] | list[BaseMessage]
-        the list of messages formatted for the specified engine
+        The converted conversation history.
 
     Raises
     ------
     ValueError
-        If the engine is not supported
+        If engine is not `openai`, `anthropic`, `hive`, or `langchain`.
 
     """
     match engine:
         case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.hive:
             return messages_dicts(history)
+        case EngineEnum.google:
+            return messages_gemini(history)
+        case EngineEnum.langchain:
+            return messages_langchain(history)
     raise ValueError(engine)
+
 
 def messages_dicts(
     history: list[tuple[str | None, str | None]],
 ) -> list[dict]:
-    """Convert a list of message tuples to a list of messages as dictionaries.
+    """Convert conversation history into dictionary format.
 
     Parameters
     ----------
     history : list[tuple[str  |  None, str  |  None]]
-        the list of message tuples
+        The original conversation history.
 
     Returns
     -------
     list[dict]
-        the list of messages as dictionaries
+        The converted conversation history.
 
     """
     messages = []
@@ -91,20 +100,46 @@ def messages_dicts(
             messages.append({"role": "assistant", "content": tup[1]})
     return messages
 
-def messages_langchain(
-        history: list[tuple[str | None, str | None]],
-) -> list[BaseMessage]:
-    """Convert a list of message tuples to a list of LangChain messages as BaseMessage objects.
+
+def messages_gemini(
+    history: list[tuple[str | None, str | None]],
+) -> list[dict]:
+    """Convert conversation history into Gemini API dictionary format.
 
     Parameters
     ----------
     history : list[tuple[str  |  None, str  |  None]]
-        the list of message tuples
+        The original conversation history.
+
+    Returns
+    -------
+    list[dict]
+        The converted conversation history.
+
+    """
+    messages = []
+    for tup in history:
+        if tup[0]:
+            messages.append({"role": "user", "parts": [tup[0]]})
+        if tup[1]:
+            messages.append({"role": "model", "parts": [tup[1]]})
+    return messages
+
+
+def messages_langchain(
+        history: list[tuple[str | None, str | None]],
+) -> list[BaseMessage]:
+    """Convert conversation history into langchain format.
+
+    Parameters
+    ----------
+    history : list[tuple[str  |  None, str  |  None]]
+        The original conversation history.
 
     Returns
     -------
     list[BaseMessage]
-        the list of LangChain messages as BaseMessage objects
+        The converted conversation history.
 
     """
     messages = []
@@ -115,24 +150,32 @@ def messages_langchain(
             messages.append(AIMessage(content=tup[1]))
     return messages
 
+
 def chat(
-    messages: list,
+    messages: list[dict] | list[BaseMessage],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> (tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage):
-    """Chat with the specified chat model.
+) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage:
+    """Chat with an LLM.
 
     Parameters
     ----------
-    messages : _type_
-        the messages for the bot.
+    messages : list[dict] | list[BaseMessage]
+        The conversation history formatted for the given chat model.
     chatmodel : ChatModelParams
-        parameteres defining the chat model
+        The chat model to use for the conversation.
+    kwargs : dict
+        Keyword arguments for the given chat model.
 
     Returns
     -------
-    Output
-        the output of the chat, type depends on the engine
+    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage
+        The response from the LLM.
+
+    Raises
+    ------
+    ValueError
+        If the given chat model is not supported.
 
     """
     match chatmodel.engine:
@@ -142,13 +185,17 @@ def chat(
             return chat_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
             return chat_anthropic(messages, chatmodel.model, **kwargs)
+        case EngineEnum.langchain:
+            msg = "langchain chat function must be implemented manually"
+    raise ValueError(msg)
 
+
+@observe(as_type="generation")
 def chat_hive(
-    messages: list,
+    messages: list[dict],
     model: str,
     **kwargs: dict,
 ) -> tuple[str, list[str]]:
-    key = "HIVE_7B_API_KEY" if model == HiveModelEnum.hive_7b else "HIVE_70B_API_KEY"
     system = kwargs.pop("system", HIVE_QA_PROMPT)
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
@@ -172,18 +219,35 @@ def chat_hive(
             "prompt_history": messages[:-1],
         },
     }
-    response = requests.post(HIVE_TASK_URL, headers=headers, json=data, timeout=30)
     response_json = response.json()
     output = response_json["status"][0]["response"]["output"][0]
     message = output["choices"][0]["message"]
     chunks = output["augmentations"]
     return message, chunks
 
+
 def chat_openai(
     messages: list[dict],
     model: str,
     **kwargs: dict,
 ) -> ChatCompletion:
+    """Chat with an LLM using the openai engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the OpenAI LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    ChatCompletion
+        The response from the LLM.
+
+    """
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
@@ -196,11 +260,29 @@ def chat_openai(
     )
 
 
+@observe(as_type="generation")
 def chat_anthropic(
     messages: list[dict],
     model: str,
     **kwargs: dict,
 ) -> AnthropicMessage | ToolsBetaMessage:
+    """Chat with an LLM using the anthropic engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the anthropic LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    AnthropicMessage | ToolsBetaMessage
+        The response from the LLM.
+
+    """
     client = kwargs.pop("client", anthropic.Anthropic())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     tools = kwargs.get("tools", [])
@@ -214,18 +296,54 @@ def chat_anthropic(
         **kwargs,
     )
     # report input, output, model, usage to langfuse
-    # usage = {
-    #     "input": response.usage.input_tokens,
-    #     "output": response.usage.output_tokens,
-    #     "total": response.usage.input_tokens + response.usage.output_tokens,
-    # }
-    # langfuse_context.update_current_observation(
-    #     input=messages,
-    #     model=model,
-    #     output=response.content,
-    #     usage=usage,
-    # )
+    usage = {
+        "input": response.usage.input_tokens,
+        "output": response.usage.output_tokens,
+        "total": response.usage.input_tokens + response.usage.output_tokens,
+    }
+    langfuse_context.update_current_observation(
+        input=messages,
+        model=model,
+        output=response.content,
+        usage=usage,
+    )
     return response
+
+
+def chat_gemini(
+    messages: list[dict],
+    model: str,
+    **kwargs: dict,
+) -> str:
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+
+    # Create the model
+    # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
+    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
+    temperature = kwargs.pop("temperature", 0.0)
+    top_p = kwargs.pop("top_p", 0.95)
+    generation_config = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": 64,
+        "max_output_tokens": max_tokens,
+        "response_mime_type": "text/plain",
+    }
+
+    llm = genai.GenerativeModel(
+        model_name=model,
+        generation_config=generation_config,
+        # safety_settings = Adjust safety settings
+        # See https://ai.google.dev/gemini-api/docs/safety-settings
+    )
+
+    chat_session = llm.start_chat(history=messages)
+    response_text = []
+    for content in messages[-1]["parts"]:
+        response = chat_session.send_message(content)
+        response_text.append(response.text.strip())
+    return "\n".join(response_text)
+
 
 def moderate(
     message: str,
@@ -269,6 +387,7 @@ def moderate(
     msg = f"Unsupported engine: {chatmodel.engine}"
     raise ValueError(msg)
 
+
 def moderate_openai(
     message: str,
     model: str = OpenAIModelEnum.mod_latest,
@@ -294,6 +413,7 @@ def moderate_openai(
     client = OpenAI() if client is None else client
     response = client.moderations.create(model=model, input=message)
     return response.results[0].flagged
+
 
 def moderate_anthropic(
     message: str,
@@ -329,6 +449,7 @@ def moderate_anthropic(
         messages=[moderation_msg],
     )
     return "Y" in response.content[-1].text.strip()
+
 
 def get_summary_message(
     documents: list[str | Element],
@@ -375,56 +496,17 @@ def get_summary_message(
     # summarize by method
     match method:
         case SummaryMethodEnum.stuffing:
-            # concatenate the documents into a single document
-            text = "\n".join(documents)
-            prompt = SUMMARY_PROMPT.format(text=text)
-            msg = {"role":"user", "content":prompt}
+            msg = summarize_stuffing_msg(documents)
         case SummaryMethodEnum.map_reduce:
-            # summarize each document (map) and concatenate the summaries (reduce)
-            summaries = []
-            for doc in documents:
-                prompt = SUMMARY_MAP_PROMPT.format(text=doc)
-                doc_msg = {"role":"user", "content":prompt}
-                # response is ChatCompletion if openai or AnthropicMessage if anthropic
-                response = chat_fn([doc_msg], chatmodel.model, **kwargs)
-                if chatmodel.engine == EngineEnum.openai:
-                    summary = response.choices[0].message.content
-                else:
-                    summary = "\n".join([
-                        block.text for block in response.content if block.type == "text"
-                    ])
-                summaries.append(summary)
-            concat_summary = "\n".join(summaries)
-            prompt = SUMMARY_PROMPT.format(text=concat_summary)
-            msg = {"role":"user", "content":prompt}
+            msg = summarize_map_reduce_msg(documents, chatmodel, chat_fn, **kwargs)
         case SummaryMethodEnum.refine:
-            # summarize each document with the previous summary as context
-            # and concatenate them
-            summaries = []
-            for i, doc in enumerate(documents):
-                if i == 0:
-                    prompt = SUMMARY_REFINE_PROMPT.format(context="", text=doc)
-                else:
-                    prompt = SUMMARY_REFINE_PROMPT.format(
-                        context=summaries[i - 1],
-                        text=doc,
-                    )
-                doc_msg = {"role":"user", "content":prompt}
-                response = chat_fn([doc_msg], chatmodel.model, **kwargs)
-                if chatmodel.engine == EngineEnum.openai:
-                    summary = response.choices[0].message.content
-                else:
-                    summary = "\n".join([
-                        block.text for block in response.content if block.type == "text"
-                    ])
-                summaries.append(summary)
-            concat_summary = "\n".join(summaries)
-            prompt = SUMMARY_PROMPT.format(text=concat_summary)
-            msg = {"role":"user", "content":prompt}
+            msg = summarize_refine_msg(documents, chatmodel, chat_fn, **kwargs)
         case _:
             raise ValueError(method)
     return msg
 
+
+@observe(capture_input=False)
 def summarize(
     documents: list[str | Element | LCDocument],
     method: str = SummaryMethodEnum.stuffing,
@@ -460,7 +542,6 @@ def summarize(
     max_summary_chunks = 200
     max_summary_tokens = 150000
     chatmodel = ChatModelParams() if chatmodel is None else chatmodel
-    from app.encoders import token_count
     tokens = 0
     # need an accurate tokenizer for anthropic models, so use gpt_3_5 for now
     if chatmodel.engine == EngineEnum.anthropic:
@@ -507,7 +588,10 @@ def summarize(
             return "\n".join([
                 block.text for block in response.content if block.type == "text"
             ])
+        case EngineEnum.langchain:
+            return summarize_langchain(documents, method, chatmodel.model, **kwargs)
     raise ValueError(chatmodel.engine)
+
 
 def summarize_langchain(
     documents: list[str | LCDocument],
@@ -544,6 +628,7 @@ def summarize_langchain(
     )
     result = chain.invoke({"input_documents": documents})
     return result["output_text"].strip()
+
 
 def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
     """Load a LangChain BaseLanguageModel.

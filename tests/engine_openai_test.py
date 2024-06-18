@@ -59,6 +59,93 @@ class TestApi:
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
+    def test_cap_openai_bot(self):
+        from models import BotRequest, ChatModelParams, EngineEnum, InitializeSession
+
+        vdb_tool = {
+            "name": "filtered-case-search",
+            "collection_name": "CAP",
+            "k": 4,
+            "prompt": "",
+        }
+        test_bot_request = BotRequest(
+            api_key=API_KEY,
+            chat_model=ChatModelParams(engine=EngineEnum.openai),
+            vdb_tools=[vdb_tool],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key=API_KEY,
+            bot_id=bot_id,
+            message="What is case law on tow trucks in Illinois since 2010?",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+
+    def test_courtlistener_openai_bot(self):
+        from models import BotRequest, ChatModelParams, EngineEnum, InitializeSession
+
+        search_tool = {
+            "name": "filtered-case-search",
+            "method": "courtlistener",
+            "prompt": "Use to find case law and optionally filter by jurisdiction and date."
+        }
+        test_bot_request = BotRequest(
+            api_key=API_KEY,
+            chat_model=ChatModelParams(engine=EngineEnum.openai),
+            search_tools=[search_tool],
+        )
+        response = client.post("/create_bot", json=test_bot_request.model_dump())
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        bot_id = response_json["bot_id"]
+        test_initialize_session = InitializeSession(
+            api_key=API_KEY,
+            bot_id=bot_id,
+            message="Tell me about cases related to copyright that were adjudicated in the state of New York since 2020.",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        self.assertEqual(response.status_code, 200)
+        response_json = response.json()
+        self.assertEqual(response_json["message"], "Success")
+        self.assertTrue("bot_id" in response_json)
+        self.assertTrue(isinstance(response_json["bot_id"], str))
+        self.assertEqual(len(response_json["bot_id"]), 36)
+        self.assertTrue("output" in response_json)
+        self.assertTrue(isinstance(response_json["output"], str))
+        self.assertTrue("session_id" in response_json)
+        print(response_json["session_id"])
+        self.assertTrue(isinstance(response_json["session_id"], str))
+        self.assertEqual(len(response_json["session_id"]), 36)
+
+
     def test_exp_opb_openai_bot(self):
         gov_search = {
             "name": "government-search",

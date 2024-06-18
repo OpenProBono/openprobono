@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Body, FastAPI
 from fastapi.responses import StreamingResponse
 
-from app.bot import anthropic_bot, openai_bot, openai_bot_stream
+from app.bot import anthropic_bot, opb_bot, openai_bot, openai_bot_stream
 from app.db import (
+    admin_check,
     api_key_check,
     fetch_session,
     load_bot,
@@ -16,6 +18,14 @@ from app.db import (
     set_session_to_bot,
     store_bot,
     store_conversation,
+)
+from milvusdb import (
+    SESSION_DATA,
+    crawl_upload_site,
+    delete_expr,
+    file_upload,
+    session_source_summaries,
+    session_upload_ocr,
 )
 from app.models import (
     BotRequest,
@@ -26,6 +36,7 @@ from app.models import (
     InitializeSession,
     get_uuid_id,
 )
+from opinion_search import opinion_search
 
 # this is to ensure tracing with langfuse
 # @asynccontextmanager
@@ -95,7 +106,7 @@ def chat(
                         "value": {
                             "history": [{"role": "user", "content": "hi"}],
                             "bot_id": "custom_4o_dynamic",
-                            "api_key": api_key,
+                            "api_key": "xyz",
                         },
                     },
                 },
@@ -278,7 +289,7 @@ def create_bot(
                             ],
                             "vdb_tools": [
                                 {
-                                    "name": "query-USCode",
+                                    "name": "uscode-query",
                                     "collection_name": "USCode",
                                     "k": 4,
                                     "prompt": "Use to find information about federal laws and regulations.",
@@ -337,160 +348,179 @@ def create_bot(
     return {"message": "Success", "bot_id": bot_id}
 
 
-# @api.post("/upload_file", tags=["User Upload"])
-# def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -> dict:
-#     """File upload by user.
+@api.post("/upload_file", tags=["User Upload"])
+def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -> dict:
+    """File upload by user.
 
-#     Parameters
-#     ----------
-#     file : UploadFile
-#         file to upload.
-#     session_id : str
-#         the session to associate the file with.
-#     summary: str, optional
-#         A summary of the file written by the user, by default None.
+    Parameters
+    ----------
+    file : UploadFile
+        file to upload.
+    session_id : str
+        the session to associate the file with.
+    summary: str, optional
+        A summary of the file written by the user, by default None.
 
-#     Returns
-#     -------
-#     dict
-#         Success or failure message.
+    Returns
+    -------
+    dict
+        Success or failure message.
 
-#     """
-#     try:
-#         return file_upload(file, session_id, summary)
-#     except Exception as error:
-#         return {"message": "Failure: Internal Error: " + str(error)}
-
-
-# @api.post("/upload_files", tags=["User Upload"])
-# def upload_files(files: list[UploadFile],
-#     session_id: str, summaries: list[str] | None = None) -> dict:
-#     """Upload multiple files by user.
-
-#     Parameters
-#     ----------
-#     files : list[UploadFile]
-#         files to upload.
-#     session_id : str
-#         the session to associate the file with.
-#     summaries : list[str] | None, optional
-#         summaries given by the user, by default None
-
-#     Returns
-#     -------
-#     dict
-#         Success or failure message.
-
-#     """
-#     if not summaries:
-#         summaries = [None] * len(files)
-#     elif len(files) != len(summaries):
-#         return {
-#             "message": f"Failure: did not find equal numbers of files and summaries, "
-#                 f"instead found {len(files)} files and {len(summaries)} summaries.",
-#         }
-
-#     failures = []
-#     for i, file in enumerate(files):
-#         result = file_upload(file, session_id, summaries[i])
-#         if result["message"].startswith("Failure"):
-#             failures.append(
-#                 f"Upload #{i + 1} of {len(files)} failed. "
-#                 f"Internal message: {result['message']}",
-#             )
-
-#     if len(failures) == 0:
-#         return {"message": f"Success: {len(files)} files uploaded"}
-#     return {"message": f"Warning: {len(failures)} failures occurred: {failures}"}
+    """
+    try:
+        return file_upload(file, session_id, summary)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
 
 
-# @api.post("/upload_file_ocr", tags=["User Upload"])
-# def vectordb_upload_ocr(file: UploadFile,
-#         session_id: str, summary: str | None = None) -> dict:
-#     """Upload a file by user and use OCR to extract info."""
-#     return session_upload_ocr(file, session_id, summary if summary else None)
+@api.post("/upload_files", tags=["User Upload"])
+def upload_files(files: list[UploadFile],
+    session_id: str, summaries: list[str] | None = None) -> dict:
+    """Upload multiple files by user.
+
+    Parameters
+    ----------
+    files : list[UploadFile]
+        files to upload.
+    session_id : str
+        the session to associate the file with.
+    summaries : list[str] | None, optional
+        summaries given by the user, by default None
+
+    Returns
+    -------
+    dict
+        Success or failure message.
+
+    """
+    if not summaries:
+        summaries = [None] * len(files)
+    elif len(files) != len(summaries):
+        return {
+            "message": f"Failure: did not find equal numbers of files and summaries, "
+                f"instead found {len(files)} files and {len(summaries)} summaries.",
+        }
+
+    failures = []
+    for i, file in enumerate(files):
+        result = file_upload(file, session_id, summaries[i])
+        if result["message"].startswith("Failure"):
+            failures.append(
+                f"Upload #{i + 1} of {len(files)} failed. "
+                f"Internal message: {result['message']}",
+            )
+
+    if len(failures) == 0:
+        return {"message": f"Success: {len(files)} files uploaded"}
+    return {"message": f"Warning: {len(failures)} failures occurred: {failures}"}
 
 
-# @api.post("/delete_file", tags=["Vector Database"])
-# def delete_file(filename: str, session_id: str):
-#     """Delete a file from the sessions database.
-
-#     Parameters
-#     ----------
-#     filename : str
-#         filename to delete.
-#     session_id : str
-#         session to delete the file from.
-
-#     """
-#     return delete_expr(
-#         SESSION_DATA,
-#         f"metadata['source']=='{filename}' and session_id=='{session_id}'",
-#     )
+@api.post("/upload_file_ocr", tags=["User Upload"])
+def vectordb_upload_ocr(file: UploadFile,
+        session_id: str, summary: str | None = None) -> dict:
+    """Upload a file by user and use OCR to extract info."""
+    return session_upload_ocr(file, session_id, summary if summary else None)
 
 
-# @api.post("/delete_files", tags=["Vector Database"])
-# def delete_files(filenames: list[str], session_id: str) -> dict:
-#     """Delete multiple files from the database.
+@api.post("/delete_file", tags=["Vector Database"])
+def delete_file(filename: str, session_id: str):
+    """Delete a file from the sessions database.
 
-#     Parameters
-#     ----------
-#     filenames : list[str]
-#         filenames to delete.
-#     session_id : str
-#         session to delete the file from
+    Parameters
+    ----------
+    filename : str
+        filename to delete.
+    session_id : str
+        session to delete the file from.
 
-#     Returns
-#     -------
-#     dict
-#         Success message with number of files deleted.
-
-#     """
-#     for filename in filenames:
-#         delete_file(filename, session_id)
-#     return {"message": f"Success: deleted {len(filenames)} files"}
+    """
+    return delete_expr(
+        SESSION_DATA,
+        f"metadata['source']=='{filename}' and session_id=='{session_id}'",
+    )
 
 
-# @api.post("/get_session_files", tags=["Vector Database"])
-# def get_session_files(session_id: str) -> dict:
-#     """Get names of all files associated with a session.
+@api.post("/delete_files", tags=["Vector Database"])
+def delete_files(filenames: list[str], session_id: str) -> dict:
+    """Delete multiple files from the database.
 
-#     Parameters
-#     ----------
-#     session_id : str
-#         session to get files from.
+    Parameters
+    ----------
+    filenames : list[str]
+        filenames to delete.
+    session_id : str
+        session to delete the file from
 
-#     Returns
-#     -------
-#     dict
-#         Success message with list of filenames.
+    Returns
+    -------
+    dict
+        Success message with number of files deleted.
 
-#     """
-#     source_summaries = session_source_summaries(session_id)
-#     files = list(source_summaries.keys())
-#     return {"message": f"Success: found {len(files)} files", "result": files}
-
-
-# @api.post("/delete_session_files", tags=["Vector Database"])
-# def delete_session_files(session_id: str):
-#     """Delete all files associated with a session.
-
-#     Parameters
-#     ----------
-#     session_id : str
-#         _description_
-
-#     Returns
-#     -------
-#     _type_
-#         _description_
-#     """
-#     return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
+    """
+    for filename in filenames:
+        delete_file(filename, session_id)
+    return {"message": f"Success: deleted {len(filenames)} files"}
 
 
-# @api.post("/upload_site", tags=["Admin Upload"])
-# def vectordb_upload_site(site: str, collection_name: str,
-#         description: str, api_key: str):
-#     if not admin_check(api_key):
-#         return {"message": "Failure: API key invalid"}
-#     return crawl_upload_site(collection_name, description, site)
+@api.post("/get_session_files", tags=["Vector Database"])
+def get_session_files(session_id: str) -> dict:
+    """Get names of all files associated with a session.
+
+    Parameters
+    ----------
+    session_id : str
+        session to get files from.
+
+    Returns
+    -------
+    dict
+        Success message with list of filenames.
+
+    """
+    source_summaries = session_source_summaries(session_id)
+    files = list(source_summaries.keys())
+    return {"message": f"Success: found {len(files)} files", "result": files}
+
+
+@api.post("/delete_session_files", tags=["Vector Database"])
+def delete_session_files(session_id: str):
+    """Delete all files associated with a session.
+
+    Parameters
+    ----------
+    session_id : str
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
+
+
+@api.post("/upload_site", tags=["Admin Upload"])
+def vectordb_upload_site(site: str, collection_name: str,
+        description: str, api_key: str):
+    if not admin_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    return crawl_upload_site(collection_name, description, site)
+
+
+@api.get("/search_opinions", tags=["Opinion Search"])
+def search_opinions(
+    query: str,
+    api_key: str,
+    jurisdiction: str | None = None,
+    after_date: str | None = None,
+    before_date: str | None = None,
+    k: int = 4,
+) -> dict:
+    if not api_key_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    try:
+        results = opinion_search(query, jurisdiction, after_date, before_date, k)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+    else:
+        return {"message": "Success", "results": results}
