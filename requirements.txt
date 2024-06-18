@@ -26,3 +26,4 @@ sentence-transformers==2.6.1
 serpapi
 pypdf
 unstructured[all-docs]
+voyageai

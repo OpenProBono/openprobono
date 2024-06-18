@@ -185,6 +185,14 @@ class OpenAIModelEnum(str, Enum):
 
 
 @unique
+class VoyageModelEnum(str, Enum):
+    """Enumeration class representing different Voyage embedding models."""
+
+    large_2_instruct = "voyage-large-2-instruct" # 16000 context length, 1024 dim
+    law = "voyage-law-2" # 16000 context length, 1024 dim
+
+
+@unique
 class MilvusMetadataEnum(str, Enum):
     """Enumeration class representing different ways of storing metadata in Milvus.
 
