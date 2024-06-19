@@ -3,7 +3,16 @@ from __future__ import annotations
 
 from cap import cap
 from courtlistener import courtlistener_search
+from milvusdb import fields_to_json
 
+
+def cap_to_courtlistener(hit: dict, jurisdiction: str) -> None:
+    """Convert CAP field names to courtlistener format."""
+    del hit["entity"]["jurisdiction_name"]
+    hit["entity"]["court_id"] = jurisdiction
+    hit["entity"]["date_filed"] = hit["entity"].pop("decision_date")
+    hit["entity"]["case_name"] = hit["entity"].pop("case_name_abbreviation")
+    hit["entity"]["author_name"] = hit["entity"].pop("opinion_author")
 
 def opinion_search(
     query: str,
@@ -33,42 +42,50 @@ def opinion_search(
         A list of dicts containing the results from the search query
 
     """
-    vdb_hits = []
-    # check if jurisdiction is in CAP
-    cap_juris = None
+    # get CAP results
+    cap_hits = []
     if jurisdiction == "ar":
-        cap_juris = "Ark."
+        cap_hits = cap(query, k, "Ark.", after_date, before_date)["result"]
     elif jurisdiction == "il":
-        cap_juris = "Ill."
-    if jurisdiction == "nc":
-        cap_juris = "N.C."
-    if jurisdiction == "nm":
-        cap_juris = "N.M."
-    if cap_juris:
-        vdb_result = cap(query, k, cap_juris, after_date, before_date)
-        vdb_hits = vdb_result["result"]
+        cap_hits = cap(query, k, "Ill.", after_date, before_date)["result"]
+    elif jurisdiction == "nc":
+        cap_hits = cap(query, k, "N.C.", after_date, before_date)["result"]
+    elif jurisdiction == "nm":
+        cap_hits = cap(query, k, "N.M.", after_date, before_date)["result"]
+
     # get courtlistener results
-    search_result = courtlistener_search(
+    cl_result = courtlistener_search(
         query,
         k,
         jurisdiction,
         after_date,
         before_date,
     )
-    search_hits = search_result["result"]
-    # get k closest results from either tool
-    hits = []
+    cl_hits: list = cl_result["result"]
+
     # if there are no results it was probably a bad query date range
-    if not vdb_hits and not search_hits:
-        return hits
-    i, j = 0, 0
-    while len(hits) < k:
-        vdb_dist = vdb_hits[i]["distance"] if i < len(vdb_hits) else 1
-        search_dist = search_hits[j]["distance"] if j < len(search_hits) else 1
-        if vdb_dist <= search_dist:
-            hits.append(vdb_hits[i])
-            i += 1
+    if not cap_hits and not cl_hits:
+        return []
+
+    # get k closest results from either tool; merge two sorted lists to size k
+    hits = []
+    while len(hits) < k and len(cap_hits) > 0 and len(cl_hits) > 0:
+        if cap_hits[0]["distance"] < cl_hits[0]["distance"]:
+            h = cap_hits.pop(0)
+            h["source"] = "cap"
+            cap_to_courtlistener(h, jurisdiction)
+            hits.append(fields_to_json(h))
         else:
-            hits.append(search_hits[j])
-            j += 1
+            h = cl_hits.pop(0)
+            h["source"] = "courtlistener"
+            hits.append(h)
+    while len(hits) < k and len(cap_hits) > 0:
+        h = cap_hits.pop(0)
+        h["source"] = "cap"
+        cap_to_courtlistener(h, jurisdiction)
+        hits.append(fields_to_json(h))
+    while len(hits) < k and len(cl_hits) > 0:
+        h = cl_hits.pop(0)
+        h["source"] = "courtlistener"
+        hits.append(h)
     return hits

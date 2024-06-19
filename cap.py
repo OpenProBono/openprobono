@@ -66,5 +66,5 @@ def cap(
     if before_date:
         if expr:
             expr += " and "
-        expr += f" and decision_date<'{before_date}'"
+        expr += f"decision_date<'{before_date}'"
     return query(collection_name, q, k, expr)

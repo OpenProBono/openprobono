@@ -460,6 +460,7 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     ids = coll.delete(expr=expr)
     return {"message": "Success", "delete_count": ids.delete_count}
 
+
 def upsert_expr_json(
     collection_name: str,
     expr: str,
@@ -489,6 +490,31 @@ def upsert_expr_json(
     texts = [d["text"] for d in upsert_data]
     metadatas = [d["metadata"] for d in upsert_data]
     return upload_data_json(collection_name, vectors, texts, metadatas)
+
+
+def fields_to_json(fields_entry: dict) -> dict:
+    """Convert a Collection entry from fields to json metadata format.
+
+    Parameters
+    ----------
+    fields_entry : dict
+        The entry from a Collection with fields metadata format
+
+    Returns
+    -------
+    dict
+        The entry with fields replaced with a metadata dictionary
+        (json metadata format)
+
+    """
+    d = {k: v for k, v in fields_entry.items() if k != "entity"}
+    d["entity"] = {
+        "text": fields_entry["entity"]["text"],
+        "metadata": {
+            k: v for k, v in fields_entry["entity"].items() if k != "text"
+        },
+    }
+    return d
 
 # application level features
 
