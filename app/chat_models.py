@@ -552,19 +552,16 @@ def summarize(
     max_summary_tokens = 150000
     chatmodel = ChatModelParams() if chatmodel is None else chatmodel
     tokens = 0
-    # need an accurate tokenizer for anthropic models, so use gpt_3_5 for now
-    if chatmodel.engine == EngineEnum.anthropic:
-        model = OpenAIModelEnum.gpt_3_5
-    else:
-        model = chatmodel.model
     # count tokens to find the number of documents to summarize
+    # need an accurate tokenizer for anthropic models, so use OpenAI's for now
+    embedding_model = OpenAIModelEnum.embed_small
     for i, doc in enumerate(documents, start=1):
         if isinstance(doc, str):
-            tokens += token_count(doc, model)
+            tokens += token_count(doc, embedding_model)
         elif isinstance(doc, Element):
-            tokens += token_count(doc.text, model)
+            tokens += token_count(doc.text, embedding_model)
         elif isinstance(doc, LCDocument):
-            tokens += token_count(doc.page_content, model)
+            tokens += token_count(doc.page_content, embedding_model)
         if tokens > max_summary_tokens:
             max_summary_chunks = i
             break
