@@ -124,6 +124,7 @@ def messages_gemini(
             messages.append({"role": "model", "parts": [tup[1]]})
     return messages
 
+
 def chat(
     messages: list[dict] | list[BaseMessage],
     chatmodel: ChatModelParams,
@@ -201,9 +202,9 @@ def chat_hive(
     output = response_json["status"][0]["response"]["output"][0]
     message = output["choices"][0]["message"]
     chunks = output["augmentations"]
-    return message, chunks  
+    return message, chunks
 
-
+@observe(as_type="generation")
 def chat_openai(
     messages: list[dict],
     model: str,
@@ -229,13 +230,25 @@ def chat_openai(
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
-    return client.chat.completions.create(
+    response: ChatCompletion = client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
         **kwargs,
     )
+    usage = {
+        "input": response.usage.prompt_tokens,
+        "output": response.usage.completion_tokens,
+        "total": response.usage.total_tokens,
+    }
+    langfuse_context.update_current_observation(
+        input=messages,
+        output=response.choices[0].message,
+        model=model,
+        usage=usage,
+    )
+    return response
 
 
 @observe(as_type="generation")
@@ -366,6 +379,7 @@ def moderate(
     raise ValueError(msg)
 
 
+@observe()
 def moderate_openai(
     message: str,
     model: str = OpenAIModelEnum.mod_latest,
@@ -516,25 +530,6 @@ def summarize(
         If chatmodel.engine is not `openai`, `anthropic`, or `langchain`.
 
     """
-    # hard limit on the number of tokens to be summarized, for cost and rate limits
-    max_summary_chunks = 200
-    max_summary_tokens = 150000
-    chatmodel = ChatModelParams() if chatmodel is None else chatmodel
-    tokens = 0
-    # count tokens to find the number of documents to summarize
-    # need an accurate tokenizer for anthropic models, so use OpenAI's for now
-    embedding_model = OpenAIModelEnum.embed_small
-    for i, doc in enumerate(documents, start=1):
-        if isinstance(doc, str):
-            tokens += token_count(doc, embedding_model)
-        elif isinstance(doc, Element):
-            tokens += token_count(doc.text, embedding_model)
-        elif isinstance(doc, LCDocument):
-            tokens += token_count(doc.page_content, embedding_model)
-        if tokens > max_summary_tokens:
-            max_summary_chunks = i
-            break
-    documents = documents[:max_summary_chunks]
     # langfuse_context.update_current_observation(
     #     input={"method":method, "num_docs":len(documents), **kwargs},
     # )
@@ -566,6 +561,56 @@ def summarize(
     raise ValueError(chatmodel.engine)
 
 
+@observe(capture_input=False)
+def summarize_langchain(
+    documents: list[str | LCDocument],
+    model: str,
+    **kwargs: dict,
+) -> str:
+    """Summarize the documents using a chain.
+
+    Parameters
+    ----------
+    documents : list[str | LCDocument]
+        The list of documents to summarize.
+    model : str
+        The model to use for summarization.
+    kwargs : dict, optional
+        For the LLM. By default, temperature = 0 and max_tokens = 1000.
+
+    Returns
+    -------
+    str
+        The summarized text.
+
+    """
+    max_chunk_indexes = documents_max_tokens_index(documents, 120000)
+    # convert to Documents if strs were given
+    if isinstance(documents[0], str):
+        documents = [LCDocument(page_content=doc) for doc in documents]
+    chain_type = "stuff"
+    chain = load_summarize_chain(
+        get_langchain_chat_model(model, **kwargs),
+        chain_type=chain_type,
+    )
+    # get the langchain handler for the current trace
+    langfuse_handler = langfuse_context.get_current_langchain_handler()
+    # if we need to summarize groups of documents and then summarize those groups
+    # because context is too long
+    if len(max_chunk_indexes) > 1:
+        # summarize each group of documents
+        last = 0
+        summaries = []
+        for max_chunk_index in max_chunk_indexes:
+            result = chain.invoke({"input_documents": documents[last: max_chunk_index]}, config={"callbacks": [langfuse_handler]})
+            summaries.append(result["output_text"].strip())
+            last = max_chunk_index
+        # summarize the grouped summaries
+        documents = [LCDocument(page_content=doc) for doc in summaries]
+    result = chain.invoke({"input_documents": documents}, config={"callbacks": [langfuse_handler]})
+    return result["output_text"].strip()
+
+
 def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
     """Load a LangChain BaseLanguageModel.
 
@@ -592,3 +637,25 @@ def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
         max_tokens=max_tokens,
         **kwargs,
     )
+
+
+def documents_max_tokens_index(documents: list[str | Element | LCDocument], max_tokens: int) -> int:
+    # hard limit on the number of tokens to be summarized, for cost and rate limits
+    tokens = 0
+    # count tokens to find the number of documents to summarize
+    # need an accurate tokenizer for anthropic models, so use OpenAI's for now
+    embedding_model = OpenAIModelEnum.embed_small
+    max_chunk_index = len(documents)
+    indexes = []
+    for i, doc in enumerate(documents, start=1):
+        if isinstance(doc, str):
+            tokens += token_count(doc, embedding_model)
+        elif isinstance(doc, Element):
+            tokens += token_count(doc.text, embedding_model)
+        elif isinstance(doc, LCDocument):
+            tokens += token_count(doc.page_content, embedding_model)
+        if tokens > max_tokens:
+            max_chunk_index = i
+            tokens = 0
+            indexes.append(max_chunk_index)
+    return indexes

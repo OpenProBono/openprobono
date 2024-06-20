@@ -18,11 +18,11 @@ from pymilvus import (
     utility,
 )
 
-from app.chat_models import summarize
+from app.chat_models import summarize_langchain
 from app.db import load_vdb, store_vdb
 from app.encoders import embed_strs
 from app.loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links
-from app.models import EncoderParams, MilvusMetadataEnum
+from app.models import EncoderParams, MilvusMetadataEnum, OpenAIModelEnum
 from app.splitters import chunk_elements_by_title, chunk_str
 
 if TYPE_CHECKING:
@@ -332,6 +332,7 @@ def source_exists(collection_name: str, source: str) -> bool:
 
     return len(q) > 0
 
+@observe(capture_input=False)
 def upload_data_json(
     collection_name: str,
     vectors: list[list[float]],
@@ -525,7 +526,7 @@ def fields_to_json(fields_entry: dict) -> dict:
     return d
 
 # application level features
-
+@observe(capture_input=False)
 def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     if "text" not in oo or not oo["text"]:
         return {"message": "Failure: no opinion text found"}
@@ -544,7 +545,7 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
     # chunk
     texts = chunk_str(oo["text"], 10000, 1000)
     # summarize
-    summary = summarize(texts, "map_reduce")
+    summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     # metadata
     del oo["text"]
     maxlen = 1000
@@ -569,7 +570,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
     strs, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
-    ai_summary = summarize(strs, "map_reduce")
+    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
     encoder = load_vdb_param(collection_name, "encoder")
@@ -585,7 +586,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
                 element for element in cur_elements if element not in prev_elements
             ]
             strs, metadatas = chunk_elements_by_title(new_elements, 3000, 1000, 300)
-            ai_summary = summarize(strs, "map_reduce")
+            ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
             vectors = embed_strs(strs, encoder)
@@ -594,7 +595,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
     print(urls)
     return urls
 
-
+@observe(capture_output=False)
 def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_chars=2500, overlap=500) -> dict[str, str]:
     """Scrape, chunk, summarize, and upload a URLs contents to Milvus.
 
@@ -616,9 +617,8 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
         return {"message": f"Failure: no elements found at {url}"}
     strs, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
     vectors = embed_strs(strs, load_vdb_param(collection_name, "encoder"))
-    ai_summary = summarize(strs, "map_reduce")
+    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
     for metadata in metadatas:
-        # metadata["timestamp"] = firestore.SERVER_TIMESTAMP
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
@@ -656,7 +656,7 @@ def session_upload_ocr(
     reader = quickstart_ocr(file)
     strs = chunk_str(reader, max_chunk_size, chunk_overlap)
     vectors = embed_strs(strs, load_vdb_param(SESSION_DATA, "encoder"))
-    ai_summary = summarize(strs, "map_reduce")
+    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
     metadata = {
         "session_id": session_id,
         "source": file.filename,

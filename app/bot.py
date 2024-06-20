@@ -187,7 +187,7 @@ def openai_tools_stream(
         messages.append(current_dict)
 
 
-# @observe(capture_input=True)
+@observe(capture_input=True)
 def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     """Call bot using openai engine.
 
@@ -228,7 +228,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     print("CALL LLM INITIAL")
     response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
 
-    print(response.usage.to_dict())
+    print(response.usage.model_dump())
     print("tokens used^^^")
     response_message = response.choices[0].message
     tool_calls = response_message.tool_calls
@@ -299,7 +299,7 @@ def openai_tools(
         # get a new response from the model where it can see the function response
         print("CALL LLM WITH TOOL RESPONSES")
         response = chat_models.chat(messages, bot.chat_model, **kwargs)
-        print(response.usage.to_dict())
+        print(response.usage.model_dump())
         print("tokens used^^^")
         response_message = response.choices[0].message
         messages.append(response_message)

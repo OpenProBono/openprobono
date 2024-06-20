@@ -1,6 +1,8 @@
 """A module for interacting with the Caselaw Access Project collection."""
 from __future__ import annotations
 
+from langfuse.decorators import observe
+
 from app.milvusdb import query
 
 cap_collection = "CAP"
@@ -26,7 +28,7 @@ cap_tool_args = {
     },
 }
 
-
+@observe()
 def cap(
     q: str,
     k: int,

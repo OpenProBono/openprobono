@@ -11,6 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
+from langfuse.decorators import observe
 from pymilvus import Collection
 from unstructured.partition.auto import partition
 from unstructured.partition.pdf import partition_pdf
@@ -36,7 +37,7 @@ def partition_uploadfile(file: UploadFile) -> list[Element]:
     """
     return partition(file=file.file, metadata_filename=file.filename)
 
-
+@observe(capture_output=False)
 def scrape(site: str) -> list[Element]:
     """Scrape a site for text and partition it into elements.
 
