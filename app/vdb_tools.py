@@ -56,44 +56,6 @@ def cap_tool(tool: VDBTool) -> Tool:
                 coroutine=tool_co,
                 description=prompt)
 
-
-def query_tool(tool: VDBTool) -> Tool:
-    """Create a tool for querying a Milvus collection.
-
-    Parameters
-    ----------
-    tool : VDBTool
-        Tool parameters
-
-    Returns
-    -------
-    Tool
-        The initialized tool
-
-    """
-    if tool.collection_name == cap_collection:
-        return cap_tool(tool)
-
-    async def async_query(tool: VDBTool, q: str) -> dict:
-        return query(tool.collection_name, q, tool.k)
-
-    def tool_func(q: str) -> dict:
-        return query(tool.collection_name, q, tool.k)
-    def tool_co(q: str) -> dict:
-        return async_query(tool, q)
-
-    prompt = tool.prompt if tool.prompt else VDB_PROMPT.format(
-        collection_name=tool.collection_name,
-        k=tool.k,
-        description=Collection(tool.collection_name).description,
-    )
-
-    return Tool(name=tool.name,
-                func=tool_func,
-                coroutine=tool_co,
-                description=prompt)
-
-
 def tool_prompt(tool: VDBTool) -> str:
     """Create a prompt for the given tool.
 
@@ -244,9 +206,7 @@ def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
     """
     toolset = []
     for t in bot.vdb_tools:
-        if (bot.chat_model.engine == EngineEnum.langchain):
-            toolset.append(query_tool(t))
-        elif (bot.chat_model.engine == EngineEnum.openai):
+        if (bot.chat_model.engine == EngineEnum.openai):
             toolset.append(openai_tool(t))
         elif bot.chat_model.engine == EngineEnum.anthropic:
             toolset.append(anthropic_tool(t))

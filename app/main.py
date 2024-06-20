@@ -296,7 +296,7 @@ def create_bot(
                                 },
                             ],
                             "chat_model": {
-                                "engine": "langchain",
+                                "engine": "openai",
                                 "model": "gpt-3.5-turbo-0125",
                             },
                             "api_key": "xyz",
@@ -329,7 +329,7 @@ def create_bot(
                             ],
                             "chat_model": {
                                 "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic, huggingface. "  # noqa: E501
-                                      "Default is langchain.",
+                                      "Default is openai.",
                                 "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
                             },
                             "api_key": "api key necessary for auth",

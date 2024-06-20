@@ -1,8 +1,8 @@
 """Tests for opinion search."""
 import pytest
 
-from courtlistener import jurisdiction_codes
-from opinion_search import opinion_search
+from app.courtlistener import jurisdiction_codes
+from app.opinion_search import opinion_search
 
 test_query = "tow truck"
 test_jurisdiction = "nc"

@@ -72,8 +72,6 @@ def messages(
             return messages_dicts(history)
         case EngineEnum.google:
             return messages_gemini(history)
-        case EngineEnum.langchain:
-            return messages_langchain(history)
     raise ValueError(engine)
 
 
@@ -126,32 +124,6 @@ def messages_gemini(
             messages.append({"role": "model", "parts": [tup[1]]})
     return messages
 
-
-def messages_langchain(
-        history: list[tuple[str | None, str | None]],
-) -> list[BaseMessage]:
-    """Convert conversation history into langchain format.
-
-    Parameters
-    ----------
-    history : list[tuple[str  |  None, str  |  None]]
-        The original conversation history.
-
-    Returns
-    -------
-    list[BaseMessage]
-        The converted conversation history.
-
-    """
-    messages = []
-    for tup in history:
-        if tup[0]:
-            messages.append(HumanMessage(content=tup[0]))
-        if tup[1]:
-            messages.append(AIMessage(content=tup[1]))
-    return messages
-
-
 def chat(
     messages: list[dict] | list[BaseMessage],
     chatmodel: ChatModelParams,
@@ -186,9 +158,6 @@ def chat(
             return chat_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
             return chat_anthropic(messages, chatmodel.model, **kwargs)
-        case EngineEnum.langchain:
-            msg = "langchain chat function must be implemented manually"
-    raise ValueError(msg)
 
 
 @observe(as_type="generation")
@@ -594,46 +563,7 @@ def summarize(
             return "\n".join([
                 block.text for block in response.content if block.type == "text"
             ])
-        case EngineEnum.langchain:
-            return summarize_langchain(documents, method, chatmodel.model, **kwargs)
     raise ValueError(chatmodel.engine)
-
-
-def summarize_langchain(
-    documents: list[str | LCDocument],
-    method: str,
-    model: str,
-    **kwargs: dict,
-) -> str:
-    """Summarize the documents using a chain.
-
-    Parameters
-    ----------
-    documents : list[str | LCDocument]
-        The list of documents to summarize.
-    method : str
-        The summarization method.
-    model : str
-        The model to use for summarization.
-    kwargs : dict, optional
-        For the LLM. By default, temperature = 0 and max_tokens = 1000.
-
-    Returns
-    -------
-    str
-        The summarized text.
-
-    """
-    # convert to Documents if strs were given
-    if isinstance(documents[0], str):
-        documents = [LCDocument(page_content=doc) for doc in documents]
-    chain_type = method if method != SummaryMethodEnum.stuffing else "stuff"
-    chain = load_summarize_chain(
-        get_langchain_chat_model(model, **kwargs),
-        chain_type=chain_type,
-    )
-    result = chain.invoke({"input_documents": documents})
-    return result["output_text"].strip()
 
 
 def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:

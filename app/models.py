@@ -131,7 +131,6 @@ class FetchSession(BaseModel):
 class EngineEnum(str, Enum):
     """Enumeration class representing different engine options."""
 
-    langchain = "langchain"
     openai = "openai"
     hive = "hive"
     anthropic = "anthropic"

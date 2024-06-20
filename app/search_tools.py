@@ -516,20 +516,6 @@ def search_toolset_creator(bot: BotRequest) -> list:
     toolset = []
     for t in bot.search_tools:
         match bot.chat_model.engine:
-            case EngineEnum.langchain:
-                match t.method:
-                    case SearchMethodEnum.serpapi:
-                        toolset.append(serpapi_tool_creator(t))
-                    case SearchMethodEnum.dynamic_serpapi:
-                        toolset.append(dynamic_serpapi_tool_creator(t))
-                    case SearchMethodEnum.google:
-                        toolset.append(search_tool_creator(t))
-                    case SearchMethodEnum.courtlistener:
-                        toolset.append(courtlistener_tool_creator(t))
-                    case SearchMethodEnum.courtroom5:
-                        toolset.append(courtroom5_tool_creator(t))
-                    case SearchMethodEnum.dynamic_courtroom5:
-                        toolset.append(dynamic_courtroom5_tool_creator(t))
             case EngineEnum.openai:
                 toolset.append(openai_tool(t))
             case EngineEnum.anthropic:
