@@ -1,16 +1,14 @@
 """The search api functions and search toolset creation. Written by Arman Aydemir."""
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 
 import requests
 from langchain.agents import Tool
 from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
 
-from app.courtlistener import (
-    courtlistener_search,
-    courtlistener_tool_args,
-    courtlistener_tool_creator,
-)
+from app.courtlistener import courtlistener_search, courtlistener_tool_args
 from app.milvusdb import query, source_exists, upload_site
 from app.models import BotRequest, EngineEnum, SearchMethodEnum, SearchTool
 from app.prompts import FILTERED_CASELAW_PROMPT
@@ -77,8 +75,16 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
             print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
             print("The error was: " + str(error))
 
-    for result in response["organic_results"]:
-        process_site(result)
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        for result in response["organic_results"]:
+            ctx = copy_context()
+            def task(r=result):
+                return ctx.run(process_site, r)
+            futures.append(executor.submit(task))
+
+        for future in as_completed(futures):
+            _ = future.result()
 
     return query(search_collection, qr, k=3)
 
