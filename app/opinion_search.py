@@ -1,6 +1,8 @@
 """Search court opinions using CAP and courtlistener data."""
 from __future__ import annotations
 
+from langfuse.decorators import observe
+
 from app.cap import cap
 from app.courtlistener import courtlistener_search
 from app.milvusdb import fields_to_json
@@ -14,6 +16,7 @@ def cap_to_courtlistener(hit: dict, jurisdiction: str) -> None:
     hit["entity"]["case_name"] = hit["entity"].pop("case_name_abbreviation")
     hit["entity"]["author_name"] = hit["entity"].pop("opinion_author")
 
+@observe()
 def opinion_search(
     query: str,
     jurisdiction: str | None = None,

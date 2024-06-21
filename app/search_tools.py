@@ -44,7 +44,7 @@ def filtered_search(results: dict) -> dict:
 
 
 @observe()
-def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 10) -> dict:
+def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters

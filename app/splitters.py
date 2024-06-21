@@ -75,6 +75,9 @@ def chunk_elements_by_title(
     )
     texts, metadatas = [], []
     for i in range(len(chunks)):
-        texts.append(chunks[i].text)
+        if not chunks[i].text:
+            texts.append(" ")
+        else:
+            texts.append(chunks[i].text)
         metadatas.append(chunks[i].metadata.to_dict())
     return texts, metadatas

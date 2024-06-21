@@ -5,10 +5,9 @@ import langchain
 import openai
 from anthropic import Anthropic
 from anthropic.types.beta.tools import ToolsBetaContentBlock
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
-from sympy import use
 
 from app import chat_models
 from app.models import BotRequest, ChatRequest
@@ -187,7 +186,7 @@ def openai_tools_stream(
         messages.append(current_dict)
 
 
-@observe(capture_input=True)
+@observe(capture_input=False)
 def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     """Call bot using openai engine.
 
@@ -220,16 +219,19 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         "client": client,
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
-        #"session_id": r.session_id,
         "temperature": 0,
     }
+    # tracing
+    langfuse_context.update_current_observation(
+        input=messages[-2]["content"], # input is last user message
+    )
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
 
     # response is a ChatCompletion object
-    print("CALL LLM INITIAL")
     response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
-
-    print(response.usage.model_dump())
-    print("tokens used^^^")
     response_message = response.choices[0].message
     tool_calls = response_message.tool_calls
     # Step 2: check if the model wanted to call a function
@@ -297,16 +299,13 @@ def openai_tools(
             )  # extend conversation with function response
             tools_used += 1
         # get a new response from the model where it can see the function response
-        print("CALL LLM WITH TOOL RESPONSES")
         response = chat_models.chat(messages, bot.chat_model, **kwargs)
-        print(response.usage.model_dump())
-        print("tokens used^^^")
         response_message = response.choices[0].message
         messages.append(response_message)
         tool_calls = response_message.tool_calls
     return response_message
 
-# @observe(capture_input=False)
+@observe(capture_input=False)
 def anthropic_bot(r: ChatRequest, bot: BotRequest):
     if r.history[-1][0].strip() == "":
         return "Hi, how can I assist you today?"
@@ -328,15 +327,15 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
 
     # Step 1.5: tracing
     # Anthropic system prompt does not go in messages list, so add it to the input
-    # langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
-    # langfuse_context.update_current_observation(input={
-    #     "input": messages[-1]["content"],
-    #     "prompt": langfuse_prompt_msg,
-    # })
-    # langfuse_context.update_current_trace(
-    #     session_id=r.session_id,
-    #     metadata={"bot_id": r.bot_id, "engine": bot.chat_model.engine},
-    # )
+    langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
+    langfuse_context.update_current_observation(input={
+        "input": messages[-1]["content"],
+        "prompt": langfuse_prompt_msg,
+    })
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
 
     response = chat_models.chat(messages, bot.chat_model, **kwargs)
     messages.append({"role": response.role, "content": response.content})

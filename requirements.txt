@@ -16,6 +16,7 @@ langchainhub
 langfuse>=2.33.0
 libmagic
 openai>1.30.2
+pandoc
 poppler-utils
 pip>=23.3
 pydantic>=2.7.1

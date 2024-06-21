@@ -13,8 +13,10 @@ from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from langfuse.decorators import observe
 from pymilvus import Collection
+from pypandoc import ensure_pandoc_installed
 from unstructured.partition.auto import partition
 from unstructured.partition.pdf import partition_pdf
+from unstructured.partition.rtf import partition_rtf
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
@@ -56,6 +58,10 @@ def scrape(site: str) -> list[Element]:
         if site.endswith(".pdf"):
             r = requests.get(site, timeout=10)
             elements = partition_pdf(file=io.BytesIO(r.content))
+        elif site.endswith(".rtf"):
+            r = requests.get(site, timeout=10)
+            ensure_pandoc_installed()
+            elements = partition_rtf(file=io.BytesIO(r.content))
         else:
             elements = partition(url=site)
     except Exception as error:

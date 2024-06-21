@@ -9,7 +9,6 @@ import google.generativeai as genai
 import requests
 from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document as LCDocument
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
@@ -46,7 +45,7 @@ MAX_TOKENS = 1000
 def messages(
     history: list[tuple[str | None, str | None]],
     engine: EngineEnum,
-) -> list[dict] | list[BaseMessage]:
+) -> list[dict]:
     """Convert conversation history into the right format for the given engine.
 
     Parameters
@@ -58,7 +57,7 @@ def messages(
 
     Returns
     -------
-    list[dict] | list[BaseMessage]
+    list[dict]
         The converted conversation history.
 
     Raises
@@ -126,7 +125,7 @@ def messages_gemini(
 
 
 def chat(
-    messages: list[dict] | list[BaseMessage],
+    messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
 ) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage:
@@ -134,7 +133,7 @@ def chat(
 
     Parameters
     ----------
-    messages : list[dict] | list[BaseMessage]
+    messages : list[dict]
         The conversation history formatted for the given chat model.
     chatmodel : ChatModelParams
         The chat model to use for the conversation.
@@ -153,10 +152,10 @@ def chat(
 
     """
     match chatmodel.engine:
-        case EngineEnum.hive:
-            return chat_hive(messages, chatmodel.model, **kwargs)
         case EngineEnum.openai:
             return chat_openai(messages, chatmodel.model, **kwargs)
+        case EngineEnum.hive:
+            return chat_hive(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
             return chat_anthropic(messages, chatmodel.model, **kwargs)
 
@@ -301,6 +300,7 @@ def chat_anthropic(
     return response
 
 
+@observe(as_type="generation")
 def chat_gemini(
     messages: list[dict],
     model: str,
@@ -407,6 +407,7 @@ def moderate_openai(
     return response.results[0].flagged
 
 
+@observe()
 def moderate_anthropic(
     message: str,
     model: str = AnthropicModelEnum.claude_3_haiku,
@@ -530,9 +531,6 @@ def summarize(
         If chatmodel.engine is not `openai`, `anthropic`, or `langchain`.
 
     """
-    # langfuse_context.update_current_observation(
-    #     input={"method":method, "num_docs":len(documents), **kwargs},
-    # )
     match chatmodel.engine:
         case EngineEnum.openai:
             client = kwargs.pop("client", OpenAI())
