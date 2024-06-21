@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import requests
@@ -253,6 +254,42 @@ def get_person(result: dict) -> dict:
 
     return response.json()["results"][0]
 
+def get_search_date(date_plus_timerange: str) -> str:
+    split_date = date_plus_timerange.split("T")
+    date_filed = split_date[0]
+    split_time = split_date[1].split("-")
+    len_split = 2
+    if len(split_time) == len_split and split_time[0] > split_time[1]:
+        # the time range goes overnight, so add one day to the date
+        dt = datetime.strptime(date_filed, "%Y-%m-%d").replace(tzinfo=UTC)
+        dt += timedelta(days=1)
+        date_filed = dt.strftime("%Y-%m-%d")
+    return date_filed
+
+def get_case_name(result: dict) -> str:
+    if result["caseName"]:
+        return result["caseName"]
+    # cluster level data: case name
+    cluster = get_cluster(result)
+    # prefer short name to full name
+    if cluster["case_name"]:
+        return cluster["case_name"]
+    if cluster["case_name_short"]:
+        return cluster["case_name_short"]
+    return cluster["case_name_full"]
+
+def get_author_name(result: dict) -> str:
+    # person level data: author name
+    author = get_person(result)
+    full_name = ""
+    if author["name_first"]:
+        full_name += author["name_first"]
+    if author["name_middle"]:
+        full_name += (" " if full_name else "") + author["name_middle"]
+    if author["name_last"]:
+        full_name += (" " if full_name else "") + author["name_last"]
+    return full_name
+
 # TODO: Need to parallelize this
 @observe()
 def courtlistener_search(
@@ -303,35 +340,14 @@ def courtlistener_search(
         opinion = get_opinion(result)
         opinion["cluster_id"] = result["cluster_id"]
         opinion["court_id"] = result["court_id"]
-        opinion["date_filed"] = result["dateFiled"].split("T")[0]
+        opinion["date_filed"] = get_search_date(result["dateFiled"])
         opinion["docket_id"] = result["docket_id"]
         opinion["court_name"] = result["court"]
         opinion["citations"] = result["citation"]
-        if result["caseName"]:
-            opinion["case_name"] = result["caseName"]
-        else:
-            # cluster level data: case name
-            cluster = get_cluster(result)
-            # prefer short name to full name
-            if cluster["case_name"]:
-                case_name = cluster["case_name"]
-            elif cluster["case_name_short"]:
-                case_name = cluster["case_name_short"]
-            else:
-                case_name = cluster["case_name_full"]
-            opinion["case_name"] = case_name
-        # person level data: author name
+        opinion["case_name"] = get_case_name(result)
         if result["author_id"]:
             opinion["author_id"] = result["author_id"]
-            author = get_person(result)
-            full_name = ""
-            if author["name_first"]:
-                full_name += author["name_first"]
-            if author["name_middle"]:
-                full_name += (" " if full_name else "") + author["name_middle"]
-            if author["name_last"]:
-                full_name += (" " if full_name else "") + author["name_last"]
-            opinion["author_name"] = full_name
+            opinion["author_name"] = get_author_name(result)
         upload_courtlistener(courtlistener_collection, opinion)
 
     return courtlistener_query(q, k, jurisdiction, after_date, before_date)
