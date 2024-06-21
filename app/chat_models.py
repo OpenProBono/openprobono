@@ -605,7 +605,7 @@ def summarize_langchain(
             result = chain.invoke({"input_documents": documents[last: max_chunk_index]}, config={"callbacks": [langfuse_handler]})
             summaries.append(result["output_text"].strip())
             last = max_chunk_index
-        # summarize the grouped summaries
+        # summarize the document group summaries
         documents = [LCDocument(page_content=doc) for doc in summaries]
     result = chain.invoke({"input_documents": documents}, config={"callbacks": [langfuse_handler]})
     return result["output_text"].strip()
@@ -645,8 +645,7 @@ def documents_max_tokens_index(documents: list[str | Element | LCDocument], max_
     # count tokens to find the number of documents to summarize
     # need an accurate tokenizer for anthropic models, so use OpenAI's for now
     embedding_model = OpenAIModelEnum.embed_small
-    max_chunk_index = len(documents)
-    indexes = []
+    indices = []
     for i, doc in enumerate(documents, start=1):
         if isinstance(doc, str):
             tokens += token_count(doc, embedding_model)
@@ -655,7 +654,7 @@ def documents_max_tokens_index(documents: list[str | Element | LCDocument], max_
         elif isinstance(doc, LCDocument):
             tokens += token_count(doc.page_content, embedding_model)
         if tokens > max_tokens:
-            max_chunk_index = i
             tokens = 0
-            indexes.append(max_chunk_index)
-    return indexes
+            indices.append(i)
+    indices.append(len(documents))
+    return indices
