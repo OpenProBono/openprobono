@@ -4,8 +4,8 @@ import pytest
 from app.courtlistener import jurisdiction_codes
 from app.opinion_search import opinion_search
 
-test_query = "tow truck"
-test_jurisdiction = "nc"
+test_query = "theme park"
+test_jurisdiction = "wa"
 test_after_date = "1989-12-31"
 test_before_date = "1991-01-01"
 

@@ -29,3 +29,5 @@ serpapi
 pypdf
 unstructured[all-docs]
 voyageai
+google-generativeai
+google-ai-generativelanguage

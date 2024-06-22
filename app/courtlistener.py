@@ -160,9 +160,9 @@ def get_opinion(result:dict) -> dict:
     op = response.json()["results"][0]  # the actual opinion
 
     # getting the text, in the best format possible
-    op["text"] = op["html_with_citations"]
+    op["text"] = op["plain_text"]
     # these are backup formats
-    backups = ["html", "plain_text", "html_lawbox", "html_columbia"]
+    backups = ["html", "html_with_citations", "html_lawbox", "html_columbia"]
     b_index = 0
     while op["text"] == "" and b_index < len(backups):
         op["text"] = op[backups[b_index]]

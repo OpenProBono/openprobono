@@ -527,11 +527,31 @@ def fields_to_json(fields_entry: dict) -> dict:
 
 # application level features
 @observe(capture_input=False)
-def upload_courtlistener(collection_name: str, oo: dict) -> dict:
-    if "text" not in oo or not oo["text"]:
+def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int=10000, chunk_overlap:int=1000) -> dict:
+    """Upload a courtlistener opinion to Milvus.
+
+    Parameters
+    ----------
+    collection_name : str
+        name of collection to upload to
+    opinion : dict
+        The opinion to upload
+    max_chunk_size : int, optional
+        the max chunk size to be uploaded to milvus, by default 10000
+    chunk_overlap : int, optional
+        chunk overlap to be uploaded to milvus, by default 1000
+
+    Returns
+    -------
+    dict
+        With a `message` indicating success or failure and an `insert_count` on success
+
+    """
+    if "text" not in opinion or not opinion["text"]:
         return {"message": "Failure: no opinion text found"}
+
     # check if the opinion is already in the collection
-    expr = f"metadata['id']=={oo['id']}"
+    expr = f"metadata['id']=={opinion['id']}"
     hits = get_expr(collection_name, expr)
     if hits["result"] and len(hits["result"]) > 0:
         # check if opinion in collection does not have citations
@@ -539,27 +559,31 @@ def upload_courtlistener(collection_name: str, oo: dict) -> dict:
         if "citations" not in hits["result"][0]["metadata"]:
             # upsert data with added metadata
             for hit in hits["result"]:
-                hit["metadata"]["citations"] = oo["citations"]
+                hit["metadata"]["citations"] = opinion["citations"]
             upsert_expr_json(collection_name, expr, hits["result"])
         return {"message": "Success"}
+
     # chunk
-    texts = chunk_str(oo["text"], 10000, 1000)
-    # summarize
-    summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
+    texts = chunk_str(opinion["text"], max_chunk_size, chunk_overlap)
+
     # metadata
-    del oo["text"]
+    del opinion["text"]
+    #delete fields which are empty or over 1000 characters
     maxlen = 1000
     keys_to_remove = [
-        key for key in oo
-        if not oo[key] or (isinstance(oo[key], str) and len(oo[key])) > maxlen
+        key for key in opinion
+        if not opinion[key] or (isinstance(opinion[key], str) and len(opinion[key])) > maxlen
     ]
     for key in keys_to_remove:
-        del oo[key]
+        del opinion[key]
     # cited opinions take up a lot of tokens and are included in the text
-    if "opinions_cited" in oo:
-        del oo["opinions_cited"]
-    oo["ai_summary"] = summary
-    metadatas = [oo] * len(texts)
+    if "opinions_cited" in opinion:
+        del opinion["opinions_cited"]
+
+    summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
+    opinion["ai_summary"] = summary
+
+    metadatas = [opinion] * len(texts)
     # upload
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     return upload_data_json(collection_name, vectors, texts, metadatas)

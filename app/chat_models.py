@@ -561,7 +561,7 @@ def summarize(
 
 @observe(capture_input=False)
 def summarize_langchain(
-    documents: list[str | LCDocument],
+    documents: list[str | Element | LCDocument],
     model: str,
     **kwargs: dict,
 ) -> str:
@@ -569,7 +569,7 @@ def summarize_langchain(
 
     Parameters
     ----------
-    documents : list[str | LCDocument]
+    documents : list[str | Element | LCDocument]
         The list of documents to summarize.
     model : str
         The model to use for summarization.
@@ -637,7 +637,7 @@ def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
     )
 
 
-def documents_max_tokens_index(documents: list[str | Element | LCDocument], max_tokens: int) -> int:
+def documents_max_tokens_index(documents: list[str | Element | LCDocument], max_tokens: int) -> list[int]:
     # hard limit on the number of tokens to be summarized, for cost and rate limits
     tokens = 0
     # count tokens to find the number of documents to summarize
