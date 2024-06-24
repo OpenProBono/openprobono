@@ -1,4 +1,5 @@
 """The search api functions and search toolset creation. Written by Arman Aydemir."""
+from multiprocessing import process
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -79,8 +80,8 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
         futures = []
         for result in response["organic_results"]:
             ctx = copy_context()
-            def task(r=result):
-                return ctx.run(process_site, r)
+            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(process_site, r)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):

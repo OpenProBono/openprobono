@@ -300,7 +300,6 @@ def upload_search_result(result: dict) -> None:
         opinion["author_name"] = get_author_name(result)
     upload_courtlistener(courtlistener_collection, opinion)
 
-# TODO: Need to parallelize this
 @observe()
 def courtlistener_search(
     q: str,
@@ -350,8 +349,8 @@ def courtlistener_search(
         futures = []
         for result in search(query_str)["results"][:k]:
             ctx = copy_context()
-            def task(r=result):
-                return ctx.run(upload_search_result, r)
+            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(upload_search_result, r)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
