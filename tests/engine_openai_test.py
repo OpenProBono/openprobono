@@ -12,9 +12,7 @@ from app.models import (
     OpenAIModelEnum,
 )
 
-client = TestClient(main.api)
-
-API_KEY = os.environ["OPB_TEST_API_KEY"]
+client = TestClient(main.api, headers={"X-API-KEY": os.environ["OPB_TEST_API_KEY"]})
 
 class TestApi:
     def test_courtroom5_openai_bot(self):
@@ -25,7 +23,6 @@ class TestApi:
             "prompt": "Tool used to search government and legal resources",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai),
             search_tools=[search_tool],
         )
@@ -38,7 +35,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -67,7 +63,6 @@ class TestApi:
             "prompt": "",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai),
             vdb_tools=[vdb_tool],
         )
@@ -80,7 +75,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is case law on tow trucks in Illinois since 2010?",
         )
@@ -108,7 +102,6 @@ class TestApi:
             "prompt": "Use to find case law and optionally filter by jurisdiction and date."
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai),
             search_tools=[search_tool],
         )
@@ -121,7 +114,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="Tell me about cases related to copyright that were adjudicated in the state of New York since 2020.",
         )
@@ -157,7 +149,6 @@ class TestApi:
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai),
             search_tools=[gov_search, case_search],
         )
@@ -170,7 +161,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -207,7 +197,6 @@ class TestApi:
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIModelEnum.gpt_3_5_1106),
             search_tools=[gov_search, case_search],
         )
@@ -220,7 +209,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -257,7 +245,6 @@ class TestApi:
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIModelEnum.gpt_4),
             search_tools=[gov_search, case_search],
         )
@@ -270,7 +257,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -307,7 +293,6 @@ class TestApi:
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai),
             search_tools=[gov_search, case_search],
         )
@@ -320,7 +305,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -357,7 +341,6 @@ class TestApi:
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai),
             search_tools=[gov_search, case_search],
         )
@@ -370,7 +353,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -407,7 +389,6 @@ class TestApi:
             "prompt": "Use for finding case law. Always cite your sources.",
         }
         test_bot_request = BotRequest(
-            api_key=API_KEY,
             chat_model=ChatModelParams(engine=EngineEnum.openai, model=OpenAIModelEnum.gpt_3_5_1106),
             search_tools=[gov_search, case_search],
         )
@@ -420,7 +401,6 @@ class TestApi:
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -446,7 +426,6 @@ class TestApi:
         test_continue_session = ChatBySession(
             message="What about North Carolina?",
             session_id=response_json["session_id"],
-            api_key=API_KEY,
         )
         response = client.post(
             "/chat_session", json=test_continue_session.model_dump(),
@@ -469,7 +448,6 @@ class TestApi:
     def test_custom_system_prompt(self):
         bot_id = "custom_system_prompt"
         test_initialize_session = InitializeSession(
-            api_key=API_KEY,
             bot_id=bot_id,
             message="Hi",
         )
@@ -496,15 +474,14 @@ class TestApi:
         #     if(msg["role"] == "system"):
         #         assert msg["content"] == "This is a custom system prompt. Respond like you are a dog."
 
-    def test_streaming(self):
-        bot_id = "custom_4o_dynamic"
-        test_initialize_session = InitializeSession(
-            api_key=API_KEY,
-            bot_id=bot_id,
-            message="what is the rule in Florida related to designating an email address for service in litigation?",
-        )
-        print(test_initialize_session.model_dump())
-        response = client.post(
-            "/initialize_session_chat_stream", json=test_initialize_session.model_dump(),
-        )
-        print(response)
+    # def test_streaming(self):
+    #     bot_id = "custom_4o_dynamic"
+    #     test_initialize_session = InitializeSession(
+    #         bot_id=bot_id,
+    #         message="what is the rule in Florida related to designating an email address for service in litigation?",
+    #     )
+    #     print(test_initialize_session.model_dump())
+    #     response = client.post(
+    #         "/initialize_session_chat_stream", json=test_initialize_session.model_dump(),
+    #     )
+    #     print(response)

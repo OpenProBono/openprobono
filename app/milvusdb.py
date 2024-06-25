@@ -326,9 +326,24 @@ def query(
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
 
-def source_exists(collection_name: str, source: str) -> bool:
+def source_exists(collection_name: str, url: str) -> bool:
+    """Check if a url source exists in a collection.
+
+    Parameters
+    ----------
+    collection_name : str
+        name of collection
+    url : str
+        source url to check for
+
+    Returns
+    -------
+    bool
+        True if the url is found in the collection, False otherwise
+
+    """
     collection = Collection(collection_name)
-    q = collection.query(expr=f"metadata['url']=='{source}'")
+    q = collection.query(expr=f"metadata['url']=='{url}'")
 
     return len(q) > 0
 

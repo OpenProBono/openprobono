@@ -2,18 +2,14 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 import requests
-from langchain.agents import Tool
 from langfuse.decorators import observe
 
 from app.milvusdb import query, upload_courtlistener
-from app.models import SearchTool
-
-if TYPE_CHECKING:
-    from app.models import SearchTool
 
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
@@ -290,7 +286,20 @@ def get_author_name(result: dict) -> str:
         full_name += (" " if full_name else "") + author["name_last"]
     return full_name
 
-# TODO: Need to parallelize this
+def upload_search_result(result: dict) -> None:
+    opinion = get_opinion(result)
+    opinion["cluster_id"] = result["cluster_id"]
+    opinion["court_id"] = result["court_id"]
+    opinion["date_filed"] = get_search_date(result["dateFiled"])
+    opinion["docket_id"] = result["docket_id"]
+    opinion["court_name"] = result["court"]
+    opinion["citations"] = result["citation"]
+    opinion["case_name"] = get_case_name(result)
+    if result["author_id"]:
+        opinion["author_id"] = result["author_id"]
+        opinion["author_name"] = get_author_name(result)
+    upload_courtlistener(courtlistener_collection, opinion)
+
 @observe()
 def courtlistener_search(
     q: str,
@@ -336,19 +345,16 @@ def courtlistener_search(
         # needs to be in MM-DD-YYYY format
         query_str += f"&filed_before={dt[1]}-{dt[2]}-{dt[0]}"
 
-    for result in search(query_str)["results"][:k]:
-        opinion = get_opinion(result)
-        opinion["cluster_id"] = result["cluster_id"]
-        opinion["court_id"] = result["court_id"]
-        opinion["date_filed"] = get_search_date(result["dateFiled"])
-        opinion["docket_id"] = result["docket_id"]
-        opinion["court_name"] = result["court"]
-        opinion["citations"] = result["citation"]
-        opinion["case_name"] = get_case_name(result)
-        if result["author_id"]:
-            opinion["author_id"] = result["author_id"]
-            opinion["author_name"] = get_author_name(result)
-        upload_courtlistener(courtlistener_collection, opinion)
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        for result in search(query_str)["results"][:k]:
+            ctx = copy_context()
+            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(upload_search_result, r)
+            futures.append(executor.submit(task))
+
+        for future in as_completed(futures):
+            _ = future.result()
 
     return courtlistener_query(q, k, jurisdiction, after_date, before_date)
 
@@ -394,43 +400,3 @@ def courtlistener_query(
             expr += " and "
         expr += f"metadata['date_filed']<'{before_date}'"
     return query(courtlistener_collection, q, k, expr)
-
-def courtlistener_tool_creator(t: SearchTool) -> Tool:
-    """Create the courtlistener tool for agents to call.
-
-    Parameters
-    ----------
-    t : SearchTool
-        The search tool definition (we only use the name and prompt for now)
-
-    Returns
-    -------
-    Tool
-        The Tool object for the courtlistener search
-
-    """
-    def query_tool(q: str,
-        jurisdiction: str | None = None,
-        after_date: str | None = None,
-        before_date: str | None = None,
-    ) -> dict:
-        return courtlistener_search(q, 3, jurisdiction, after_date, before_date)
-
-    async def async_query_tool(q: str,
-        jurisdiction: str | None = None,
-        after_date: str | None = None,
-        before_date: str | None = None,
-    ) -> dict:
-        return courtlistener_search(q, 3, jurisdiction, after_date, before_date)
-
-    name = t.name
-    prompt = t.prompt
-
-    tool_func = lambda q: query_tool(q)
-    co_func = lambda q: async_query_tool(q)
-    return Tool(
-        name=name,
-        func=tool_func,
-        coroutine=co_func,
-        description=prompt,
-    )

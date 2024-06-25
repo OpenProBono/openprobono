@@ -1,12 +1,12 @@
 """Written by Arman Aydemir. This file contains the main API code for the backend."""
 from __future__ import annotations
 
-import os
-from contextlib import asynccontextmanager
+import re
 from typing import Annotated
 
-from fastapi import Body, FastAPI, UploadFile
+from fastapi import Body, Depends, FastAPI, HTTPException, Security, UploadFile
 from fastapi.responses import StreamingResponse
+from fastapi.security import APIKeyHeader
 
 from app.bot import anthropic_bot, openai_bot, openai_bot_stream
 from app.db import (
@@ -48,7 +48,32 @@ from app.opinion_search import opinion_search
 #     # Flush all events to be sent to Langfuse on shutdown and
 #     # terminate all Threads gracefully. This operation is blocking.
 #     langfuse.flush()
-api_key = os.environ.get("OPB_TEST_API_KEY")
+
+X_API_KEY = APIKeyHeader(name="X-API-Key")
+
+
+def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
+    """Authenticate API key. Source: https://stackoverflow.com/questions/67942766/fastapi-api-key-as-parameter-secure-enough.
+
+    Parameters
+    ----------
+    x_api_key : str, optional
+        api key string, by default Depends(X_API_KEY)
+
+    Raises
+    ------
+    HTTPException
+        if the API key is invalid
+
+    """
+    if not api_key_check(x_api_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API Key. Check that you are passing a 'X-API-Key' on your header.",
+        )
+    return x_api_key
+
+
 
 def process_chat_stream(r: ChatRequest):
     bot = load_bot(r.bot_id)
@@ -111,10 +136,10 @@ def chat(
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        api_key: str = Security(api_key_auth)) -> dict:
     """Call a bot with history (only for backwards compat, could be deprecated)."""
-    if not api_key_check(request.api_key):
-        return {"message": "Invalid API Key"}
+    request.api_key = api_key
     return process_chat(request)
 
 
@@ -131,15 +156,14 @@ def init_session(
                         "value": {
                             "message": "hi, I need help",
                             "bot_id": "some bot id",
-                            "api_key": "xyz",
                         },
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        api_key: str = Security(api_key_auth)) -> dict:
     """Initialize a new session with a message."""
-    if not api_key_check(request.api_key):
-        return {"message": "Invalid API Key"}
+    request.api_key = api_key
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -173,15 +197,15 @@ def init_session_stream(
                         "value": {
                             "message": "hi",
                             "bot_id": "custom_4o_dynamic",
-                            "api_key": api_key,
+                            "api_key": "xyz",
                         },
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        api_key: str = Security(api_key_auth)) -> dict:
     """Initialize a new session with a message."""
-    if not api_key_check(request.api_key):
-        return {"message": "Invalid API Key"}
+    request.api_key = api_key
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -209,15 +233,14 @@ def chat_session(
                         "value": {
                             "message": "hi, I need help",
                             "session_id": "some session id",
-                            "api_key": "xyz",
                         },
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        api_key: str = Security(api_key_auth))  -> dict:
     """Continue a chat session with a message."""
-    if not api_key_check(request.api_key):
-        return {"message": "Invalid API Key"}
+    request.api_key = api_key
 
     cr = load_session(request)
     response = process_chat(cr)
@@ -244,16 +267,15 @@ def get_session(
                                        "which was used, session_id: the session_id which was used}",
                         "value": {
                             "session_id": "some session id",
-                            "api_key": "xyz",
                         },
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        api_key: str = Security(api_key_auth))  -> dict:
     """Fetch the chat history and details of a session."""
-    if not api_key_check(request.api_key):
-        return {"message": "Invalid API Key"}
-    
+    request.api_key = api_key
+
     cr = fetch_session(request)
     return {
         "message": "Success",
@@ -299,7 +321,6 @@ def create_bot(
                                 "engine": "openai",
                                 "model": "gpt-3.5-turbo-0125",
                             },
-                            "api_key": "xyz",
                         },
                     },
                     "full descriptions of every parameter": {
@@ -332,15 +353,14 @@ def create_bot(
                                       "Default is openai.",
                                 "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
                             },
-                            "api_key": "api key necessary for auth",
                         },
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        api_key: str = Security(api_key_auth)) -> dict:
     """Create a new bot."""
-    if not api_key_check(request.api_key):
-        return {"message": "Invalid API Key"}
+    request.api_key = api_key
 
     bot_id = get_uuid_id()
     store_bot(request, bot_id)
@@ -349,7 +369,8 @@ def create_bot(
 
 
 @api.post("/upload_file", tags=["User Upload"])
-def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -> dict:
+def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
+                api_key: str = Security(api_key_auth)) -> dict:
     """File upload by user.
 
     Parameters
@@ -367,6 +388,7 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -
         Success or failure message.
 
     """
+    print(f"api_key {api_key} uploading file")
     try:
         return file_upload(file, session_id, summary)
     except Exception as error:
@@ -375,7 +397,8 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None) -
 
 @api.post("/upload_files", tags=["User Upload"])
 def upload_files(files: list[UploadFile],
-    session_id: str, summaries: list[str] | None = None) -> dict:
+    session_id: str, summaries: list[str] | None = None,
+    api_key: str = Security(api_key_auth)) -> dict:
     """Upload multiple files by user.
 
     Parameters
@@ -393,6 +416,7 @@ def upload_files(files: list[UploadFile],
         Success or failure message.
 
     """
+    print(f"api_key {api_key} uploading files")
     if not summaries:
         summaries = [None] * len(files)
     elif len(files) != len(summaries):
@@ -417,13 +441,15 @@ def upload_files(files: list[UploadFile],
 
 @api.post("/upload_file_ocr", tags=["User Upload"])
 def vectordb_upload_ocr(file: UploadFile,
-        session_id: str, summary: str | None = None) -> dict:
+        session_id: str, summary: str | None = None,
+        api_key: str = Security(api_key_auth)) -> dict:
     """Upload a file by user and use OCR to extract info."""
+    print(f"api_key {api_key} uploading file with OCR")
     return session_upload_ocr(file, session_id, summary if summary else None)
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str):
+def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_auth)):
     """Delete a file from the sessions database.
 
     Parameters
@@ -434,6 +460,7 @@ def delete_file(filename: str, session_id: str):
         session to delete the file from.
 
     """
+    print(f"api_key {api_key} deleting file {filename}")
     return delete_expr(
         SESSION_DATA,
         f"metadata['source']=='{filename}' and session_id=='{session_id}'",
@@ -441,7 +468,7 @@ def delete_file(filename: str, session_id: str):
 
 
 @api.post("/delete_files", tags=["Vector Database"])
-def delete_files(filenames: list[str], session_id: str) -> dict:
+def delete_files(filenames: list[str], session_id: str, api_key: str = Security(api_key_auth)) -> dict:
     """Delete multiple files from the database.
 
     Parameters
@@ -457,13 +484,14 @@ def delete_files(filenames: list[str], session_id: str) -> dict:
         Success message with number of files deleted.
 
     """
+    print(f"api_key {api_key} deleting files")
     for filename in filenames:
         delete_file(filename, session_id)
     return {"message": f"Success: deleted {len(filenames)} files"}
 
 
 @api.post("/get_session_files", tags=["Vector Database"])
-def get_session_files(session_id: str) -> dict:
+def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) -> dict:
     """Get names of all files associated with a session.
 
     Parameters
@@ -477,13 +505,14 @@ def get_session_files(session_id: str) -> dict:
         Success message with list of filenames.
 
     """
+    print(f"api_key {api_key} getting session files for session {session_id}")
     source_summaries = session_source_summaries(session_id)
     files = list(source_summaries.keys())
     return {"message": f"Success: found {len(files)} files", "result": files}
 
 
 @api.post("/delete_session_files", tags=["Vector Database"])
-def delete_session_files(session_id: str):
+def delete_session_files(session_id: str, api_key: str = Security(api_key_auth)):
     """Delete all files associated with a session.
 
     Parameters
@@ -496,12 +525,13 @@ def delete_session_files(session_id: str):
     _type_
         _description_
     """
+    print(f"api_key {api_key} deleting session files for session {session_id}")
     return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
 
 
 @api.post("/upload_site", tags=["Admin Upload"])
 def vectordb_upload_site(site: str, collection_name: str,
-        description: str, api_key: str):
+        description: str, api_key: str = Security(api_key_auth)):
     if not admin_check(api_key):
         return {"message": "Failure: API key invalid"}
     return crawl_upload_site(collection_name, description, site)
@@ -510,11 +540,11 @@ def vectordb_upload_site(site: str, collection_name: str,
 @api.get("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
     query: str,
-    api_key: str,
     jurisdiction: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
     k: int = 4,
+    api_key: str = Security(api_key_auth),
 ) -> dict:
     if not api_key_check(api_key):
         return {"message": "Failure: API key invalid"}
