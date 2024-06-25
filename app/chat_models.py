@@ -11,7 +11,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain_core.documents import Document as LCDocument
 from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
-from openai import OpenAI
+from openai import OpenAI, Stream
 from unstructured.documents.elements import Element
 
 from app.encoders import token_count
@@ -236,17 +236,18 @@ def chat_openai(
         temperature=temperature,
         **kwargs,
     )
-    usage = {
-        "input": response.usage.prompt_tokens,
-        "output": response.usage.completion_tokens,
-        "total": response.usage.total_tokens,
-    }
-    langfuse_context.update_current_observation(
-        input=messages,
-        output=response.choices[0].message,
-        model=model,
-        usage=usage,
-    )
+    if not isinstance(response, Stream):
+        usage = {
+            "input": response.usage.prompt_tokens,
+            "output": response.usage.completion_tokens,
+            "total": response.usage.total_tokens,
+        }
+        langfuse_context.update_current_observation(
+            input=messages,
+            output=response.choices[0].message,
+            model=model,
+            usage=usage,
+        )
     return response
 
 

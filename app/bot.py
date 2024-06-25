@@ -1,7 +1,6 @@
 """Defines the bot engines. The meaty stuff."""
 import json
 
-import langchain
 import openai
 from anthropic import Anthropic
 from anthropic.types.beta.tools import ToolsBetaContentBlock
@@ -24,7 +23,6 @@ from app.vdb_tools import (
     vdb_toolset_creator,
 )
 
-langchain.debug = True
 openai.log = "debug"
 
 def stream_openai_response(response: ChatCompletion):

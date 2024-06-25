@@ -8,7 +8,7 @@ from json import loads
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 from pymilvus import (
     Collection,
     CollectionSchema,
@@ -301,12 +301,10 @@ def query(
             search_params["output_fields"] += ["metadata"]
         case MilvusMetadataEnum.field:
             search_params["output_fields"] += load_vdb_param(collection_name, "fields")
+    if session_id:
+        expr += (" and " if expr else "") + f"session_id=='{session_id}'"
     if expr:
         search_params["expr"] = expr
-    if session_id:
-        if expr:
-            expr += " and "
-        expr += f"session_id=='{session_id}'"
     res = coll.search(**search_params)
     if res:
         # on success, returns a list containing a single inner list containing
@@ -325,6 +323,33 @@ def query(
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
+
+
+def fuzzy_keyword_query(keyword_query: str) -> str:
+    """Create a fuzzy* version of a keyword query.
+
+    *Replaces uppercase letters and the first letter of every word
+    with a wildcard character (_). Mainly for case-insensitivity.
+
+    Parameters
+    ----------
+    keyword_query : str
+        the original keyword query
+
+    Returns
+    -------
+    str
+        A fuzzy version of the keyword query
+
+    """
+    keywords = keyword_query.split()
+    fuzzy_keywords = []
+    for kw in keywords:
+        fuzzy_kw = "".join([c if not c.isupper() else "_" for c in kw])
+        fuzzy_keywords.append(fuzzy_kw)
+    fuzzy_keywords = ["_" + fuzzy_kw[1:] for fuzzy_kw in fuzzy_keywords]
+    return " ".join(fuzzy_keywords)
+
 
 def source_exists(collection_name: str, source: str) -> bool:
     collection = Collection(collection_name)
@@ -528,6 +553,9 @@ def fields_to_json(fields_entry: dict) -> dict:
 # application level features
 @observe(capture_input=False)
 def upload_courtlistener(collection_name: str, oo: dict) -> dict:
+    langfuse_context.update_current_observation(
+        input={"case_name": oo["case_name"], "id": oo["id"]},
+    )
     if "text" not in oo or not oo["text"]:
         return {"message": "Failure: no opinion text found"}
     # check if the opinion is already in the collection

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Body, FastAPI, UploadFile
@@ -511,6 +510,7 @@ def vectordb_upload_site(site: str, collection_name: str,
 def search_opinions(
     query: str,
     api_key: str,
+    keyword_query: str | None = None,
     jurisdiction: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
@@ -519,7 +519,7 @@ def search_opinions(
     if not api_key_check(api_key):
         return {"message": "Failure: API key invalid"}
     try:
-        results = opinion_search(query, jurisdiction, after_date, before_date, k)
+        results = opinion_search(query, k, jurisdiction, keyword_query, after_date, before_date)
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
     else:

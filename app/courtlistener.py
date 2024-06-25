@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import requests
 from langfuse.decorators import observe
 
-from app.milvusdb import query, upload_courtlistener
+from app.milvusdb import fuzzy_keyword_query, query, upload_courtlistener
 
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
@@ -306,6 +306,7 @@ def courtlistener_search(
     q: str,
     k: int = 3,
     jurisdiction: str | None = None,
+    keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
 ) -> dict:
@@ -322,6 +323,8 @@ def courtlistener_search(
     jurisdiction : str | None, optional
         The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'US' for federal courts. By default None.
+    keyword_query: str | None, optional
+        The users keyword query, by default None
     after_date : str | None, optional
         The after date for the query date range in YYYY-MM-DD format, by default None
     before_date : str | None, optional
@@ -333,7 +336,8 @@ def courtlistener_search(
         the response with relevant info from courtlistener
 
     """
-    query_str = q
+    # use semantic query if keyword not given
+    query_str = '"' + keyword_query + '"' if keyword_query else q
     # add options to query string
     if jurisdiction and jurisdiction in jurisdiction_codes:
         query_str += f"&court={jurisdiction_codes[jurisdiction]}"
@@ -357,12 +361,13 @@ def courtlistener_search(
         for future in as_completed(futures):
             _ = future.result()
 
-    return courtlistener_query(q, k, jurisdiction, after_date, before_date)
+    return courtlistener_query(q, k, jurisdiction, keyword_query, after_date, before_date)
 
 def courtlistener_query(
     q: str,
     k: int,
     jurisdiction: str | None = None,
+    keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
 ) -> dict:
@@ -377,6 +382,8 @@ def courtlistener_query(
     jurisdiction : str | None, optional
         The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'US' for federal courts. By default None.
+    keyword_query: str | None, optional
+        The users keyword query, by default None
     after_date : str | None, optional
         The after date for the query date range in YYYY-MM-DD format, by default None
     before_date : str | None, optional
@@ -393,11 +400,10 @@ def courtlistener_query(
         code_list = jurisdiction_codes[jurisdiction].split(" ")
         expr = f"metadata['court_id'] in {code_list}"
     if after_date:
-        if expr:
-            expr += " and "
-        expr += f"metadata['date_filed']>'{after_date}'"
+        expr += (" and " if expr else "") + f"metadata['date_filed']>'{after_date}'"
     if before_date:
-        if expr:
-            expr += " and "
-        expr += f"metadata['date_filed']<'{before_date}'"
+        expr += (" and " if expr else "") + f"metadata['date_filed']<'{before_date}'"
+    if keyword_query:
+        keyword_query = fuzzy_keyword_query(keyword_query)
+        expr += (" and " if expr else "") + f"text like '%{keyword_query}%'"
     return query(courtlistener_collection, q, k, expr)

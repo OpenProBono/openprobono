@@ -23,7 +23,7 @@ pydantic>=2.7.1
 python-multipart==0.0.9
 ragas
 requests==2.31.0
-pymilvus==2.3.6
+pymilvus==2.4.4
 sentence-transformers==2.6.1
 serpapi
 pypdf

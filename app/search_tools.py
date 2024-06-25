@@ -495,6 +495,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
                 qr,
                 3,
                 tool_jurisdiction,
+                None,
                 tool_after_date,
                 tool_before_date,
             )
