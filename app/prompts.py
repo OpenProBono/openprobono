@@ -182,7 +182,15 @@ Score 5: The response is completely correct, accurate, and factual.
 
 ###Feedback:"""
 
-FILTERED_CASELAW_PROMPT = "Use to find case law and optionally filter by a jurisdiction and date range."
+FILTERED_CASELAW_PROMPT = (
+    "Use to find case law and optionally filter by jurisdiction and date range. "
+    "You can search by semantic or keyword. For example, to search for "
+    "cases related to workers compensation that cite the Jones Act, you "
+    'can search semantically for "workers compensation" and search by '
+    'keyword for "Jones Act". Be sure to enter dates in YYYY-MM-DD format. '
+    "The citation for this tool should include a link in the following format: "
+    "https://www.courtlistener.com/ + metadata['absolute_url']. "
+)
 
 VDB_PROMPT = (
     "This tool queries a database named {collection_name} "

@@ -33,6 +33,12 @@ courtlistener_tool_args = {
             "to filter query results by jurisdiction. Use 'US' for federal courts."
         ),
     },
+    "keyword-qr": {
+        "type": "string",
+        "description": (
+            "A keyword query to search for exact names and terms."
+        ),
+    },
     "after-date": {
         "type": "string",
         "description": (
@@ -51,7 +57,6 @@ courtlistener_tool_args = {
 
 # https://github.com/freelawproject/courtlistener/discussions/3114
 # manual mapping from two-letter state abbreviations to court_id affixes
-# for some ambiguous states
 jurisdiction_codes = {
     "us": "scotus ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca tecoa reglrailreorgct kingsbench",
     "al": "almd alnd alsd almb alnb alsb ala alactapp alacrimapp alacivapp",

@@ -415,6 +415,10 @@ def openai_tool(t: SearchTool) -> dict:
     if t.method == SearchMethodEnum.courtlistener:
         # arg definitions
         body["function"]["parameters"]["properties"].update(courtlistener_tool_args)
+        # modify query text for semantic + keyword queries
+        body["function"]["parameters"]["properties"]["qr"]["description"] = (
+            "A semantic query to search for general concepts and terms."
+        )
         # default tool definition
         if not t.prompt:
             body["function"]["description"] = FILTERED_CASELAW_PROMPT
@@ -451,6 +455,10 @@ def anthropic_tool(t: SearchTool) -> dict:
     if t.method == SearchMethodEnum.courtlistener:
         # add courtlistener arg definitions
         body["input_schema"]["properties"].update(courtlistener_tool_args)
+        # modify query text for semantic + keyword queries
+        body["input_schema"]["properties"]["qr"]["description"] = (
+            "A semantic query to search for general concepts and terms."
+        )
         # default tool definition
         if not t.prompt:
             body["description"] = FILTERED_CASELAW_PROMPT
@@ -484,9 +492,14 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
-            tool_jurisdiction, tool_after_date, tool_before_date = None, None, None
+            tool_jurisdiction = None
+            tool_kw_query = None
+            tool_after_date = None
+            tool_before_date = None
             if "jurisdiction" in function_args:
                 tool_jurisdiction = function_args["jurisdiction"].lower()
+            if "keyword-qr" in function_args:
+                tool_kw_query = function_args["keyword-qr"]
             if "after-date" in function_args:
                 tool_after_date = function_args["after-date"]
             if "before-date" in function_args:
@@ -495,7 +508,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
                 qr,
                 3,
                 tool_jurisdiction,
-                None,
+                tool_kw_query,
                 tool_after_date,
                 tool_before_date,
             )

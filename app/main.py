@@ -36,6 +36,7 @@ from app.models import (
     get_uuid_id,
 )
 from app.opinion_search import opinion_search
+from app.prompts import FILTERED_CASELAW_PROMPT  # noqa: TCH001
 
 # this is to ensure tracing with langfuse
 # @asynccontextmanager
@@ -283,7 +284,7 @@ def create_bot(
                                 {
                                     "name": "case-search",
                                     "method": "courtlistener",
-                                    "prompt": "Use to find case law.",
+                                    "prompt": FILTERED_CASELAW_PROMPT,
                                 },
                             ],
                             "vdb_tools": [
