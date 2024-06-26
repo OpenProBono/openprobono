@@ -1,60 +1,13 @@
 """Vector database functions and toolset creation."""
 from __future__ import annotations
 
-from langchain.agents import Tool
 from pymilvus import Collection
 
 from app.cap import cap, cap_collection, cap_tool_args
-from app.milvusdb import SESSION_DATA, query
+from app.milvusdb import query
 from app.models import BotRequest, EngineEnum, VDBTool
 from app.prompts import FILTERED_CASELAW_PROMPT, VDB_PROMPT
 
-
-def cap_tool(tool: VDBTool) -> Tool:
-    """Create a tool for filtered queries on the CAP collection.
-
-    Parameters
-    ----------
-    tool : VDBTool
-        Tool parameters
-
-    Returns
-    -------
-    Tool
-        The initialized tool
-
-    """
-    async def async_cap(
-        tool: VDBTool,
-        q: str,
-        jurisdiction: str,
-        after_date: str | None = None,
-        before_date: str | None = None,
-    ) -> dict:
-        return cap(q, tool.k, jurisdiction, after_date, before_date)
-
-    def tool_func(
-        tool: VDBTool,
-        q: str,
-        jurisdiction: str,
-        after_date: str | None = None,
-        before_date: str | None = None,
-    ) -> dict:
-        return cap(q, tool.k, jurisdiction, after_date, before_date)
-    def tool_co(
-        tool: VDBTool,
-        q: str,
-        jurisdiction: str,
-        after_date: str | None = None,
-        before_date: str | None = None,
-    ) -> dict:
-        return async_cap(tool, q, jurisdiction, after_date, before_date)
-
-    prompt = tool.prompt if tool.prompt else FILTERED_CASELAW_PROMPT
-    return Tool(name=tool.name,
-                func=tool_func,
-                coroutine=tool_co,
-                description=prompt)
 
 def tool_prompt(tool: VDBTool) -> str:
     """Create a prompt for the given tool.
@@ -211,24 +164,3 @@ def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
         elif bot.chat_model.engine == EngineEnum.anthropic:
             toolset.append(anthropic_tool(t))
     return toolset
-
-
-# TODO: implement this for openai
-# this is a unique type of search for files uploaded during the session (by the user), not defined by the bot
-def session_query_tool(session_id: str, source_summaries: dict):
-
-    def query_tool(q: str):
-        return query(SESSION_DATA, q, session_id=session_id)
-
-    async def async_query_tool(q: str):
-        return query_tool(q)
-
-    tool_func = lambda q: query_tool(q)
-    co_func = lambda q: async_query_tool(q)
-    return Tool(
-        name="session_query_tool",
-        func=tool_func,
-        coroutine=co_func,
-        description=
-        "Tool used to query a vector database including information uploaded by the user and return the most relevant text chunks."
-    )
