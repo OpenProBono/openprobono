@@ -78,6 +78,7 @@ def test_query_filtered(
     query_juris_codes = jurisdiction_codes[jurisdiction].split(" ")
     assert "court_id" in results[0]["entity"]["metadata"]
     assert results[0]["entity"]["metadata"]["court_id"] in query_juris_codes
+    assert keyword_query in results[0]["entity"]["text"]
     assert "date_filed" in results[0]["entity"]["metadata"]
     assert results[0]["entity"]["metadata"]["date_filed"] < before_date
     assert results[0]["entity"]["metadata"]["date_filed"] > after_date

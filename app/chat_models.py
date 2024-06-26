@@ -166,6 +166,23 @@ def chat_hive(
     model: str,
     **kwargs: dict,
 ) -> tuple[str, list[str]]:
+    """Chat with a Hive LLM.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history
+    model : str
+        The name of the model.
+    kwargs : dict
+        Keyword arguments for the given chat model.
+
+    Returns
+    -------
+    tuple[str, list[str]]
+        message, chunks used for augmentation (empty if no RAG)
+
+    """
     use_embedding = kwargs.pop("use_embedding", False)
     system = kwargs.pop("system", HIVE_QA_PROMPT)
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
@@ -202,6 +219,7 @@ def chat_hive(
     message = output["choices"][0]["message"]
     chunks = output["augmentations"]
     return message, chunks
+
 
 @observe(as_type="generation")
 def chat_openai(
@@ -307,6 +325,23 @@ def chat_gemini(
     model: str,
     **kwargs: dict,
 ) -> str:
+    """Chat with a Gemini LLM.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the model.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    str
+        The response from the LLM
+
+    """
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
     # Create the model
@@ -601,12 +636,18 @@ def summarize_langchain(
         last = 0
         summaries = []
         for max_chunk_index in max_chunk_indexes:
-            result = chain.invoke({"input_documents": documents[last: max_chunk_index]}, config={"callbacks": [langfuse_handler]})
+            result = chain.invoke(
+                {"input_documents": documents[last: max_chunk_index]},
+                config={"callbacks": [langfuse_handler]},
+            )
             summaries.append(result["output_text"].strip())
             last = max_chunk_index
         # summarize the document group summaries
         documents = [LCDocument(page_content=doc) for doc in summaries]
-    result = chain.invoke({"input_documents": documents}, config={"callbacks": [langfuse_handler]})
+    result = chain.invoke(
+        {"input_documents": documents},
+        config={"callbacks": [langfuse_handler]},
+    )
     return result["output_text"].strip()
 
 
@@ -638,7 +679,25 @@ def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
     )
 
 
-def documents_max_tokens_index(documents: list[str | Element | LCDocument], max_tokens: int) -> int:
+def documents_max_tokens_index(
+    documents: list[str | Element | LCDocument],
+    max_tokens: int,
+) -> list[int]:
+    """Get indices of the maximal ranges of documents within the maximum token limit.
+
+    Parameters
+    ----------
+    documents : list[str  |  Element  |  LCDocument]
+        The list of documents to calculate ranges for.
+    max_tokens : int
+        The maximum number of tokens that can be passed in a single LLM API call.
+
+    Returns
+    -------
+    list[int]
+        The indices marking the document ranges.
+
+    """
     # hard limit on the number of tokens to be summarized, for cost and rate limits
     tokens = 0
     # count tokens to find the number of documents to summarize
