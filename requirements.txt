@@ -4,6 +4,7 @@ uvicorn[standard]==0.20.0
 anyio==3.7.1
 bs4
 firebase-admin==6.2.0
+google-ai-generativelanguage
 google-cloud-documentai
 google-generativeai
 google-search-results==2.4.2

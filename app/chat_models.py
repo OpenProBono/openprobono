@@ -597,7 +597,7 @@ def summarize(
 
 @observe(capture_input=False)
 def summarize_langchain(
-    documents: list[str | LCDocument],
+    documents: list[str],
     model: str,
     **kwargs: dict,
 ) -> str:
@@ -605,7 +605,7 @@ def summarize_langchain(
 
     Parameters
     ----------
-    documents : list[str | LCDocument]
+    documents : list[str]
         The list of documents to summarize.
     model : str
         The model to use for summarization.
@@ -620,8 +620,7 @@ def summarize_langchain(
     """
     max_chunk_indexes = documents_max_tokens_index(documents, 120000)
     # convert to Documents if strs were given
-    if isinstance(documents[0], str):
-        documents = [LCDocument(page_content=doc) for doc in documents]
+    documents = [LCDocument(page_content=doc) for doc in documents]
     chain_type = "stuff"
     chain = load_summarize_chain(
         get_langchain_chat_model(model, **kwargs),
@@ -680,14 +679,14 @@ def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
 
 
 def documents_max_tokens_index(
-    documents: list[str | Element | LCDocument],
+    documents: list[str],
     max_tokens: int,
 ) -> list[int]:
     """Get indices of the maximal ranges of documents within the maximum token limit.
 
     Parameters
     ----------
-    documents : list[str  |  Element  |  LCDocument]
+    documents : list[str]
         The list of documents to calculate ranges for.
     max_tokens : int
         The maximum number of tokens that can be passed in a single LLM API call.
@@ -705,12 +704,7 @@ def documents_max_tokens_index(
     embedding_model = OpenAIModelEnum.embed_small
     indices = []
     for i, doc in enumerate(documents, start=1):
-        if isinstance(doc, str):
-            tokens += token_count(doc, embedding_model)
-        elif isinstance(doc, Element):
-            tokens += token_count(doc.text, embedding_model)
-        elif isinstance(doc, LCDocument):
-            tokens += token_count(doc.page_content, embedding_model)
+        tokens += token_count(doc, embedding_model)
         if tokens > max_tokens:
             tokens = 0
             indices.append(i)

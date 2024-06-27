@@ -62,7 +62,7 @@ def test_query_before_date(query: str, before_date: str) -> None:
     assert results[0]["entity"]["metadata"]["date_filed"] < before_date
 
 @pytest.mark.parametrize(
-    ("query", "jurisdiction", "keyworde_query", "after_date", "before_date"),
+    ("query", "jurisdiction", "keyword_query", "after_date", "before_date"),
     [(test_query, test_jurisdiction, test_keyword_query, test_after_date, test_before_date)],
 )
 def test_query_filtered(

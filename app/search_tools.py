@@ -79,8 +79,8 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
         futures = []
         for result in response["organic_results"]:
             ctx = copy_context()
-            def task(r=result):
-                return ctx.run(process_site, r)
+            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(process_site, r)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
