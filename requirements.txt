@@ -30,3 +30,4 @@ serpapi
 pypdf
 unstructured[all-docs]
 voyageai
+psutil

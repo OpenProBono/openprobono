@@ -6,7 +6,7 @@ WORKDIR /api
 
 COPY . /api
 
-RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 poppler-utils -y
+RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 poppler-utils tesseract-ocr -y
 
 RUN pip install -r requirements.txt
 
