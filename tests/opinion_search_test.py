@@ -82,3 +82,10 @@ def test_query_filtered(
     assert "date_filed" in results[0]["entity"]["metadata"]
     assert results[0]["entity"]["metadata"]["date_filed"] < before_date
     assert results[0]["entity"]["metadata"]["date_filed"] > after_date
+
+@pytest.mark.parametrize("keyword_query", [test_keyword_query])
+def test_only_keyword(keyword_query: str) -> None:
+    """Run a query with a keyword query and no semantic query provided."""
+    results = opinion_search("", 1, None, keyword_query, None, None)
+    _test_results(results)
+    assert keyword_query in results[0]["entity"]["text"]

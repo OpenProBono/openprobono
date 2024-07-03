@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from datetime import UTC, datetime, timedelta
@@ -23,7 +24,7 @@ people_url = base_url + "/people/?id="
 
 courtlistener_collection = "courtlistener"
 
-courtlistener_timeout = 30 #seconds
+courtlistener_timeout = 10 #seconds
 
 courtlistener_tool_args = {
     "jurisdiction": {
@@ -132,10 +133,22 @@ def search(q: str) -> dict:
         dict containing the results
 
     """
-    response = requests.get(search_url + q,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-    return response.json()
+    max_retries = 5
+    retry_delay = 1 # second
+    for _ in range(max_retries):
+        try:
+            response = requests.get(
+                search_url + q,
+                headers=courtlistener_header,
+                timeout=courtlistener_timeout,
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            print(e)
+            time.sleep(retry_delay)
+    msg = "Unable to complete courtlistener request"
+    raise Exception(msg)
 
 def get_opinion(result:dict) -> dict:
     """Get the full opinion info for a search result from search().
@@ -400,6 +413,8 @@ def courtlistener_query(
 
     """
     expr = ""
+    # copy keyword query to semantic if not given
+    q = q if q else keyword_query
     if jurisdiction and jurisdiction in jurisdiction_codes:
         code_list = jurisdiction_codes[jurisdiction].split(" ")
         expr = f"metadata['court_id'] in {code_list}"
