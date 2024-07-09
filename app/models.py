@@ -246,3 +246,14 @@ class BotRequest(BaseModel):
     vdb_tools: List[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
     api_key: str = ""
+
+
+class OpinionSearchRequest(BaseModel):
+    """Model class representing an opinion search request."""
+
+    query: str
+    k: int = 4
+    jurisdictions: list[str] | None = None
+    keyword_query: str | None = None
+    after_date: str | None = None
+    before_date: str | None = None

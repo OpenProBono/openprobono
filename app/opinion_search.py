@@ -1,26 +1,36 @@
 """Search court opinions using CAP and courtlistener data."""
 from __future__ import annotations
 
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 
 from app.cap import cap
+from app.chat_models import summarize_langchain
 from app.courtlistener import courtlistener_search
-from app.milvusdb import fields_to_json
+from app.milvusdb import fields_to_json, get_expr, upsert_expr_json
+from app.models import OpenAIModelEnum
 
 
-def cap_to_courtlistener(hit: dict, jurisdiction: str) -> None:
+def cap_to_courtlistener(hit: dict) -> None:
     """Convert CAP field names to courtlistener format."""
+    match hit["entity"]["jurisdiction_name"]:
+        case "Ark.":
+            hit["entity"]["court_id"] = "ar"
+        case "Ill.":
+            hit["entity"]["court_id"] = "il"
+        case "N.C.":
+            hit["entity"]["court_id"] = "nc"
+        case "N.M.":
+            hit["entity"]["court_id"] = "nm"
     del hit["entity"]["jurisdiction_name"]
-    hit["entity"]["court_id"] = jurisdiction
     hit["entity"]["date_filed"] = hit["entity"].pop("decision_date")
     hit["entity"]["case_name"] = hit["entity"].pop("case_name_abbreviation")
     hit["entity"]["author_name"] = hit["entity"].pop("opinion_author")
 
-@observe()
+@observe(capture_output=False)
 def opinion_search(
     query: str,
     k: int = 10,
-    jurisdiction: str | None = None,
+    jurisdictions: list[str] | None = None,
     keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
@@ -33,8 +43,8 @@ def opinion_search(
         The users semantic query
     k : int, optional
         The number of results to return, by default 10
-    jurisdiction : str | None, optional
-        The jurisdiction to filter by, by default None
+    jurisdictions : str | None, optional
+        The jurisdictions to filter by, by default None
     keyword_query: str | None, optional
         The users keyword query, by default None
     after_date : str | None, optional
@@ -50,20 +60,14 @@ def opinion_search(
     """
     # get CAP results
     cap_hits = []
-    if jurisdiction == "ar":
-        cap_hits = cap(query, k, "Ark.", keyword_query, after_date, before_date)
-    elif jurisdiction == "il":
-        cap_hits = cap(query, k, "Ill.", keyword_query, after_date, before_date)
-    elif jurisdiction == "nc":
-        cap_hits = cap(query, k, "N.C.", keyword_query, after_date, before_date)
-    elif jurisdiction == "nm":
-        cap_hits = cap(query, k, "N.M.", keyword_query, after_date, before_date)
-    cap_hits = cap_hits["result"] if cap_hits else cap_hits
+    if jurisdictions:
+        cap_hits = cap(query, k, jurisdictions, keyword_query, after_date, before_date)
+        cap_hits = cap_hits.pop("result", [])
     # get courtlistener results
     cl_result = courtlistener_search(
         query,
         k,
-        jurisdiction,
+        jurisdictions,
         keyword_query,
         after_date,
         before_date,
@@ -80,7 +84,7 @@ def opinion_search(
         if cap_hits[0]["distance"] < cl_hits[0]["distance"]:
             h = cap_hits.pop(0)
             h["source"] = "cap"
-            cap_to_courtlistener(h, jurisdiction)
+            cap_to_courtlistener(h)
             hits.append(fields_to_json(h))
         else:
             h = cl_hits.pop(0)
@@ -89,10 +93,27 @@ def opinion_search(
     while len(hits) < k and len(cap_hits) > 0:
         h = cap_hits.pop(0)
         h["source"] = "cap"
-        cap_to_courtlistener(h, jurisdiction)
+        cap_to_courtlistener(h)
         hits.append(fields_to_json(h))
     while len(hits) < k and len(cl_hits) > 0:
         h = cl_hits.pop(0)
         h["source"] = "courtlistener"
         hits.append(h)
+    langfuse_context.update_current_observation(
+        output=[hit["entity"]["metadata"]["id"] for hit in hits],
+    )
     return hits
+
+
+@observe()
+def summarize_opinion(opinion_id: int) -> str:
+    res = get_expr("courtlistener", f"metadata['id']=={opinion_id}")
+    hits = res["result"]
+    hits = sorted(hits, key= lambda x: x["metadata"]["id"])
+    texts = [hit["text"] for hit in hits]
+    summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
+    for hit in hits:
+        hit["metadata"]["ai_summary"] = summary
+    # save the summary to Milvus for future searches
+    upsert_expr_json("courtlistener", f"metadata['id']=={opinion_id}", hits)
+    return summary

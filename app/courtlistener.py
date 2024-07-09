@@ -57,9 +57,12 @@ courtlistener_tool_args = {
 }
 
 # https://github.com/freelawproject/courtlistener/discussions/3114
-# manual mapping from two-letter state abbreviations to court_id affixes
+# manual mapping from two-letter state abbreviations to courtlistener court_id format
 jurisdiction_codes = {
-    "us": "scotus ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca tecoa reglrailreorgct kingsbench",
+    "us-app": "ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc",
+    "us-dis": "dcd almd alnd alsd akd azd ared arwd cacd caed cand casd cod ctd ded flmd flnd flsd gamd gand gasd hid idd ilcd ilnd ilsd innd insd iand iasd ksd kyed kywd laed lamd lawd med mdd mad mied miwd mnd msnd mssd moed mowd mtd ned nvd nhd njd nmd nyed nynd nysd nywd nced ncmd ncwd ndd ohnd ohsd oked oknd okwd ord paed pamd pawd rid scd sdd tned tnmd tnwd txed txnd txsd txwd utd vtd vaed vawd waed wawd wvnd wvsd wied wiwd wyd gud nmid prd vid californiad illinoised illinoisd indianad orld ohiod pennsylvaniad southcarolinaed southcarolinawd tennessed canalzoned",
+    "us-sup": "scotus",
+    "us-misc": "bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca tecoa reglrailreorgct kingsbench",
     "al": "almd alnd alsd almb alnb alsb ala alactapp alacrimapp alacivapp",
     "ak": "akd akb alaska alaskactapp",
     "az": "azd arb ariz arizctapp ariztaxct",
@@ -144,11 +147,9 @@ def search(q: str) -> dict:
             )
             if response.status_code == 200:
                 return response.json()
-        except Exception as e:
-            print(e)
+        except requests.exceptions.ReadTimeout:  # noqa: PERF203
             time.sleep(retry_delay)
-    msg = "Unable to complete courtlistener request"
-    raise Exception(msg)
+    return {}
 
 def get_opinion(result:dict) -> dict:
     """Get the full opinion info for a search result from search().
@@ -322,7 +323,7 @@ def upload_search_result(result: dict) -> None:
 def courtlistener_search(
     q: str,
     k: int = 3,
-    jurisdiction: str | None = None,
+    jurisdictions: list[str] | None = None,
     keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
@@ -337,9 +338,11 @@ def courtlistener_search(
         The query
     k : int, optional
         The number of results to return, by default 3
-    jurisdiction : str | None, optional
-        The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
-        to filter query results by state. Use 'US' for federal courts. By default None.
+    jurisdictions : list[str] | None, optional
+        The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX',
+        to filter query results by state. Use 'us-app' for federal appellate,
+        'us-dis' for federal district, 'us-sup' for supreme court, 'us-misc'
+        for federal special. By default None.
     keyword_query: str | None, optional
         The users keyword query, by default None
     after_date : str | None, optional
@@ -356,8 +359,15 @@ def courtlistener_search(
     # use semantic query if keyword not given
     query_str = '"' + keyword_query + '"' if keyword_query else q
     # add options to query string
-    if jurisdiction and jurisdiction in jurisdiction_codes:
-        query_str += f"&court={jurisdiction_codes[jurisdiction]}"
+    valid_jurisdics = []
+    if jurisdictions:
+        # look up each str in dictionary, append matches as lists
+        for juris in jurisdictions:
+            if juris in jurisdiction_codes:
+                valid_jurisdics += jurisdiction_codes[juris].split(" ")
+        # clear duplicate federal district jurisdictions if they exist
+        valid_jurisdics = list(set(valid_jurisdics))
+        query_str += f"&court={' '.join(valid_jurisdics)}"
     if after_date:
         dt = after_date.split("-")
         # needs to be in MM-DD-YYYY format
@@ -377,13 +387,13 @@ def courtlistener_search(
 
         for future in as_completed(futures):
             _ = future.result()
+    return courtlistener_query(q, k, valid_jurisdics, keyword_query, after_date, before_date)
 
-    return courtlistener_query(q, k, jurisdiction, keyword_query, after_date, before_date)
-
+@observe(capture_input=False, capture_output=False)
 def courtlistener_query(
     q: str,
     k: int,
-    jurisdiction: str | None = None,
+    jurisdictions: list[str] | None = None,
     keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
@@ -396,9 +406,10 @@ def courtlistener_query(
         The query text
     k : int
         How many chunks to return
-    jurisdiction : str | None, optional
-        The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
-        to filter query results by state. Use 'US' for federal courts. By default None.
+    jurisdictions : str | None, optional
+        The two-letter abbreviations of a state or territory, e.g. 'nj' or 'tx',
+        to filter query results by state. Unlike `courtlistener_search`, these
+        should already be in courtlistener court_id format. By default None.
     keyword_query: str | None, optional
         The users keyword query, by default None
     after_date : str | None, optional
@@ -415,14 +426,13 @@ def courtlistener_query(
     expr = ""
     # copy keyword query to semantic if not given
     q = q if q else keyword_query
-    if jurisdiction and jurisdiction in jurisdiction_codes:
-        code_list = jurisdiction_codes[jurisdiction].split(" ")
-        expr = f"metadata['court_id'] in {code_list}"
+    if jurisdictions:
+        expr = f"metadata['court_id'] in {jurisdictions}"
     if after_date:
         expr += (" and " if expr else "") + f"metadata['date_filed']>'{after_date}'"
     if before_date:
         expr += (" and " if expr else "") + f"metadata['date_filed']<'{before_date}'"
     if keyword_query:
         keyword_query = fuzzy_keyword_query(keyword_query)
-        expr += (" and " if expr else "") + f"text like '%{keyword_query}%'"
+        expr += (" and " if expr else "") + f"text like '% {keyword_query} %'"
     return query(courtlistener_collection, q, k, expr)

@@ -291,7 +291,7 @@ def query(
     search_params = {
         "anns_field": "vector",
         "param": {}, # can customize index params assuming you know index type
-        "output_fields": ["text"],
+        "output_fields": ["text", "pk"],
         "data": data,
         "limit": k,
     }
@@ -315,11 +315,10 @@ def query(
                 [hit.to_dict() for hit in res[0]],
                 key=lambda h: h["distance"],
             )
-            # delete pks
-            for hit in hits:
-                if "metadata" in hit["entity"] and "orig_elements" in hit["entity"]["metadata"]:
-                    del hit["entity"]["metadata"]["orig_elements"]
-                del hit["id"]
+            # format output for tracing
+            langfuse_context.update_current_observation(
+                output=[hit["entity"]["pk"] for hit in hits],
+            )
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
@@ -440,6 +439,7 @@ def upload_data_json(
     return {"message": "Success", "insert_count": res.insert_count}
 
 
+@observe(capture_output=False)
 def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     """Get database entries according to a boolean expression.
 
@@ -483,9 +483,13 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         hits += res
         res = q_iter.next()
     q_iter.close()
+    langfuse_context.update_current_observation(
+        output=f"{len(hits)} hits",
+    )
     return {"message": "Success", "result": hits}
 
 
+@observe()
 def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     """Delete database entries according to a boolean expression.
 
@@ -510,6 +514,7 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     return {"message": "Success", "delete_count": ids.delete_count}
 
 
+@observe()
 def upsert_expr_json(
     collection_name: str,
     expr: str,
@@ -597,13 +602,6 @@ def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int
     expr = f"metadata['id']=={opinion['id']}"
     hits = get_expr(collection_name, expr)
     if hits["result"] and len(hits["result"]) > 0:
-        # check if opinion in collection does not have citations
-        # TODO(Nick) remove this and do the rest manually later
-        if "citations" not in hits["result"][0]["metadata"]:
-            # upsert data with added metadata
-            for hit in hits["result"]:
-                hit["metadata"]["citations"] = opinion["citations"]
-            upsert_expr_json(collection_name, expr, hits["result"])
         return {"message": "Success"}
 
     # chunk
@@ -622,9 +620,6 @@ def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int
     # cited opinions take up a lot of tokens and are included in the text
     if "opinions_cited" in opinion:
         del opinion["opinions_cited"]
-
-    summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
-    opinion["ai_summary"] = summary
 
     metadatas = [opinion] * len(texts)
     # upload

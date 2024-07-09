@@ -34,9 +34,10 @@ from app.models import (
     EngineEnum,
     FetchSession,
     InitializeSession,
+    OpinionSearchRequest,
     get_uuid_id,
 )
-from app.opinion_search import opinion_search
+from app.opinion_search import opinion_search, summarize_opinion
 from app.prompts import FILTERED_CASELAW_PROMPT  # noqa: TCH001
 
 # this is to ensure tracing with langfuse
@@ -538,21 +539,38 @@ def vectordb_upload_site(site: str, collection_name: str,
     return crawl_upload_site(collection_name, description, site)
 
 
-@api.get("/search_opinions", tags=["Opinion Search"])
+@api.post("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
-    query: str,
-    keyword_query: str | None = None,
-    jurisdiction: str | None = None,
-    after_date: str | None = None,
-    before_date: str | None = None,
-    k: int = 4,
+    req: OpinionSearchRequest,
     api_key: str = Security(api_key_auth),
 ) -> dict:
     if not api_key_check(api_key):
         return {"message": "Failure: API key invalid"}
     try:
-        results = opinion_search(query, k, jurisdiction, keyword_query, after_date, before_date)
+        results = opinion_search(
+            req.query,
+            req.k,
+            req.jurisdictions,
+            req.keyword_query,
+            req.after_date,
+            req.before_date,
+        )
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "results": results}
+
+
+@api.get("/get_opinion_summary", tags=["Opinion Search"])
+def get_opinion_summary(
+    opinion_id: int,
+    api_key: str = Security(api_key_auth),
+) -> dict:
+    if not api_key_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    try:
+        summary = summarize_opinion(opinion_id)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+    else:
+        return {"message": "Success", "result": summary}
