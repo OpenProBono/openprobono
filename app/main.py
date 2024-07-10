@@ -37,7 +37,7 @@ from app.models import (
     OpinionSearchRequest,
     get_uuid_id,
 )
-from app.opinion_search import opinion_search, summarize_opinion
+from app.opinion_search import count_opinions, opinion_search, summarize_opinion
 from app.prompts import FILTERED_CASELAW_PROMPT  # noqa: TCH001
 
 # this is to ensure tracing with langfuse
@@ -574,3 +574,9 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
+
+@api.get("/get_opinion_count", tags=["Opinion Search"])
+def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
+    if not api_key_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    return {"message": "Success", "opinion_count": count_opinions()}

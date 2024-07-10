@@ -319,7 +319,7 @@ def upload_search_result(result: dict) -> None:
         opinion["author_name"] = get_author_name(result)
     upload_courtlistener(courtlistener_collection, opinion)
 
-@observe()
+@observe(capture_output=False)
 def courtlistener_search(
     q: str,
     k: int = 3,

@@ -33,6 +33,7 @@ from app.splitters import chunk_elements_by_title, chunk_str
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
+    from pymilvus.orm.iterator import QueryIterator
 
 
 connection_args = loads(os.environ["Milvus"])
@@ -534,7 +535,41 @@ def fields_to_json(fields_entry: dict) -> dict:
     }
     return d
 
+
+def collection_iterator(
+    collection_name: str,
+    expr: str,
+    output_fields: list[str],
+    batch_size: int,
+) -> QueryIterator:
+    """Get a query iterator for a collection.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection
+    expr : str
+        The boolean expression to filter entities in the collection
+    output_fields : list[str]
+        the fields to return for each entity
+    batch_size : int
+        the number of entities to process at a time
+
+    Returns
+    -------
+    QueryIterator
+        An iterator over the chosen entities in the collection
+
+    """
+    coll = Collection(collection_name)
+    return coll.query_iterator(
+        expr=expr,
+        output_fields=output_fields,
+        batch_size=batch_size,
+    )
+
 # application level features
+
 @observe(capture_input=False)
 def upload_courtlistener(
     collection_name: str,
