@@ -21,7 +21,13 @@ from pymilvus import (
 from app.chat_models import summarize_langchain
 from app.db import load_vdb, store_vdb
 from app.encoders import embed_strs
-from app.loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links
+from app.loaders import (
+    partition_html_str,
+    partition_uploadfile,
+    quickstart_ocr,
+    scrape,
+    scrape_with_links,
+)
 from app.models import EncoderParams, MilvusMetadataEnum, OpenAIModelEnum
 from app.splitters import chunk_elements_by_title, chunk_str
 
@@ -220,38 +226,6 @@ def create_collection(
     return coll
 
 
-def query_check(collection_name: str, query: str, k: int, session_id: str = "") -> dict:
-    """Check query parameters.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of the collection
-    query : str
-        The query for the collection
-    k : int
-        The number of vectors to return from the collection
-    session_id : str, optional
-        The session id if the query is to a session collection, by default ""
-
-    Returns
-    -------
-    dict
-        Contains a `message` if there was an error, otherwise empty
-
-    """
-    msg = {}
-    if not utility.has_collection(collection_name):
-        msg["message"] = f"Failure: collection {collection_name} not found"
-    if not query or query == "":
-        msg["message"] = "Failure: query not found"
-    if k < 1 or k > MAX_K:
-        msg["message"] = f"Failure: k = {k} out of range [1, {MAX_K}]"
-    if not session_id and collection_name == SESSION_DATA:
-        msg["message"] = "Failure: session_id not found"
-    return msg
-
-
 @observe()
 def query(
     collection_name: str,
@@ -281,9 +255,6 @@ def query(
         With message and result on success, just message on failure
 
     """
-    if query_check(collection_name, query, k, session_id):
-        return query_check(collection_name, query, k, session_id)
-
     coll = Collection(collection_name)
     coll.load()
     encoder = load_vdb_param(collection_name, "encoder")
@@ -458,12 +429,10 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         Contains `message`, `result` list if successful
 
     """
-    if not utility.has_collection(collection_name):
-        return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
     coll.load()
     collection_format = load_vdb_param(collection_name, "metadata_format")
-    output_fields = ["vector", "text"]
+    output_fields = ["text"]
     match collection_format:
         case MilvusMetadataEnum.field:
             output_fields += [*load_vdb_param(collection_name, "fields")]
@@ -477,9 +446,6 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     hits = []
     res = q_iter.next()
     while len(res) > 0:
-        # delete pks
-        for hit in res:
-            del hit["pk"]
         hits += res
         res = q_iter.next()
     q_iter.close()
@@ -506,8 +472,6 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
         Contains `message`, `delete_count` if successful
 
     """
-    if not utility.has_collection(collection_name):
-        return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
     coll.load()
     ids = coll.delete(expr=expr)
@@ -572,7 +536,13 @@ def fields_to_json(fields_entry: dict) -> dict:
 
 # application level features
 @observe(capture_input=False)
-def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int=10000, chunk_overlap:int=1000) -> dict:
+def upload_courtlistener(
+    collection_name: str,
+    opinion: dict,
+    max_chunk_size: int = 10000,
+    new_after_n_chars: int = 2500,
+    chunk_overlap: int = 1000,
+) -> dict:
     """Upload a courtlistener opinion to Milvus.
 
     Parameters
@@ -583,6 +553,9 @@ def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int
         The opinion to upload
     max_chunk_size : int, optional
         the max chunk size to be uploaded to milvus, by default 10000
+    new_after_n_chars : int, optional
+        cuts off new sections after this size (soft max), see `chunk_by_title`
+        for details, by default 2500
     chunk_overlap : int, optional
         chunk overlap to be uploaded to milvus, by default 1000
 
@@ -605,7 +578,13 @@ def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int
         return {"message": "Success"}
 
     # chunk
-    texts = chunk_str(opinion["text"], max_chunk_size, chunk_overlap)
+    elements = partition_html_str(opinion["text"])
+    texts, metadatas = chunk_elements_by_title(
+        elements,
+        max_chunk_size,
+        new_after_n_chars,
+        chunk_overlap,
+    )
 
     # metadata
     del opinion["text"]

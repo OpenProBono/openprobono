@@ -15,12 +15,31 @@ from langfuse.decorators import observe
 from pymilvus import Collection
 from pypandoc import ensure_pandoc_installed
 from unstructured.partition.auto import partition
+from unstructured.partition.html import partition_html
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.rtf import partition_rtf
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
     from unstructured.documents.elements import Element
+
+
+@observe(capture_input=False, capture_output=False)
+def partition_html_str(html: str) -> list[Element]:
+    """Partition an HTML string into elements.
+
+    Parameters
+    ----------
+    html : str
+        The HTML string.
+
+    Returns
+    -------
+    list[Element]
+        The extracted elements.
+
+    """
+    return partition_html(text=html)
 
 
 def partition_uploadfile(file: UploadFile) -> list[Element]:

@@ -5,6 +5,7 @@ import pymilvus
 
 from app import milvusdb
 
+collection_name = "DevTest"
 
 def test_connection() -> None:
     conns = pymilvus.connections.list_connections()
@@ -53,3 +54,10 @@ def test_firebase_config() -> None:
                 assert milvus_field_names == ["metadata"]
             case MilvusMetadataEnum.no_field:
                 assert milvus_field_names == []
+
+
+def test_upload_site(url: str) -> None:
+    result = milvusdb.upload_site(collection_name, url)
+    assert result["message"] == "Success"
+    assert "insert_count" in result
+    assert result["insert_count"] > 0

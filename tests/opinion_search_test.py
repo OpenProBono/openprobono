@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.courtlistener import jurisdiction_codes
+from app.opinion_search import opinion_search
 
 if TYPE_CHECKING:
     import requests
@@ -41,6 +42,16 @@ def _test_response(response: requests.Response) -> None:
     assert response_json["message"] == "Success"
     assert "results" in response_json
     _test_results(response_json["results"])
+
+@pytest.mark.parametrize(("query", "jurisdictions"), [(test_query, test_jurisdictions)])
+def test_opinion_search(query: str, jurisdictions: list[str]) -> None:
+    """Run the opinion_search function directly with jurisdictions."""
+    results = opinion_search(query, 10, jurisdictions, None, None, None)
+    _test_results(results)
+    query_juris_codes = []
+    for juris in jurisdictions:
+        query_juris_codes += jurisdiction_codes[juris].split(" ")
+    assert results[0]["entity"]["metadata"]["court_id"] in query_juris_codes
 
 @pytest.mark.parametrize("query", [test_query])
 def test_query_unfiltered(query: str) -> None:
