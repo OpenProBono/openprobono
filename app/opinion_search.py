@@ -100,6 +100,7 @@ def opinion_search(
         h = cl_hits.pop(0)
         h["source"] = "courtlistener"
         hits.append(h)
+
     langfuse_context.update_current_observation(
         output=[hit["entity"]["metadata"]["id"] for hit in hits],
     )
