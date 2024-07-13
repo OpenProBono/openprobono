@@ -64,6 +64,7 @@ def opinion_search(
         cap_hits = cap(query, k, jurisdictions, keyword_query, after_date, before_date)
         cap_hits = cap_hits.pop("result", [])
     # get courtlistener results
+
     cl_result = courtlistener_search(
         query,
         k,
