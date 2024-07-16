@@ -229,7 +229,7 @@ def chat_openai(
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
-    top_p = kwargs.pop("top_p", 0.95)
+    top_p = kwargs.pop("top_p", 0.0)
     seed = kwargs.pop("seed", 0)
     response: ChatCompletion = client.chat.completions.create(
         model=model,
