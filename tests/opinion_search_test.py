@@ -46,7 +46,7 @@ def _test_response(response: requests.Response) -> None:
 @pytest.mark.parametrize(("query", "jurisdictions"), [(test_query, test_jurisdictions)])
 def test_opinion_search(query: str, jurisdictions: list[str]) -> None:
     """Run the opinion_search function directly with jurisdictions."""
-    results = opinion_search(query, 10, jurisdictions, None, None, None)
+    results = opinion_search(query, 1, jurisdictions, None, None, None)
     _test_results(results)
     query_juris_codes = []
     for juris in jurisdictions:

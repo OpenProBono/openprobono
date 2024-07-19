@@ -200,3 +200,28 @@ def embed_strs_voyage(text: list[str], encoder: EncoderParams) -> list:
                 time.sleep(1)
                 attempt += 1
     return data
+
+
+def embed_strs_openai_batch(id: str, client: OpenAI | None = None) -> str:
+    """Create and execute a batch from an uploaded file of embeddings requests.
+
+    Parameters
+    ----------
+    ids : list[str]
+        The ID of an uploaded file that contains requests for the new batch.
+    client : OpenAI | None, optional
+        The OpenAI client to use, by default None.
+
+    Returns
+    -------
+    str
+        The created batch's identifier, for reference in API endpoints
+
+    """
+    client = OpenAI() if client is None else client
+    res = client.batches.create(
+        input_file_id=id,
+        endpoint="/v1/embeddings",
+        completion_window="24h",
+    )
+    return res.id

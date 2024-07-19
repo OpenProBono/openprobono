@@ -614,7 +614,7 @@ def upload_courtlistener(
 
     # chunk
     elements = partition_html_str(opinion["text"])
-    texts, metadatas = chunk_elements_by_title(
+    texts, _ = chunk_elements_by_title(
         elements,
         max_chunk_size,
         new_after_n_chars,

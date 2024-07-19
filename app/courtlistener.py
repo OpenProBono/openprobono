@@ -436,3 +436,183 @@ def courtlistener_query(
         keyword_query = fuzzy_keyword_query(keyword_query)
         expr += (" and " if expr else "") + f"text like '% {keyword_query} %'"
     return query(courtlistener_collection, q, k, expr)
+
+
+def process_bulkdata() -> None:
+    """Process CourtListener's bulk data file of opinions.
+
+    Chunks opinions and makes a batch file for embedding with OpenAI.
+    """
+    import ast
+    import bz2
+    import io
+    import json
+    import pathlib
+
+    import pandas as pd
+    import requests
+    from unstructured.partition.text import partition_text
+    from unstructured.partition.xml import partition_xml
+
+    from app.loaders import partition_html_str, partition_pdf
+    from app.models import OpenAIModelEnum
+    from app.splitters import chunk_elements_by_title
+
+    def get_matching_cluster_ids(filename: str, ids_filename: str):
+        """Get cluster IDs since 1980 with at least 1 citation."""
+        matching_ids = set()
+        total_rows = 0
+        cutoff_date = "1979-12-31"
+
+        with bz2.open(filename, "rt") as bz_file:
+            for chunk in pd.read_csv(
+                bz_file,
+                chunksize=100000,
+                usecols=["id", "date_filed", "citation_count"],
+                parse_dates=["date_filed"],
+            ):
+                total_rows += len(chunk)
+
+                # Filter rows that meet both conditions and add their ids to the set
+                matches = chunk[(chunk["date_filed"] > cutoff_date) & (chunk["citation_count"] > 0)]
+                matching_ids.update(matches["id"])
+
+                if total_rows % 1000000 == 0:
+                    print(f"Processed {total_rows} rows in cluster file...")
+
+        print(f"\nTotal rows processed in cluster file: {total_rows}")
+        print(f"Number of matching IDs: {len(matching_ids)}")
+        with pathlib.Path(ids_filename).open("w") as f:
+            f.write(str(matching_ids))
+
+    def get_matching_opinion_ids(dirname: str, ids_filename: str):
+        """Get the IDs of opinions that have already been chunked, for resuming."""
+        matching_ids = set()
+
+        for filename in os.listdir(dirname):
+            print(filename)
+            if not filename.endswith(".jsonl"):
+                continue
+            with pathlib.Path(dirname + filename).open("r") as f:
+                lines = f.readlines()
+            for line in lines:
+                d = json.loads(line)
+                opinion_id = d["custom_id"].split("-")[1]
+                if opinion_id in matching_ids:
+                    continue
+                matching_ids.add(opinion_id)
+        with pathlib.Path(ids_filename).open("w") as f:
+            f.write(str(matching_ids))
+
+    def process_opinion_file(filename: str, matching_clusters: set, matching_ids: set):
+        """Chunk opinions and create jsonl batch files."""
+        total_rows = 0
+        req_input = {"custom_id": "", "method": "POST", "url": "/v1/embeddings",
+                 "body": {"model": OpenAIModelEnum.embed_small, "input": ""}}
+        file_number = 19
+        current_file_size = 0
+        current_file = None
+        max_file_size_bytes = int(0.95 * 100 * 1024 * 1024)
+        with bz2.open(filename, "rt") as bz_file:
+            for chunk in pd.read_csv(bz_file, chunksize=10000):
+                total_rows += len(chunk)
+                matches = chunk[chunk["cluster_id"].isin(matching_clusters)]
+                matches = matches[~matches["id"].isin(matching_ids)]
+                for _, row in matches.iterrows():
+                    val = None
+                    if pd.notna(row["html_with_citations"]):
+                        val = row["html_with_citations"]
+                    elif pd.notna(row["html"]):
+                        val = row["html"]
+                    elif pd.notna(row["html_lawbox"]):
+                        val = row["html_lawbox"]
+
+                    elements = None
+                    if val is not None:
+                        # try parsing html
+                        try:
+                            elements = partition_html_str(val)
+                        except Exception as e:
+                            print(f"error parsing html for cluster {row['cluster_id']} opinion {row['id']}")
+                            print(e)
+
+                    # try parsing download_url (PDF)
+                    if elements is None and pd.notna(row["download_url"]) and row["download_url"].endswith(".pdf"):
+                        try:
+                            r = requests.get(row["download_url"], timeout=60)
+                            val = io.BytesIO(r.content)
+                            elements = partition_pdf(file=val)
+                            print("PDF downloaded")
+                        except Exception as e:
+                            print(f"error parsing PDF for cluster {row['cluster_id']} opinion {row['id']}")
+                            print(e)
+
+                    # try parsing xml
+                    if elements is None and pd.notna(row["xml_harvard"]):
+                        val = row["xml_harvard"]
+                        try:
+                            elements = partition_xml(text=val)
+                        except Exception as e:
+                            print(f"error parsing XML for cluster {row['cluster_id']} opinion {row['id']}")
+                            print(e)
+
+                    # try parsing plain_text
+                    if elements is None and pd.notna(row["plain_text"]):
+                        val = row["plain_text"]
+                        try:
+                            elements = partition_text(text=val)
+                        except Exception as e:
+                            print(f"error parsing txt for cluster {row['cluster_id']} opinion {row['id']}")
+                            print(e)
+
+                    if elements is None:
+                        continue
+
+                    # chunk
+                    texts, _ = chunk_elements_by_title(
+                        elements,
+                        10000,
+                        2500,
+                        1000,
+                    )
+                    custom_id = 1
+                    if current_file is None or current_file_size >= max_file_size_bytes:
+                        if current_file:
+                            current_file.close()
+                        current_filename = f"/Users/njc/Documents/programming/opb/data/courtlistener_bulk/chunks_{file_number}.jsonl"
+                        current_file = pathlib.Path(current_filename).open("w")
+                        current_file_size = 0
+                        file_number += 1
+                        print(f"Started writing to new file: {current_filename}")
+                    for text in texts:
+                        req_input["custom_id"] = str(row["cluster_id"]) + "-" + str(row["id"]) + "-" + str(custom_id)
+                        req_input["body"]["input"] = text
+                        json_line = json.dumps(req_input) + "\n"
+                        line_size = len(json_line.encode("utf-8"))
+                        current_file.write(json_line)
+                        custom_id += 1
+                        current_file_size += line_size
+
+                if total_rows % 100000 == 0:
+                    print(f"Processed {total_rows} rows in opinion file...")
+
+        if current_file:
+            current_file.close()
+        print(f"\nTotal rows processed in opinion file: {total_rows}")
+
+    # Usage
+    basedir = "/opb/data/courtlistener_bulk/"
+    opinion_filename = basedir + "opinions-2024-05-06.csv.bz2"
+    cluster_filename = basedir + "opinion-clusters-2024-05-06.csv.bz2"
+    opinion_ids_filename = basedir + "opinion_ids"
+    cluster_ids_filename = basedir + "cluster_ids"
+
+    if not pathlib.Path(cluster_ids_filename).exists():
+        get_matching_cluster_ids(cluster_filename, cluster_ids_filename)
+    with pathlib.Path(cluster_ids_filename).open("r") as f:
+        matching_clusters = ast.literal_eval(f.read())
+    if not pathlib.Path(opinion_ids_filename).exists():
+        get_matching_opinion_ids(basedir, opinion_ids_filename)
+    with pathlib.Path(opinion_ids_filename).open("r") as f:
+        matching_ids = ast.literal_eval(f.read())
+    process_opinion_file(opinion_filename, matching_clusters, matching_ids)

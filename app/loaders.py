@@ -5,6 +5,7 @@ import io
 import mimetypes
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
@@ -12,6 +13,7 @@ from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
 from langfuse.decorators import observe
+from openai import OpenAI
 from pymilvus import Collection
 from pypandoc import ensure_pandoc_installed
 from unstructured.partition.auto import partition
@@ -24,7 +26,6 @@ if TYPE_CHECKING:
     from unstructured.documents.elements import Element
 
 
-@observe(capture_input=False, capture_output=False)
 def partition_html_str(html: str) -> list[Element]:
     """Partition an HTML string into elements.
 
@@ -57,6 +58,7 @@ def partition_uploadfile(file: UploadFile) -> list[Element]:
 
     """
     return partition(file=file.file, metadata_filename=file.filename)
+
 
 @observe(capture_output=False)
 def scrape(site: str) -> list[Element]:
@@ -204,6 +206,7 @@ def quickstart_ocr(file: UploadFile) -> str:
     print(document.text)
     return document.text
 
+
 def transfer_hive(collection_name: str) -> None:
     """Transfer a collection from Milvus to Hive.
 
@@ -258,3 +261,51 @@ def transfer_hive(collection_name: str) -> None:
             break
         res = q_iter.next()
     q_iter.close()
+
+
+def upload_batch_openai(
+    jsonl_path: str,
+    purpose: str,
+    client: OpenAI | None = None,
+) -> str:
+    """Upload a batch file to OpenAI.
+
+    Parameters
+    ----------
+    jsonl_path : str
+        Path to a .jsonl batch file
+    purpose : str
+        'assistants', 'vision', 'batch', or 'fine-tune'
+    client : OpenAI | None, optional
+        An OpenAI client to use, by default None.
+
+    Returns
+    -------
+    str
+        The uploaded file's identifier, for reference in API endpoints
+
+    """
+    client = OpenAI() if client is None else client
+    res = client.files.create(file=Path.open(jsonl_path, "rb"), purpose=purpose)
+    return res.id
+
+
+def download_batch_openai(batch_id: str, client: OpenAI | None = None) -> str:
+    """Download a batch output file from OpenAI.
+
+    Parameters
+    ----------
+    batch_id : str
+        The batch file identifier
+    client : OpenAI | None, optional
+        An OpenAI client to use, by default None
+
+    Returns
+    -------
+    str
+        The file content
+
+    """
+    client = OpenAI() if client is None else client
+    res = client.files.content(batch_id)
+    return res.text
