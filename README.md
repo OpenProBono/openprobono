@@ -4,7 +4,7 @@ We use external resources that you will need to set up if you want to recreate t
 # List of External Resources:
 - OpenAI: llm calls
 - Serpapi: web search
-- Langfuse: racing
+- Langfuse: tracing
 - Milvus/Zilliz: vector database
 - Firebase: database
 - More that are optional
