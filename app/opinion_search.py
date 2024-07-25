@@ -3,28 +3,11 @@ from __future__ import annotations
 
 from langfuse.decorators import langfuse_context, observe
 
-from app.cap import cap
 from app.chat_models import summarize_langchain
 from app.courtlistener import courtlistener_collection, courtlistener_search
-from app.milvusdb import collection_iterator, fields_to_json, get_expr, upsert_expr_json
+from app.milvusdb import collection_iterator, get_expr, upsert_expr_json
 from app.models import OpenAIModelEnum
 
-
-def cap_to_courtlistener(hit: dict) -> None:
-    """Convert CAP field names to courtlistener format."""
-    match hit["entity"]["jurisdiction_name"]:
-        case "Ark.":
-            hit["entity"]["court_id"] = "ar"
-        case "Ill.":
-            hit["entity"]["court_id"] = "il"
-        case "N.C.":
-            hit["entity"]["court_id"] = "nc"
-        case "N.M.":
-            hit["entity"]["court_id"] = "nm"
-    del hit["entity"]["jurisdiction_name"]
-    hit["entity"]["date_filed"] = hit["entity"].pop("decision_date")
-    hit["entity"]["case_name"] = hit["entity"].pop("case_name_abbreviation")
-    hit["entity"]["author_name"] = hit["entity"].pop("opinion_author")
 
 @observe(capture_output=False)
 def opinion_search(
@@ -58,12 +41,6 @@ def opinion_search(
         A list of dicts containing the results from the search query
 
     """
-    # get CAP results
-    cap_hits = []
-    if jurisdictions:
-        cap_hits = cap(query, k, jurisdictions, keyword_query, after_date, before_date)
-        cap_hits = cap_hits.pop("result", [])
-
     # get courtlistener results
     cl_result = courtlistener_search(
         query,
@@ -73,38 +50,11 @@ def opinion_search(
         after_date,
         before_date,
     )
-    cl_hits: list = cl_result["result"]
-
-    # if there are no results it was probably a bad query date range
-    if not cap_hits and not cl_hits:
-        return []
-
-    # get k closest results from either tool; merge two sorted lists to size k
-    hits = []
-    while len(hits) < k and len(cap_hits) > 0 and len(cl_hits) > 0:
-        if cap_hits[0]["distance"] < cl_hits[0]["distance"]:
-            h = cap_hits.pop(0)
-            h["source"] = "cap"
-            cap_to_courtlistener(h)
-            hits.append(fields_to_json(h))
-        else:
-            h = cl_hits.pop(0)
-            h["source"] = "courtlistener"
-            hits.append(h)
-    while len(hits) < k and len(cap_hits) > 0:
-        h = cap_hits.pop(0)
-        h["source"] = "cap"
-        cap_to_courtlistener(h)
-        hits.append(fields_to_json(h))
-    while len(hits) < k and len(cl_hits) > 0:
-        h = cl_hits.pop(0)
-        h["source"] = "courtlistener"
-        hits.append(h)
-
+    cl_hits = cl_result["result"]
     langfuse_context.update_current_observation(
-        output=[hit["entity"]["metadata"]["id"] for hit in hits],
+        output=[hit["entity"]["metadata"]["id"] for hit in cl_hits],
     )
-    return hits
+    return cl_hits
 
 
 @observe()
