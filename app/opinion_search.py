@@ -71,13 +71,13 @@ def summarize_opinion(opinion_id: int) -> str:
     return summary
 
 def count_opinions() -> int:
-    q_iter = collection_iterator(courtlistener_collection, "", ["metadata"], 100)
+    coll_iter = collection_iterator(courtlistener_collection, "", ["metadata"], 100)
     opinions = set()
-    res = q_iter.next()
+    res = coll_iter.next()
     while len(res) > 0:
         for hit in res:
             if hit["metadata"]["id"] not in opinions:
                 opinions.add(hit["metadata"]["id"])
-        res = q_iter.next()
-    q_iter.close()
+        res = coll_iter.next()
+    coll_iter.close()
     return len(opinions)
