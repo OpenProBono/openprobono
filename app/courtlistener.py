@@ -27,7 +27,7 @@ docket_url = base_url + "/dockets/?id="
 court_url = base_url + "/courts/?id="
 people_url = base_url + "/people/?id="
 
-courtlistener_collection = "courtlistener"
+courtlistener_collection = "courtlistener_bulk"
 
 courtlistener_timeout = 10 #seconds
 
