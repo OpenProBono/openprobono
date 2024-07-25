@@ -1,6 +1,8 @@
 """Search court opinions using CAP and courtlistener data."""
 from __future__ import annotations
 
+import time
+
 from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import summarize_langchain
@@ -41,6 +43,7 @@ def opinion_search(
         A list of dicts containing the results from the search query
 
     """
+    start = time.time()
     # get courtlistener results
     cl_result = courtlistener_search(
         query,
@@ -54,6 +57,8 @@ def opinion_search(
     langfuse_context.update_current_observation(
         output=[hit["entity"]["metadata"]["id"] for hit in cl_hits],
     )
+    end = time.time()
+    print("opinion search time: " + str(end - start))
     return cl_hits
 
 
@@ -67,17 +72,20 @@ def summarize_opinion(opinion_id: int) -> str:
     for hit in hits:
         hit["metadata"]["ai_summary"] = summary
     # save the summary to Milvus for future searches
-    upsert_expr_json("courtlistener", f"metadata['id']=={opinion_id}", hits)
+    upsert_expr_json(courtlistener_collection, f"metadata['id']=={opinion_id}", hits)
     return summary
 
 def count_opinions() -> int:
     coll_iter = collection_iterator(courtlistener_collection, "", ["metadata"], 100)
     opinions = set()
     res = coll_iter.next()
+    start = time.time()
     while len(res) > 0:
         for hit in res:
             if hit["metadata"]["id"] not in opinions:
                 opinions.add(hit["metadata"]["id"])
         res = coll_iter.next()
     coll_iter.close()
+    end = time.time()
+    print("summarization time: " + str(end - start))
     return len(opinions)
