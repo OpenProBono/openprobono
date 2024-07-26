@@ -12,6 +12,7 @@ from langfuse.decorators import observe
 
 from app.milvusdb import (
     fuzzy_keyword_query,
+    get_expr,
     query,
     upload_courtlistener,
     upload_data_json,
@@ -311,6 +312,11 @@ def get_author_name(result: dict) -> str:
     return full_name
 
 def upload_search_result(result: dict) -> None:
+    # check if the opinion is already in the collection
+    expr = f"metadata['id']=={result['id']}"
+    hits = get_expr(courtlistener_collection, expr)
+    if hits["result"] and len(hits["result"]) > 0:
+        return
     opinion = get_opinion(result)
     opinion["cluster_id"] = result["cluster_id"]
     opinion["court_id"] = result["court_id"]

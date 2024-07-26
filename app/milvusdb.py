@@ -606,12 +606,6 @@ def upload_courtlistener(
     if "text" not in opinion or not opinion["text"]:
         return {"message": "Failure: no opinion text found"}
 
-    # check if the opinion is already in the collection
-    expr = f"metadata['id']=={opinion['id']}"
-    hits = get_expr(collection_name, expr)
-    if hits["result"] and len(hits["result"]) > 0:
-        return {"message": "Success"}
-
     # chunk
     elements = partition_html_str(opinion["text"])
     texts, _ = chunk_elements_by_title(
