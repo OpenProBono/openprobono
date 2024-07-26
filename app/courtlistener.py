@@ -458,7 +458,7 @@ def batch_metadata_files() -> None:
     import pandas as pd
     from openai import OpenAI
 
-    from app.milvusdb import collection_iterator
+    from app.milvusdb import query_iterator
 
     def get_data_dictionary(data_filename: str, id_filename: str, chunksize: int, row_fn, people_filename: str | None = None, court_filename: str | None = None) -> dict:
         with pathlib.Path(id_filename).open("r") as f:
@@ -566,14 +566,14 @@ def batch_metadata_files() -> None:
     with pathlib.Path(opinion_data_filename + "_new").open("r") as f:
         opinion_data = ast.literal_eval(f.read())
 
-    coll_iter = collection_iterator("courtlistener", "", ["metadata"], 1000)
-    res = coll_iter.next()
+    q_iter = query_iterator("courtlistener", "", ["metadata"], 1000)
+    res = q_iter.next()
     while len(res) > 0:
         for hit in res:
             if "ai_summary" in hit["metadata"] and hit["metadata"]["id"] in opinion_data:
                 opinion_data[hit["metadata"]["id"]]["ai_summary"] = hit["metadata"]["ai_summary"]
-        res = coll_iter.next()
-    coll_iter.close()
+        res = q_iter.next()
+    q_iter.close()
 
     client = OpenAI()
     openai_files = client.files.list()

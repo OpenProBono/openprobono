@@ -7,7 +7,7 @@ from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import summarize_langchain
 from app.courtlistener import courtlistener_collection, courtlistener_search
-from app.milvusdb import collection_iterator, get_expr, upsert_expr_json
+from app.milvusdb import get_expr, query_iterator, upsert_expr_json
 from app.models import OpenAIModelEnum
 
 
@@ -58,12 +58,13 @@ def opinion_search(
         output=[hit["entity"]["metadata"]["id"] for hit in cl_hits],
     )
     end = time.time()
-    print("opinion search time: " + str(end - start))
+    print(f"opinion search time: {end - start!s}")
     return cl_hits
 
 
 @observe()
 def summarize_opinion(opinion_id: int) -> str:
+    start = time.time()
     res = get_expr(courtlistener_collection, f"metadata['id']=={opinion_id}")
     hits = res["result"]
     hits = sorted(hits, key= lambda x: x["metadata"]["id"])
@@ -73,19 +74,21 @@ def summarize_opinion(opinion_id: int) -> str:
         hit["metadata"]["ai_summary"] = summary
     # save the summary to Milvus for future searches
     upsert_expr_json(courtlistener_collection, f"metadata['id']=={opinion_id}", hits)
+    end = time.time()
+    print(f"summarization time: {end - start!s}")
     return summary
 
 def count_opinions() -> int:
-    coll_iter = collection_iterator(courtlistener_collection, "", ["metadata"], 10000)
-    opinions = set()
-    res = coll_iter.next()
     start = time.time()
+    q_iter = query_iterator(courtlistener_collection, "", ["metadata"], 10000)
+    opinions = set()
+    res = q_iter.next()
     while len(res) > 0:
         for hit in res:
             if hit["metadata"]["id"] not in opinions:
                 opinions.add(hit["metadata"]["id"])
-        res = coll_iter.next()
-    coll_iter.close()
+        res = q_iter.next()
+    q_iter.close()
     end = time.time()
-    print("summarization time: " + str(end - start))
+    print(f"opinion count time: {end - start!s}")
     return len(opinions)

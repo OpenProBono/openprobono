@@ -543,7 +543,7 @@ def fields_to_json(fields_entry: dict) -> dict:
     return d
 
 
-def collection_iterator(
+def query_iterator(
     collection_name: str,
     expr: str,
     output_fields: list[str],
