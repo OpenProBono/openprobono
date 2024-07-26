@@ -76,7 +76,7 @@ def summarize_opinion(opinion_id: int) -> str:
     return summary
 
 def count_opinions() -> int:
-    coll_iter = collection_iterator(courtlistener_collection, "", ["metadata"], 100)
+    coll_iter = collection_iterator(courtlistener_collection, "", ["metadata"], 10000)
     opinions = set()
     res = coll_iter.next()
     start = time.time()

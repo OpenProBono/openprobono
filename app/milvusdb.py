@@ -313,12 +313,19 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
         A fuzzy version of the keyword query
 
     """
+    min_length_fuzzy = 5
     keywords = keyword_query.split()
-    fuzzy_keywords = []
-    for kw in keywords:
-        fuzzy_kw = "".join([c if not c.isupper() else "_" for c in kw])
-        fuzzy_keywords.append(fuzzy_kw)
-    fuzzy_keywords = ["_" + fuzzy_kw[1:] for fuzzy_kw in fuzzy_keywords]
+    fuzzy_keywords = [
+        "".join([
+            c if not c.isupper() or len(kw) < min_length_fuzzy else "_"
+            for c in kw
+        ])
+        for kw in keywords
+    ]
+    fuzzy_keywords = [
+        kw if len(kw) < min_length_fuzzy else "_" + kw[1:]
+        for kw in fuzzy_keywords
+    ]
     return " ".join(fuzzy_keywords)
 
 
