@@ -64,7 +64,7 @@ def opinion_search(
 
 @observe()
 def summarize_opinion(opinion_id: int) -> str:
-    res = get_expr("courtlistener", f"metadata['id']=={opinion_id}")
+    res = get_expr(courtlistener_collection, f"metadata['id']=={opinion_id}")
     hits = res["result"]
     hits = sorted(hits, key= lambda x: x["metadata"]["id"])
     texts = [hit["text"] for hit in hits]

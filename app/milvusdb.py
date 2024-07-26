@@ -408,7 +408,7 @@ def upload_data_json(
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
-    return {"message": "Success", "insert_count": res.insert_count}
+    return {"message": "Success", "insert_count": res.insert_count if res else 0}
 
 
 @observe(capture_output=False)
