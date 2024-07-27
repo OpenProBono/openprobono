@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import io
+import json
 import mimetypes
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generator
 
 import requests
 from bs4 import BeautifulSoup
@@ -263,17 +264,17 @@ def transfer_hive(collection_name: str) -> None:
     q_iter.close()
 
 
-def upload_batch_openai(
+def upload_jsonl_openai(
     jsonl_path: str,
     purpose: str,
     client: OpenAI | None = None,
 ) -> str:
-    """Upload a batch file to OpenAI.
+    """Upload a .jsonl file of API requests to OpenAI.
 
     Parameters
     ----------
     jsonl_path : str
-        Path to a .jsonl batch file
+        Path to a .jsonl file
     purpose : str
         'assistants', 'vision', 'batch', or 'fine-tune'
     client : OpenAI | None, optional
@@ -290,13 +291,30 @@ def upload_batch_openai(
     return res.id
 
 
-def download_batch_openai(batch_id: str, client: OpenAI | None = None) -> str:
-    """Download a batch output file from OpenAI.
+def create_batch_openai(
+    file_id: str,
+    endpoint: str,
+    client: OpenAI | None = None,
+    description: str | None = None,
+    metadata: dict | None = None,
+) -> str:
+    client = OpenAI() if client is None else client
+    batch = client.batches.create(
+        input_file_id=file_id,
+        endpoint=endpoint,
+        description=description,
+        metadata=metadata,
+    )
+    return batch.id
+
+
+def download_file_openai(file_id: str, client: OpenAI | None = None) -> str:
+    """Download a file from OpenAI.
 
     Parameters
     ----------
-    batch_id : str
-        The batch file identifier
+    file_id : str
+        The file identifier
     client : OpenAI | None, optional
         An OpenAI client to use, by default None
 
@@ -307,5 +325,62 @@ def download_batch_openai(batch_id: str, client: OpenAI | None = None) -> str:
 
     """
     client = OpenAI() if client is None else client
-    res = client.files.content(batch_id)
+    res = client.files.content(file_id)
     return res.text
+
+
+def yield_batch_output(basedir: str) -> Generator[tuple[list, list, list]]:
+    client = OpenAI()
+    openai_files = client.files.list()
+    batches = client.batches.list()
+    for batch in batches.data:
+        metadatas, texts, vectors = [], [], []
+        if batch.status != "completed":
+            continue
+
+        input_file = next(
+            (f for f in openai_files if batch.input_file_id == f.id),
+            None,
+        )
+        if input_file is None:
+            print("input file not found for " + batch.input_file_id)
+            continue
+
+        input_filename = input_file.filename
+        print(input_filename)
+
+        result_file_id = batch.output_file_id
+        result_file_name = input_filename.split(".")[0] + "_out.jsonl"
+        if not Path(basedir + result_file_name).exists():
+            result = client.files.content(result_file_id).content
+            with Path(basedir + result_file_name).open("wb") as f:
+                f.write(result)
+        with Path(basedir + result_file_name).open("r") as f:
+            for i, line in enumerate(f, start=1):
+                output = json.loads(line)
+                with Path(basedir + input_filename).open("r") as in_f:
+                    input_line = in_f.readline()
+                    input_data = json.loads(input_line)
+                    while input_line and input_data["custom_id"] != output["custom_id"]:
+                        input_line = in_f.readline()
+                        input_data = json.loads(input_line)
+                custom_id_split = output["custom_id"].split("-")
+                cluster_id = int(custom_id_split[0])
+                opinion_id = int(custom_id_split[1])
+                metadata = {}
+                # metadata.update(cluster_data[cluster_id])
+                # metadata.update(opinion_data[opinion_id])
+                # metadata.update(docket_data[metadata["docket_id"]])
+                text = input_data["body"]["input"]
+                vector = output["response"]["body"]["data"][0]["embedding"]
+                metadatas.append(metadata)
+                texts.append(text)
+                vectors.append(vector)
+                if i % 5000 == 0:
+                    print(f"i = {i}")
+                if len(metadatas) == 1000:
+                    yield metadatas, texts, vectors
+                    metadatas, texts, vectors = [], [], []
+        # return the last (< batch_size) lines
+        if len(metadatas) > 0:
+            yield metadatas, texts, vectors

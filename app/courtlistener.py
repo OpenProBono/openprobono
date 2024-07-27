@@ -21,15 +21,7 @@ from app.milvusdb import (
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
 base_url = "https://www.courtlistener.com/api/rest/v3"
-search_url = base_url + "/search/?q="
-opinion_url = base_url + "/opinions/?id="
-cluster_url = base_url + "/clusters/?id="
-docket_url = base_url + "/dockets/?id="
-court_url = base_url + "/courts/?id="
-people_url = base_url + "/people/?id="
-
-courtlistener_collection = "courtlistener_bulk"
-
+courtlistener_collection = "courtlistener"
 courtlistener_timeout = 10 #seconds
 
 courtlistener_tool_args = {
@@ -66,15 +58,31 @@ courtlistener_tool_args = {
 # manual mapping from two-letter state abbreviations to courtlistener court_id format
 jurisdiction_codes = {
     "us-app": "ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc",
-    "us-dis": "dcd almd alnd alsd akd azd ared arwd cacd caed cand casd cod ctd ded flmd flnd flsd gamd gand gasd hid idd ilcd ilnd ilsd innd insd iand iasd ksd kyed kywd laed lamd lawd med mdd mad mied miwd mnd msnd mssd moed mowd mtd ned nvd nhd njd nmd nyed nynd nysd nywd nced ncmd ncwd ndd ohnd ohsd oked oknd okwd ord paed pamd pawd rid scd sdd tned tnmd tnwd txed txnd txsd txwd utd vtd vaed vawd waed wawd wvnd wvsd wied wiwd wyd gud nmid prd vid californiad illinoised illinoisd indianad orld ohiod pennsylvaniad southcarolinaed southcarolinawd tennessed canalzoned",
+    "us-dis": (
+        "dcd almd alnd alsd akd azd ared arwd cacd caed cand casd cod ctd ded flmd "
+        "flnd flsd gamd gand gasd hid idd ilcd ilnd ilsd innd insd iand iasd ksd kyed "
+        "kywd laed lamd lawd med mdd mad mied miwd mnd msnd mssd moed mowd mtd ned nvd "
+        "nhd njd nmd nyed nynd nysd nywd nced ncmd ncwd ndd ohnd ohsd oked oknd okwd "
+        "ord paed pamd pawd rid scd sdd tned tnmd tnwd txed txnd txsd txwd utd vtd "
+        "vaed vawd waed wawd wvnd wvsd wied wiwd wyd gud nmid prd vid californiad "
+        "illinoised illinoisd indianad orld ohiod pennsylvaniad southcarolinaed "
+        "southcarolinawd tennessed canalzoned"
+    ),
     "us-sup": "scotus",
-    "us-misc": "bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca tecoa reglrailreorgct kingsbench",
+    "us-misc": (
+        "bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc "
+        "mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca "
+        "tecoa reglrailreorgct kingsbench"
+    ),
     "al": "almd alnd alsd almb alnb alsb ala alactapp alacrimapp alacivapp",
     "ak": "akd akb alaska alaskactapp",
     "az": "azd arb ariz arizctapp ariztaxct",
     "ar": "ared arwd areb arwb ark arkctapp arkworkcompcom arkag",
     "as": "amsamoa amsamoatc",
-    "ca": "cacd caed cand casd californiad cacb caeb canb casb cal calctapp calappdeptsuper calag",
+    "ca": (
+        "cacd caed cand casd californiad cacb caeb canb casb cal calctapp "
+        "calappdeptsuper calag"
+    ),
     "co": "cod cob colo coloctapp coloworkcompcom coloag",
     "ct": "ctd ctb conn connappct connsuperct connworkcompcom",
     "de": "ded deb del delch delorphct delsuperct delctcompl delfamct deljudct",
@@ -103,20 +111,32 @@ jurisdiction_codes = {
     "nh": "nhd nhb nh",
     "nj": "njd njb nj njsuperctappdiv njtaxct njch",
     "nm": "nmd nmb nm nmctapp",
-    "ny": "nyed nynd nysd nywd nyeb nynb nysb nywb ny nyappdiv nyappterm nysupct nycountyctny nydistct nyjustct nyfamct nysurct nycivct nycrimct nyag",
+    "ny": (
+        "nyed nynd nysd nywd nyeb nynb nysb nywb ny nyappdiv nyappterm nysupct "
+        "nycountyctny nydistct nyjustct nyfamct nysurct nycivct nycrimct nyag"
+    ),
     "nc": "nced ncmd ncwd nceb ncmb ncwb nc ncctapp ncsuperct ncworkcompcom",
     "nd": "ndd ndb nd ndctapp",
     "mp": "nmariana cnmisuperct cnmitrialct",
     "oh": "ohnd ohsd ohiod ohnb ohsb ohio ohioctapp ohioctcl",
-    "ok": "oked oknd okwd okeb oknb okwb okla oklacivapp oklacrimapp oklajeap oklacoj oklaag",
+    "ok": (
+        "oked oknd okwd okeb oknb okwb okla oklacivapp oklacrimapp oklajeap "
+        "oklacoj oklaag"
+    ),
     "or": "ord orb or orctapp ortc",
     "pa": "paed pamd pawd pennsylvaniad paeb pamb pawb pa pasuperct pacommwct cjdpa",
     "pr": "prsupreme prapp prd prb",
     "ri": "rid rib ri risuperct",
     "sc": "scd southcarolinaed southcarolinawd scb sc scctapp",
     "sd": "sdd sdb sd",
-    "tn": "tned tnmd tnwd tennessed tneb tnmb tnwb tennesseeb tenn tennctapp tenncrimapp tennworkcompcl tennworkcompapp tennsuperct",
-    "tx": "txed txnd txsd txwd txeb txnb txsb txwb tex texapp texcrimapp texreview texjpml texag",
+    "tn": (
+        "tned tnmd tnwd tennessed tneb tnmb tnwb tennesseeb tenn tennctapp "
+        "tenncrimapp tennworkcompcl tennworkcompapp tennsuperct"
+    ),
+    "tx": (
+        "txed txnd txsd txwd txeb txnb txsb txwb tex texapp texcrimapp "
+        "texreview texjpml texag"
+    ),
     "ut": "utd utb utah utahctapp",
     "vt": "vtd vtb vt vtsuperct",
     "va": "vaed vawd vaeb vawb va vactapp",
@@ -142,6 +162,8 @@ def search(q: str) -> dict:
         dict containing the results
 
     """
+    http_code_ok = 200
+    search_url = base_url + "/search/?q="
     max_retries = 5
     retry_delay = 1 # second
     for _ in range(max_retries):
@@ -151,11 +173,48 @@ def search(q: str) -> dict:
                 headers=courtlistener_header,
                 timeout=courtlistener_timeout,
             )
-            if response.status_code == 200:
+            if response.status_code == http_code_ok:
                 return response.json()
         except requests.exceptions.ReadTimeout:  # noqa: PERF203
             time.sleep(retry_delay)
     return {}
+
+def get_target(target_id: int, target_name: str) -> dict:
+    """Get a courtlistener target object by id.
+
+    Parameters
+    ----------
+    target_id : int
+        The target object's id
+    target_name : str
+        The target object's name. Must be one of:
+        "opinion", "cluster", "docket", "court", "people"
+
+    Returns
+    -------
+    dict
+        The target object with the matching id
+
+    """
+    url = None
+    if target_name == "opinion":
+        url = base_url + "/opinions/?id="
+    elif target_name == "cluster":
+        url = base_url + "/clusters/?id="
+    elif target_name == "docket":
+        url = base_url + "/dockets/?id="
+    elif target_name == "court":
+        url = base_url + "/courts/?id="
+    elif target_name == "people":
+        url = base_url + "/people/?id="
+    if url is None:
+        return {}
+    response = requests.get(
+        url + str(target_id),
+        headers=courtlistener_header,
+        timeout=courtlistener_timeout,
+    )
+    return response.json()["results"][0]
 
 def get_opinion(result:dict) -> dict:
     """Get the full opinion info for a search result from search().
@@ -171,109 +230,17 @@ def get_opinion(result:dict) -> dict:
         dict containing the Opinion info
 
     """
-    # get the opinion id
-    opinion_id = str(result["id"])
-
-    response = requests.get(opinion_url + opinion_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    op = response.json()["results"][0]  # the actual opinion
-
+    # lookup the opinion
+    op = get_target(result["id"], "opinion")
     # getting the text, in the best format possible
-    op["text"] = op["html_with_citations"]
+    op["text"] = op["xml_harvard"]
     # these are backup formats
-    backups = ["html", "plain_text", "html_lawbox", "html_columbia"]
+    backups = ["html_with_citations", "html", "plain_text", "html_lawbox", "html_columbia"]
     b_index = 0
     while op["text"] == "" and b_index < len(backups):
         op["text"] = op[backups[b_index]]
         b_index += 1
     return op
-
-
-def get_cluster(result: dict) -> dict:
-    """Get the full cluster info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Cluster info
-
-    """
-    cid = str(result["cluster_id"])
-    response = requests.get(cluster_url + cid,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_docket(result: dict) -> dict:
-    """Get the full docket info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Docket info
-
-    """
-    docket_id = str(result["docket_id"])
-    response = requests.get(docket_url + docket_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_court(result: dict) -> dict:
-    """Get the full court info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Court info
-
-    """
-    court_id = str(result["court_id"])
-    response = requests.get(court_url + court_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_person(result: dict) -> dict:
-    """Get the full person info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Person info
-
-    """
-    author_id = str(result["author_id"])
-    response = requests.get(people_url + author_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
 
 def get_search_date(date_plus_timerange: str) -> str:
     split_date = date_plus_timerange.split("T")
@@ -291,7 +258,7 @@ def get_case_name(result: dict) -> str:
     if result["caseName"]:
         return result["caseName"]
     # cluster level data: case name
-    cluster = get_cluster(result)
+    cluster = get_target(result["cluster_id"], "cluster")
     # prefer short name to full name
     if cluster["case_name"]:
         return cluster["case_name"]
@@ -301,7 +268,7 @@ def get_case_name(result: dict) -> str:
 
 def get_author_name(result: dict) -> str:
     # person level data: author name
-    author = get_person(result)
+    author = get_target(result["author_id"], "people")
     full_name = ""
     if author["name_first"]:
         full_name += author["name_first"]
@@ -561,9 +528,9 @@ def batch_metadata_files() -> None:
 
     with pathlib.Path(docket_data_filename).open("r") as f:
         docket_data = ast.literal_eval(f.read())
-    with pathlib.Path(cluster_data_filename + "_new").open("r") as f:
+    with pathlib.Path(cluster_data_filename).open("r") as f:
         cluster_data = ast.literal_eval(f.read())
-    with pathlib.Path(opinion_data_filename + "_new").open("r") as f:
+    with pathlib.Path(opinion_data_filename).open("r") as f:
         opinion_data = ast.literal_eval(f.read())
 
     q_iter = query_iterator("courtlistener", "", ["metadata"], 1000)
@@ -589,7 +556,7 @@ def batch_metadata_files() -> None:
             None,
         )
         if input_file is None:
-            print("error: input file not found for " + batch.input_file_id)
+            print("input file not found for " + batch.input_file_id)
             continue
 
         input_filename = input_file.filename
@@ -603,9 +570,6 @@ def batch_metadata_files() -> None:
                 f.write(result)
         with pathlib.Path(basedir + result_file_name).open("r") as f:
             for i, line in enumerate(f, start=1):
-                if not line:
-                    print(f"line {i} empty, skipping")
-                    continue
                 output = json.loads(line)
                 with pathlib.Path(basedir + input_filename).open("r") as in_f:
                     input_line = in_f.readline()
@@ -613,8 +577,6 @@ def batch_metadata_files() -> None:
                     while input_line and input_data["custom_id"] != output["custom_id"]:
                         input_line = in_f.readline()
                         input_data = json.loads(input_line)
-                if input_data["custom_id"] != output["custom_id"]:
-                    print("error: input data not found for " + output["custom_id"])
                 custom_id_split = output["custom_id"].split("-")
                 cluster_id = int(custom_id_split[0])
                 opinion_id = int(custom_id_split[1])
@@ -623,13 +585,209 @@ def batch_metadata_files() -> None:
                 metadata.update(opinion_data[opinion_id])
                 metadata.update(docket_data[metadata["docket_id"]])
                 text = input_data["body"]["input"]
-                if output["response"]["status_code"] != 200:
-                    print(f"error: bad status code for batch {batch.id} id {output['custom_id']}")
-                    continue
                 vector = output["response"]["body"]["data"][0]["embedding"]
                 metadatas.append(metadata)
                 texts.append(text)
                 vectors.append(vector)
+                if i % 5000 == 0:
+                    print(f"i = {i}")
+                if len(metadatas) == 1000:
+                    upload_result = upload_data_json("courtlistener_bulk", vectors, texts, metadatas)
+                    if upload_result["message"] != "Success":
+                        print(f"error: bad upload for batch {batch.id}")
+                        continue
+                    upload_counter += 1
+                    if upload_counter % 10 == 0:
+                        print("uploaded 10 batches")
+                    metadatas, texts, vectors = [], [], []
+        # upload the last <1000 lines
+        if len(metadatas) > 0:
+            upload_result = upload_data_json("courtlistener_bulk", vectors, texts, metadatas)
+            if upload_result["message"] != "Success":
+                print(f"error: bad upload for batch {batch.id}")
+                continue
+            upload_counter += 1
+            if upload_counter % 10 == 0:
+                print("uploaded 10 batches")
+
+
+
+
+def process_batches() -> None:
+    import ast
+    import bz2
+    import json
+    import pathlib
+
+    import pandas as pd
+    from openai import OpenAI
+
+    from app.milvusdb import query_iterator
+
+    def get_data_dictionary(data_filename: str, id_filename: str, chunksize: int, row_fn, people_filename: str | None = None, court_filename: str | None = None) -> dict:
+        with pathlib.Path(id_filename).open("r") as f:
+            matching_ids = ast.literal_eval(f.read())
+        total_rows = 0
+        data = {}
+        if people_filename is not None:
+            # opinion data
+            people_df = None # pd.read_csv(people_filename)
+            court_df = None
+            cols = ["id", "type"]
+        elif court_filename is not None:
+            # docket data
+            people_df = None
+            court_df = pd.read_csv(court_filename)
+            cols = ["id", "court_id"]
+        else:
+            # cluster data
+            people_df, court_df = None, None
+            cols = ["id", "slug"]
+
+        with bz2.open(data_filename, "rt") as bz_file:
+            for chunk in pd.read_csv(bz_file, chunksize=chunksize, low_memory=False, usecols=cols):
+                total_rows += len(chunk)
+                matches = chunk[chunk["id"].isin(matching_ids)]
+                for _, row in matches.iterrows():
+                    row_fn(row, data, people_df, court_df)
+
+                if total_rows % (10 * chunksize) == 0:
+                    print(f"Processed {total_rows} rows in {data_filename}...")
+        return data
+
+    def opinion_row_data(row, data, people_df, court_df) -> None:
+        data[row["id"]] = {"id": row["id"], "type": row["type"]}
+        # if pd.notna(row["author_str"]):
+        #     data[row["id"]]["author_name"] = row["author_str"]
+        # if pd.notna(row["author_id"]):
+        #     # look up author_name in people db
+        #     data[row["id"]]["author_id"] = row["author_id"]
+        #     if "author_name" not in data[row["id"]]:
+        #         author = people_df[people_df["id"] == row["author_id"]].iloc[0]
+        #         author_name = author["name_first"]
+        #         if pd.notna(author["name_middle"]):
+        #             author_name += " " + author["name_middle"]
+        #         author_name += " " + author["name_last"]
+        #         if pd.notna(author["name_suffix"]):
+        #             author_name += " " + author["name_suffix"]
+        #         data[row["id"]]["author_name"] = author_name
+        # if pd.notna(row["download_url"]):
+        #     data[row["id"]]["download_url"] = row["download_url"]
+
+    def cluster_row_data(row, data, people_df, court_df) -> None:
+        data[row["id"]] = {"id": row["id"]}
+        # if pd.notna(row["case_name"]):
+        #     data[row["id"]]["case_name"] = row["case_name"]
+        # elif pd.notna(row["case_name_short"]):
+        #     data[row["id"]]["case_name"] = row["case_name_short"]
+        # else:
+        #     data[row["id"]]["case_name"] = row["case_name_full"]
+        # if pd.notna(row["summary"]):
+        #     data[row["id"]]["summary"] = row["summary"]
+        # if pd.notna(row["precedential_status"]):
+        #     data[row["id"]]["precedential_status"] = row["precedential_status"]
+        # if pd.notna(row["other_dates"]):
+        #     data[row["id"]]["other_dates"] = row["other_dates"]
+        # if pd.notna(row["date_blocked"]):
+        #     data[row["id"]]["date_blocked"] = row["date_blocked"]
+        if pd.notna(row["slug"]):
+            data[row["id"]]["slug"] = row["slug"]
+
+    def docket_row_data(row, data, people_df, court_df) -> None:
+        data[row["id"]] = {"court_id": row["court_id"]}
+        # look up court_name in courts db
+        court = court_df[court_df["id"] == row["court_id"]].iloc[0]
+        data[row["id"]]["court_name"] = court["full_name"]
+
+    basedir = "/Users/njc/Documents/programming/opb/data/courtlistener_bulk/"
+    opinion_filename = basedir + "opinions-2024-05-06.csv.bz2"
+    cluster_filename = basedir + "opinion-clusters-2024-05-06.csv.bz2"
+    docket_filename = basedir + "dockets-2024-05-06.csv.bz2"
+    people_filename = basedir + "people-db-people-2024-05-06.csv"
+    court_filename = basedir + "courts-2024-05-06.csv.bz2"
+    opinion_ids_filename = basedir + "opinion_ids"
+    cluster_ids_filename = basedir + "cluster_ids"
+    docket_ids_filename = basedir + "docket_ids"
+    opinion_data_filename = basedir + "opinion_data"
+    cluster_data_filename = basedir + "cluster_data"
+    docket_data_filename = basedir + "docket_data"
+
+
+    # docket_data = get_data_dictionary(docket_filename, docket_ids_filename, 100000, docket_row_data, court_filename=court_filename)
+    # with pathlib.Path(docket_data_filename).open("w") as f:
+    #     f.write(str(docket_data))
+    # cluster_data = get_data_dictionary(cluster_filename, cluster_ids_filename, 100000, cluster_row_data)
+    # with pathlib.Path(cluster_data_filename).open("w") as f:
+    #     f.write(str(cluster_data))
+    # opinion_data = get_data_dictionary(opinion_filename, opinion_ids_filename, 100000, opinion_row_data, people_filename=people_filename)
+    # with pathlib.Path(opinion_data_filename).open("w") as f:
+    #     f.write(str(opinion_data))
+
+    with pathlib.Path(docket_data_filename).open("r") as f:
+        docket_data = ast.literal_eval(f.read())
+    with pathlib.Path(cluster_data_filename).open("r") as f:
+        cluster_data = ast.literal_eval(f.read())
+    with pathlib.Path(opinion_data_filename).open("r") as f:
+        opinion_data = ast.literal_eval(f.read())
+
+    q_iter = query_iterator("courtlistener", "", ["metadata"], 1000)
+    res = q_iter.next()
+    while len(res) > 0:
+        for hit in res:
+            if "ai_summary" in hit["metadata"] and hit["metadata"]["id"] in opinion_data:
+                opinion_data[hit["metadata"]["id"]]["ai_summary"] = hit["metadata"]["ai_summary"]
+        res = q_iter.next()
+    q_iter.close()
+
+    client = OpenAI()
+    openai_files = client.files.list()
+    batches = client.batches.list()
+    upload_counter = 0
+    for batch in batches.data:
+        metadatas, texts, vectors = [], [], []
+        if batch.status != "completed":
+            continue
+
+        input_file = next(
+            (f for f in openai_files if batch.input_file_id == f.id),
+            None,
+        )
+        if input_file is None:
+            print("input file not found for " + batch.input_file_id)
+            continue
+
+        input_filename = input_file.filename
+        print(input_filename)
+
+        result_file_id = batch.output_file_id
+        result_file_name = input_filename.split(".")[0] + "_out.jsonl"
+        if not pathlib.Path(basedir + result_file_name).exists():
+            result = client.files.content(result_file_id).content
+            with pathlib.Path(basedir + result_file_name).open("wb") as f:
+                f.write(result)
+        with pathlib.Path(basedir + result_file_name).open("r") as f:
+            for i, line in enumerate(f, start=1):
+                output = json.loads(line)
+                with pathlib.Path(basedir + input_filename).open("r") as in_f:
+                    input_line = in_f.readline()
+                    input_data = json.loads(input_line)
+                    while input_line and input_data["custom_id"] != output["custom_id"]:
+                        input_line = in_f.readline()
+                        input_data = json.loads(input_line)
+                custom_id_split = output["custom_id"].split("-")
+                cluster_id = int(custom_id_split[0])
+                opinion_id = int(custom_id_split[1])
+                metadata = {}
+                metadata.update(cluster_data[cluster_id])
+                metadata.update(opinion_data[opinion_id])
+                metadata.update(docket_data[metadata["docket_id"]])
+                text = input_data["body"]["input"]
+                vector = output["response"]["body"]["data"][0]["embedding"]
+                metadatas.append(metadata)
+                texts.append(text)
+                vectors.append(vector)
+                if i % 5000 == 0:
+                    print(f"i = {i}")
                 if len(metadatas) == 1000:
                     upload_result = upload_data_json("courtlistener_bulk", vectors, texts, metadatas)
                     if upload_result["message"] != "Success":
