@@ -382,6 +382,7 @@ def upload_data_json(
     data = [vectors, texts, metadatas]
     collection = Collection(collection_name)
     pks = []
+    insert_count = 0
     for i in range(0, len(texts), batch_size):
         batch_vector = data[0][i: i + batch_size]
         batch_text = data[1][i: i + batch_size]
@@ -390,6 +391,7 @@ def upload_data_json(
         current_batch_size = len(batch[0])
         res = collection.insert(batch)
         pks += res.primary_keys
+        insert_count += res.insert_count
         if res.insert_count != current_batch_size:
             # the upload failed, try deleting any partially uploaded data
             bad_deletes = []
@@ -415,7 +417,7 @@ def upload_data_json(
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
-    return {"message": "Success", "insert_count": res.insert_count if res else 0}
+    return {"message": "Success", "insert_count": insert_count}
 
 
 @observe(capture_output=False)
