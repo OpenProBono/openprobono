@@ -355,9 +355,11 @@ def courtlistener_search(
         # needs to be in MM-DD-YYYY format
         query_str += f"&filed_before={dt[1]}-{dt[2]}-{dt[0]}"
 
+    opinion_ids = []
     with ThreadPoolExecutor() as executor:
         futures = []
         for result in search(query_str)["results"][:k]:
+            opinion_ids.append(result["id"])
             ctx = copy_context()
             def task(r=result, context=ctx):  # noqa: ANN001, ANN202
                 return context.run(upload_search_result, r)
@@ -365,7 +367,9 @@ def courtlistener_search(
 
         for future in as_completed(futures):
             _ = future.result()
-    return courtlistener_query(q, k, valid_jurisdics, keyword_query, after_date, before_date)
+    if not keyword_query:
+        opinion_ids = None
+    return courtlistener_query(q, k, valid_jurisdics, keyword_query, after_date, before_date, opinion_ids)
 
 @observe(capture_input=False, capture_output=False)
 def courtlistener_query(
@@ -375,6 +379,7 @@ def courtlistener_query(
     keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
+    search_result_ids: list[str] | None = None,
 ) -> dict:
     """Query Courtlistener data.
 
@@ -394,6 +399,9 @@ def courtlistener_query(
         The after date for the query date range in YYYY-MM-DD format, by default None
     before_date : str | None, optional
         The before date for the query date range in YYYY-MM-DD format, by default None
+    search_result_ids : list[str] | None = None
+        The opinion ids from CL search results if keyword_query was used,
+        by default None
 
     Returns
     -------
@@ -412,7 +420,12 @@ def courtlistener_query(
         expr += (" and " if expr else "") + f"metadata['date_filed']<'{before_date}'"
     if keyword_query:
         keyword_query = fuzzy_keyword_query(keyword_query)
-        expr += (" and " if expr else "") + f"text like '% {keyword_query} %'"
+        expr += (" and " if expr else "")
+        keyword_expr = f"text like '% {keyword_query} %'"
+        if search_result_ids:
+            expr += f"(metadata['id'] in {search_result_ids} or " + keyword_expr + ")"
+        else:
+            expr += keyword_expr
     return query(courtlistener_collection, q, k, expr)
 
 

@@ -313,7 +313,7 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
         A fuzzy version of the keyword query
 
     """
-    min_length_fuzzy = 5
+    min_length_fuzzy = 6
     keywords = keyword_query.split()
     fuzzy_keywords = [
         "".join([
@@ -326,7 +326,10 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
         kw if len(kw) < min_length_fuzzy else "_" + kw[1:]
         for kw in fuzzy_keywords
     ]
-    return " ".join(fuzzy_keywords)
+    fuzzy_keywords_str = " ".join(fuzzy_keywords)
+    fuzzy_keywords_str = fuzzy_keywords_str.replace("%", "\\\\%")
+    fuzzy_keywords_str = fuzzy_keywords_str.replace('"', '\\"')
+    return fuzzy_keywords_str.replace("'", "\\'")
 
 
 def source_exists(collection_name: str, url: str) -> bool:
@@ -390,6 +393,7 @@ def upload_data_json(
         batch = [batch_vector, batch_text, batch_metadata]
         current_batch_size = len(batch[0])
         res = collection.insert(batch)
+        print(res)
         pks += res.primary_keys
         insert_count += res.insert_count
         if res.insert_count != current_batch_size:
