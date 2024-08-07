@@ -486,7 +486,6 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
 
     """
     coll = Collection(collection_name)
-    coll.load()
     ids = coll.delete(expr=expr)
     return {"message": "Success", "delete_count": ids.delete_count}
 
@@ -808,7 +807,6 @@ def session_source_summaries(
 
     """
     coll = Collection(SESSION_DATA)
-    coll.load()
     q_iter = coll.query_iterator(
         expr=f"session_id=='{session_id}'",
         output_fields=["metadata"],
