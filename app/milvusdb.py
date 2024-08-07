@@ -444,7 +444,6 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
 
     """
     coll = Collection(collection_name)
-    coll.load()
     collection_format = load_vdb_param(collection_name, "metadata_format")
     output_fields = ["text", "vector"]
     match collection_format:
