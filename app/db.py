@@ -7,6 +7,7 @@ from typing import Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 from app.models import (
     BotRequest,
@@ -218,6 +219,28 @@ def load_bot(bot_id: str) -> BotRequest:
         return BotRequest(**bot.to_dict())
 
     return None
+
+def browse_bots(api_key: str) -> dict:
+    """Browse Bots by api key.
+
+    Parameters
+    ----------
+    api_key : str
+        api_key
+
+    Returns
+    -------
+    dict
+        the bots, indexed by bot id
+
+    """
+    bot_ref = db.collection(BOT_COLLECTION + VERSION)
+    query = bot_ref.where(filter=FieldFilter("api_key", "==", api_key))
+    data = query.get()
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
 
 def load_vdb(collection_name: str) -> dict:
     """Load the parameters for a collection from the database.

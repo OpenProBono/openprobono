@@ -12,6 +12,7 @@ from app.bot import anthropic_bot, openai_bot, openai_bot_stream
 from app.db import (
     admin_check,
     api_key_check,
+    browse_bots,
     fetch_session,
     load_bot,
     load_session,
@@ -367,6 +368,9 @@ def create_bot(
 
     return {"message": "Success", "bot_id": bot_id}
 
+@api.post("/view_bots", tags=["Bot"])
+def view_bots(api_key: str = Security(api_key_auth)) -> dict:
+    return {"message": "Success", "data": browse_bots(api_key)}
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
@@ -381,6 +385,8 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
         the session to associate the file with.
     summary: str, optional
         A summary of the file written by the user, by default None.
+    api_key: str
+        The api key
 
     Returns
     -------
