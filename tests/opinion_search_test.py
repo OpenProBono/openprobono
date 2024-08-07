@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.courtlistener import jurisdiction_codes
-from app.opinion_search import opinion_search
+from app.opinion_search import opinion_search, summarize_opinion
 
 if TYPE_CHECKING:
     import requests
@@ -169,3 +169,7 @@ def test_query_filtered(
     assert "date_filed" in results[0]["entity"]["metadata"]
     assert results[0]["entity"]["metadata"]["date_filed"] < before_date
     assert results[0]["entity"]["metadata"]["date_filed"] > after_date
+
+def test_summarize_opinion() -> None:
+    # summarize_opinion(2207257)
+    pass

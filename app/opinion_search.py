@@ -7,7 +7,7 @@ from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import summarize_langchain
 from app.courtlistener import courtlistener_collection, courtlistener_search
-from app.milvusdb import MAX_K, get_expr, query_iterator, upsert_expr_json
+from app.milvusdb import MAX_K, get_expr, query_iterator, upsert_expr
 from app.models import OpenAIModelEnum
 
 
@@ -72,8 +72,9 @@ def summarize_opinion(opinion_id: int) -> str:
     summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     for hit in hits:
         hit["metadata"]["ai_summary"] = summary
+        del hit["pk"]
     # save the summary to Milvus for future searches
-    upsert_expr_json(courtlistener_collection, f"metadata['id']=={opinion_id}", hits)
+    upsert_expr(courtlistener_collection, f"metadata['id']=={opinion_id}", hits)
     end = time.time()
     print(f"summarization time: {end - start!s}")
     return summary

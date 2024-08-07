@@ -424,6 +424,67 @@ def upload_data_json(
     return {"message": "Success", "insert_count": insert_count}
 
 
+@observe(capture_input=False)
+def upload_data(
+    collection_name: str,
+    data: list[dict],
+    batch_size: int = 1000,
+) -> dict[str, str]:
+    """Upload data to a collection with json format.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the Milvus collection.
+    data : list[dict]
+        The data to upload. Format should match collection schema.
+        Example: `[{'vector': [], 'text': '', 'metadata': {}}]`
+    batch_size : int, optional
+        The number of records to be uploaded at a time, by default 1000.
+
+    Returns
+    -------
+    dict[str, str]
+        With a `message`, `insert_count` on success
+
+    """
+    collection = Collection(collection_name)
+    pks = []
+    insert_count = 0
+    for i in range(0, len(data), batch_size):
+        batch = data[i: i + batch_size]
+        current_batch_size = len(batch)
+        res = collection.insert(batch)
+        pks += res.primary_keys
+        insert_count += res.insert_count
+        if res.insert_count != current_batch_size:
+            # the upload failed, try deleting any partially uploaded data
+            bad_deletes = []
+            for pk in pks:
+                delete_res = collection.delete(expr=f"pk=={pk}")
+                if delete_res.delete_count != 1:
+                    bad_deletes.append(pk)
+            bad_insert = (
+                f"Failure: expected {current_batch_size} insertions but got "
+                f"{res.insert_count}. "
+            )
+            if bad_deletes:
+                logging.error(
+                    "dangling data",
+                    extra={"pks": bad_deletes},
+                )
+                bad_insert += (
+                    "We were unable to delete some of your partially uploaded data. "
+                    "This has been logged, and your data will eventually be deleted. "
+                    "If you would like more information, please email "
+                    "contact@openprobono.com."
+                )
+            else:
+                bad_insert += "Any partially uploaded data has been deleted."
+            return {"message": bad_insert}
+    return {"message": "Success", "insert_count": insert_count}
+
+
 @observe(capture_output=False)
 def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     """Get database entries according to a boolean expression.
@@ -491,7 +552,7 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
 
 
 @observe()
-def upsert_expr_json(
+def upsert_expr(
     collection_name: str,
     expr: str,
     upsert_data: list[dict],
@@ -516,10 +577,9 @@ def upsert_expr_json(
     delete_result = delete_expr(collection_name, expr)
     if delete_result["message"] != "Success":
         return delete_result
-    vectors = [d["vector"] for d in upsert_data]
-    texts = [d["text"] for d in upsert_data]
-    metadatas = [d["metadata"] for d in upsert_data]
-    return upload_data_json(collection_name, vectors, texts, metadatas)
+    delete_count = delete_result["delete_count"]
+    insert_result = upload_data(collection_name, upsert_data)
+    return {"delete_count": delete_count, **insert_result}
 
 
 def fields_to_json(fields_entry: dict) -> dict:
