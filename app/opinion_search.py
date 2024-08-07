@@ -7,7 +7,7 @@ from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import summarize_langchain
 from app.courtlistener import courtlistener_collection, courtlistener_search
-from app.milvusdb import get_expr, query_iterator, upsert_expr_json
+from app.milvusdb import MAX_K, get_expr, query_iterator, upsert_expr_json
 from app.models import OpenAIModelEnum
 
 
@@ -79,16 +79,16 @@ def summarize_opinion(opinion_id: int) -> str:
     return summary
 
 def count_opinions() -> int:
-    start = time.time()
-    q_iter = query_iterator(courtlistener_collection, "", ["metadata"], 10000)
-    opinions = set()
-    res = q_iter.next()
-    while len(res) > 0:
-        for hit in res:
-            if hit["metadata"]["id"] not in opinions:
-                opinions.add(hit["metadata"]["id"])
-        res = q_iter.next()
-    q_iter.close()
-    end = time.time()
-    print(f"opinion count time: {end - start!s}")
-    return len(opinions)
+    # start = time.time()
+    # q_iter = query_iterator(courtlistener_collection, "", ["opinion_id"], MAX_K)
+    # opinions = set()
+    # res = q_iter.next()
+    # while len(res) > 0:
+    #     for hit in res:
+    #         if hit["opinion_id"] not in opinions:
+    #             opinions.add(hit["opinion_id"])
+    #     res = q_iter.next()
+    # q_iter.close()
+    # end = time.time()
+    # print(f"opinion count time: {end - start!s}")
+    return 623662

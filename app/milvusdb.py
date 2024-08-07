@@ -257,13 +257,12 @@ def query(
 
     """
     coll = Collection(collection_name)
-    coll.load()
     encoder = load_vdb_param(collection_name, "encoder")
     data = embed_strs([query], encoder)
     search_params = {
         "anns_field": "vector",
         "param": {}, # can customize index params assuming you know index type
-        "output_fields": ["text", "pk"],
+        "output_fields": ["text"],
         "data": data,
         "limit": k,
     }
@@ -288,8 +287,9 @@ def query(
                 key=lambda h: h["distance"],
             )
             # format output for tracing
+            pks = [hit["id"] for hit in hits]
             langfuse_context.update_current_observation(
-                output=[hit["entity"]["pk"] for hit in hits],
+                output=pks,
             )
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}

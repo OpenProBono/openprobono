@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextvars import copy_context
 from datetime import UTC, datetime, timedelta
 
 import requests
@@ -21,7 +19,7 @@ from app.milvusdb import (
 courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
 base_url = "https://www.courtlistener.com/api/rest/v3"
-courtlistener_collection = "courtlistener"
+courtlistener_collection = "courtlistener_bulk"
 courtlistener_timeout = 10 #seconds
 
 courtlistener_tool_args = {
@@ -334,42 +332,15 @@ def courtlistener_search(
         the response with relevant info from courtlistener
 
     """
-    # use semantic query if keyword not given
-    query_str = '"' + keyword_query + '"' if keyword_query else q
-    # add options to query string
     valid_jurisdics = []
     if jurisdictions:
         # look up each str in dictionary, append matches as lists
         for juris in jurisdictions:
-            if juris in jurisdiction_codes:
-                valid_jurisdics += jurisdiction_codes[juris].split(" ")
+            if juris.lower() in jurisdiction_codes:
+                valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
         # clear duplicate federal district jurisdictions if they exist
         valid_jurisdics = list(set(valid_jurisdics))
-        query_str += f"&court={' '.join(valid_jurisdics)}"
-    if after_date:
-        dt = after_date.split("-")
-        # needs to be in MM-DD-YYYY format
-        query_str += f"&filed_after={dt[1]}-{dt[2]}-{dt[0]}"
-    if before_date:
-        dt = before_date.split("-")
-        # needs to be in MM-DD-YYYY format
-        query_str += f"&filed_before={dt[1]}-{dt[2]}-{dt[0]}"
-
-    opinion_ids = []
-    with ThreadPoolExecutor() as executor:
-        futures = []
-        for result in search(query_str)["results"][:k]:
-            opinion_ids.append(result["id"])
-            ctx = copy_context()
-            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(upload_search_result, r)
-            futures.append(executor.submit(task))
-
-        for future in as_completed(futures):
-            _ = future.result()
-    if not keyword_query:
-        opinion_ids = None
-    return courtlistener_query(q, k, valid_jurisdics, keyword_query, after_date, before_date, opinion_ids)
+    return courtlistener_query(q, k, valid_jurisdics, keyword_query, after_date, before_date)
 
 @observe(capture_input=False, capture_output=False)
 def courtlistener_query(
@@ -379,7 +350,6 @@ def courtlistener_query(
     keyword_query: str | None = None,
     after_date: str | None = None,
     before_date: str | None = None,
-    search_result_ids: list[str] | None = None,
 ) -> dict:
     """Query Courtlistener data.
 
@@ -399,9 +369,6 @@ def courtlistener_query(
         The after date for the query date range in YYYY-MM-DD format, by default None
     before_date : str | None, optional
         The before date for the query date range in YYYY-MM-DD format, by default None
-    search_result_ids : list[str] | None = None
-        The opinion ids from CL search results if keyword_query was used,
-        by default None
 
     Returns
     -------
@@ -422,10 +389,7 @@ def courtlistener_query(
         keyword_query = fuzzy_keyword_query(keyword_query)
         expr += (" and " if expr else "")
         keyword_expr = f"text like '% {keyword_query} %'"
-        if search_result_ids:
-            expr += f"(metadata['id'] in {search_result_ids} or " + keyword_expr + ")"
-        else:
-            expr += keyword_expr
+        expr += keyword_expr
     return query(courtlistener_collection, q, k, expr)
 
 
