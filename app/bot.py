@@ -10,10 +10,12 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
 from app import chat_models
-from app.models import BotRequest, ChatRequest
+from app.milvusdb import check_session_data
+from app.models import BotRequest, ChatRequest, VDBTool
 from app.prompts import (
     MAX_NUM_TOOLS,
     MULTIPLE_TOOLS_PROMPT,
+    VDB_PROMPT,
 )
 from app.search_tools import (
     run_search_tool,
@@ -214,7 +216,18 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     client = OpenAI()
     messages = r.history
     messages.append({"role": "system", "content": bot.system_prompt})
+
+    #vdb tool for user uploaded files
+    if(check_session_data(r.session_id)):
+        bot.vdb_tools.append(VDBTool(
+            name="session_data",
+            collection_name="SessionData",
+            k=5,
+            prompt="Used to search user uploaded data. Only available if a user has uploaded a file."),
+        )
+
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+
     kwargs = {
         "client": client,
         "tools": toolset,

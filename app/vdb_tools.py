@@ -185,6 +185,9 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
             tool_after_date,
             tool_before_date,
         )
+    elif collection_name == SESSION_DATA:
+        session_id = function_args["session_id"]
+        function_response = query(collection_name, tool_query, k, session_id=session_id)
     else:
         function_response = query(collection_name, tool_query, k)
     return str(function_response)

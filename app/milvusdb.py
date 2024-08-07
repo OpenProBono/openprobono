@@ -17,6 +17,7 @@ from pymilvus import (
     connections,
     utility,
 )
+from requests import session
 
 from app.chat_models import summarize_langchain
 from app.db import load_vdb, store_vdb
@@ -742,6 +743,24 @@ def file_upload(
         metadatas[i]["session_id"] = session_id
     # upload
     return upload_data_json(SESSION_DATA, vectors, texts, metadatas)
+
+def check_session_data(session_id: str) -> bool:
+    """Check if user uploaded a file in a specific session.
+
+    Parameters
+    ----------
+    session_id : str
+        the session id
+
+    Returns
+    -------
+    bool
+        true if file was uploaded, false if it is empty
+
+    """
+    expr = f'metadata["session_id"] in ["{session_id}"]'
+    data = get_expr(SESSION_DATA, expr, 1)
+    return len(data["result"]) != 0
 
 
 def session_source_summaries(
