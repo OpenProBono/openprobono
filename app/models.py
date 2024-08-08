@@ -217,8 +217,7 @@ class ChatModelParams(BaseModel):
     engine: EngineEnum = EngineEnum.openai
     model: str = OpenAIModelEnum.gpt_3_5.value
     seed: int = 0
-    temperature: float = None
-    top_p : float = None
+    temperature: float = 0.0
 
 
 class EncoderParams(BaseModel):
