@@ -235,11 +235,12 @@ def browse_bots(api_key: str) -> dict:
 
     """
     bot_ref = db.collection(BOT_COLLECTION + VERSION)
-    query = bot_ref.where(filter=FieldFilter("api_key", "==", api_key))
+    query = bot_ref.where(filter=FieldFilter("public", "==", True))
     data = query.get()
     data_dict = {}
     for datum in data:
         data_dict[datum.id] = datum.to_dict()
+        data_dict[datum.id].pop("api_key")
     return data_dict
 
 def load_vdb(collection_name: str) -> dict:

@@ -223,8 +223,9 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
             name="session_data",
             collection_name="SessionData",
             k=5,
-            prompt="Used to search user uploaded data. Only available if a user has uploaded a file."),
-        )
+            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
+            session_id=r.session_id,
+        ))
 
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 

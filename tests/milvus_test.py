@@ -4,7 +4,7 @@ from re import search
 from app import milvusdb
 
 
-class SearchToolTests(unittest.TestCase):
+class SessionDataTests(unittest.TestCase):
 
     def test_empty_session_data(self):
         session_id = "emptysession"

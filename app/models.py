@@ -61,6 +61,7 @@ class VDBTool(BaseModel):
     collection_name: str
     k: int
     prompt: str = ""
+    session_id: str | None = None
 
 
 class ChatRequest(BaseModel):

@@ -284,6 +284,10 @@ def query(
     """
     if query_check(collection_name, query, k, session_id):
         return query_check(collection_name, query, k, session_id)
+    if session_id:
+        if expr:
+            expr += " and "
+        expr += f"metadata[\"session_id\"]=='{session_id}'"
 
     coll = Collection(collection_name)
     coll.load()
@@ -302,12 +306,10 @@ def query(
             search_params["output_fields"] += ["metadata"]
         case MilvusMetadataEnum.field:
             search_params["output_fields"] += load_vdb_param(collection_name, "fields")
+
     if expr:
         search_params["expr"] = expr
-    if session_id:
-        if expr:
-            expr += " and "
-        expr += f"session_id=='{session_id}'"
+
     res = coll.search(**search_params)
     if res:
         # on success, returns a list containing a single inner list containing
@@ -481,8 +483,8 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     if not utility.has_collection(collection_name):
         return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
-    coll.load()
     ids = coll.delete(expr=expr)
+    coll.flush()
     return {"message": "Success", "delete_count": ids.delete_count}
 
 
@@ -731,10 +733,12 @@ def file_upload(
 
     """
     # extract text
+    print(session_id)
+    print("session_id")
     elements = partition_uploadfile(file)
-    if summary is not None:
+    if summary is not None and summary is not "":
         for i in range(len(elements)):
-            elements[i].metadata["user_summary"] = summary
+            elements[i].metadata["user_summary"] = summary #this is broken ('ElementMetadata' object does not support item assignment)
     # chunk text
     texts, metadatas = chunk_elements_by_title(elements)
     vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
@@ -761,6 +765,20 @@ def check_session_data(session_id: str) -> bool:
     expr = f'metadata["session_id"] in ["{session_id}"]'
     data = get_expr(SESSION_DATA, expr, 1)
     return len(data["result"]) != 0
+
+def fetch_session_data_files(
+    session_id: str,
+    batch_size: int = 1000,
+) -> dict[str, dict[str, str]]:
+    coll = Collection(SESSION_DATA)
+    coll.load()
+    query = coll.query(
+        expr=f"metadata[\"session_id\"] in [\"{session_id}\"]",
+        output_fields=["metadata"],
+        batch_size=batch_size,
+    )
+    files = [data["metadata"]["filename"] for data in query]
+    return set(files)
 
 
 def session_source_summaries(

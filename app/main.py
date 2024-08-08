@@ -24,6 +24,7 @@ from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
     delete_expr,
+    fetch_session_data_files,
     file_upload,
     session_source_summaries,
     session_upload_ocr,
@@ -512,8 +513,7 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
 
     """
     print(f"api_key {api_key} getting session files for session {session_id}")
-    source_summaries = session_source_summaries(session_id)
-    files = list(source_summaries.keys())
+    files = fetch_session_data_files(session_id=session_id)
     return {"message": f"Success: found {len(files)} files", "result": files}
 
 
@@ -532,7 +532,7 @@ def delete_session_files(session_id: str, api_key: str = Security(api_key_auth))
         _description_
     """
     print(f"api_key {api_key} deleting session files for session {session_id}")
-    return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
+    return delete_expr(SESSION_DATA, f'metadata["session_id"] in ["{session_id}"]')
 
 
 @api.post("/upload_site", tags=["Admin Upload"])
