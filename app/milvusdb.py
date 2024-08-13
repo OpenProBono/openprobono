@@ -21,7 +21,6 @@ from pymilvus import (
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
-    partition_html_str,
     partition_uploadfile,
     quickstart_ocr,
     scrape,
@@ -64,6 +63,7 @@ MAX_K = 16384
 
 # core features
 
+@observe()
 def load_vdb_param(
     collection_name: str,
     param_name: str,
@@ -112,6 +112,7 @@ def load_vdb_param(
     return COLLECTION_PARAMS[collection_name][param_name]
 
 
+@observe()
 def create_collection(
     name: str,
     encoder: EncoderParams | None = None,
@@ -353,6 +354,8 @@ def source_exists(collection_name: str, url: str) -> bool:
 
     return len(q) > 0
 
+
+@observe()
 def upload_data(
     collection_name: str,
     data: list[dict],
@@ -376,10 +379,17 @@ def upload_data(
         With a `message`, `insert_count` on success
 
     """
+    data_count = len(data)
+    langfuse_context.update_current_observation(
+        input={
+            "collection_name":collection_name,
+            "data_count": data_count,
+        },
+    )
     collection = Collection(collection_name)
     pks = []
     insert_count = 0
-    for i in range(0, len(data), batch_size):
+    for i in range(0, data_count, batch_size):
         batch = data[i: i + batch_size]
         current_batch_size = len(batch)
         res = collection.insert(batch)
@@ -550,6 +560,13 @@ def upsert_expr(
         Contains `message` and `insert_count` if successful.
 
     """
+    langfuse_context.update_current_observation(
+        input={
+            "collection_name":collection_name,
+            "expr": expr,
+            "upsert_data_count": len(upsert_data),
+        },
+    )
     delete_result = delete_expr(collection_name, expr)
     if delete_result["message"] != "Success":
         return delete_result
@@ -617,74 +634,6 @@ def query_iterator(
 
 # application level features
 
-@observe(capture_input=False)
-def upload_courtlistener(
-    collection_name: str,
-    opinion: dict,
-    max_chunk_size: int = 10000,
-    new_after_n_chars: int = 2500,
-    chunk_overlap: int = 1000,
-) -> dict:
-    """Upload a courtlistener opinion to Milvus.
-
-    Parameters
-    ----------
-    collection_name : str
-        name of collection to upload to
-    opinion : dict
-        The opinion to upload
-    max_chunk_size : int, optional
-        the max chunk size to be uploaded to milvus, by default 10000
-    new_after_n_chars : int, optional
-        cuts off new sections after this size (soft max), see `chunk_by_title`
-        for details, by default 2500
-    chunk_overlap : int, optional
-        chunk overlap to be uploaded to milvus, by default 1000
-
-    Returns
-    -------
-    dict
-        With a `message` indicating success or failure and an `insert_count` on success
-
-    """
-    langfuse_context.update_current_observation(
-        input={"case_name": opinion["case_name"], "id": opinion["id"]},
-    )
-    if "text" not in opinion or not opinion["text"]:
-        return {"message": "Failure: no opinion text found"}
-
-    # chunk
-    elements = partition_html_str(opinion["text"])
-    texts, _ = chunk_elements_by_title(
-        elements,
-        max_chunk_size,
-        new_after_n_chars,
-        chunk_overlap,
-    )
-
-    # metadata
-    del opinion["text"]
-    #delete fields which are empty or over 1000 characters
-    maxlen = 1000
-    keys_to_remove = [
-        key for key in opinion
-        if not opinion[key] or (isinstance(opinion[key], str) and len(opinion[key])) > maxlen
-    ]
-    for key in keys_to_remove:
-        del opinion[key]
-    # cited opinions take up a lot of tokens and are included in the text
-    if "opinions_cited" in opinion:
-        del opinion["opinions_cited"]
-    # upload
-    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
-    data = [{
-        "vector": vectors[i],
-        "metadata": opinion,
-        "text": texts[i],
-    } for i in range(len(texts))]
-    return upload_data(collection_name, data)
-
-
 def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
     create_collection(collection_name, description=description)
     urls = [url]
@@ -724,6 +673,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
             prev_elements = cur_elements
     print(urls)
     return urls
+
 
 @observe(capture_output=False)
 def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_chars=2500, overlap=500) -> dict[str, str]:

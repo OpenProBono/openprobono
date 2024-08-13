@@ -27,9 +27,8 @@ def opinion_search(request: OpinionSearchRequest) -> list[dict]:
     # get courtlistener results
     cl_result = courtlistener_query(request)
     cl_hits = cl_result["result"]
-    langfuse_context.update_current_observation(
-        output=[hit["entity"]["metadata"]["id"] for hit in cl_hits],
-    )
+    pks = [hit["entity"]["metadata"]["id"] for hit in cl_hits]
+    langfuse_context.update_current_observation(output=pks)
     return cl_hits
 
 
@@ -48,8 +47,7 @@ def add_opinion_summary(opinion_id: int) -> str:
         The opinion summary
 
     """
-    print(opinion_id)
-    res = get_expr(courtlistener_collection, f"metadata['id']=={opinion_id}")
+    res = get_expr(courtlistener_collection, f"opinion_id=={opinion_id}")
     hits = res["result"]
     hits = sorted(hits, key=lambda x: x["pk"])
     texts = [hit["text"] for hit in hits]
@@ -58,10 +56,10 @@ def add_opinion_summary(opinion_id: int) -> str:
         hit["metadata"]["ai_summary"] = summary
         del hit["pk"]
     # save the summary to Milvus for future searches
-    upsert_expr(courtlistener_collection, f"metadata['id']=={opinion_id}", hits)
+    upsert_expr(courtlistener_collection, f"opinion_id=={opinion_id}", hits)
     return summary
 
 
 def count_opinions() -> int:
     # hardcoded for now
-    return 811019
+    return 799315

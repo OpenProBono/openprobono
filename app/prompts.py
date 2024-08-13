@@ -226,17 +226,17 @@ The output format should look as follows: \"Feedback: {{Write out your analysis 
 Please do not generate any other opening, closing, and explanations. Be sure to include [RESULT] in your output."""
 
 
-OPINION_SUMMARY_BASE_PROMPT = """Write your summary as a list of bullet points with the following titles:
+OPINION_SUMMARY_BASE_PROMPT = """Write your summary as a list of bullet points in the following format:
 
-Parties
-Introduction
-Background
-Procedural History
-Issues Presented
-Analysis
-Holding
+- **Parties**: <parties>
+- **Introduction**: <introduction>
+- **Background**: <background>
+- **Procedural History**: <procedural history>
+- **Issues Presented**: <issues presented>
+- **Analysis**: <analysis>
+- **Holding**: <holding>
 
-Provide exactly one bullet point per title. Each bullet point should be no longer than 3 sentences. Only use the titles given above, and do not change the titles."""
+Each bullet point should be no longer than 3 sentences. Only include the bullets above, and do not change the titles."""
 
 OPINION_SUMMARY_MAP_PROMPT = \
     "Your task is to summarize a judicial opinion. " +\
