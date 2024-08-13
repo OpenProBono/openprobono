@@ -37,7 +37,7 @@ from app.models import (
     OpinionSearchRequest,
     get_uuid_id,
 )
-from app.opinion_search import count_opinions, opinion_search, summarize_opinion
+from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 from app.prompts import FILTERED_CASELAW_PROMPT  # noqa: TCH001
 
 # this is to ensure tracing with langfuse
@@ -547,14 +547,7 @@ def search_opinions(
     if not api_key_check(api_key):
         return {"message": "Failure: API key invalid"}
     try:
-        results = opinion_search(
-            req.query,
-            req.k,
-            req.jurisdictions,
-            req.keyword_query,
-            req.after_date,
-            req.before_date,
-        )
+        results = opinion_search(req)
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
@@ -569,7 +562,7 @@ def get_opinion_summary(
     if not api_key_check(api_key):
         return {"message": "Failure: API key invalid"}
     try:
-        summary = summarize_opinion(opinion_id)
+        summary = add_opinion_summary(opinion_id)
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
     else:

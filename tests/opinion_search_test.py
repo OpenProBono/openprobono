@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.courtlistener import jurisdiction_codes
-from app.opinion_search import opinion_search, summarize_opinion
+from app.models import OpinionSearchRequest
+from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 
 if TYPE_CHECKING:
     import requests
@@ -46,7 +47,8 @@ def _test_response(response: requests.Response) -> None:
 @pytest.mark.parametrize(("query", "jurisdictions"), [(test_query, test_jurisdictions)])
 def test_opinion_search(query: str, jurisdictions: list[str]) -> None:
     """Run the opinion_search function directly with jurisdictions."""
-    results = opinion_search(query, 1, jurisdictions, None, None, None)
+    request = OpinionSearchRequest(query=query, k=1, jurisdictions=jurisdictions)
+    results = opinion_search(request)
     _test_results(results)
     query_juris_codes = []
     for juris in jurisdictions:
@@ -170,6 +172,9 @@ def test_query_filtered(
     assert results[0]["entity"]["metadata"]["date_filed"] < before_date
     assert results[0]["entity"]["metadata"]["date_filed"] > after_date
 
-def test_summarize_opinion() -> None:
-    # summarize_opinion(2207257)
+def test_summary() -> None:
     pass
+
+def test_count_opinions() -> None:
+    opinion_count = count_opinions()
+    assert opinion_count > 0

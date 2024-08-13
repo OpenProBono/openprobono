@@ -18,8 +18,7 @@ from pymilvus import (
     utility,
 )
 
-from app.chat_models import summarize_langchain
-from app.db import load_vdb, store_vdb
+from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
     partition_html_str,
@@ -30,6 +29,7 @@ from app.loaders import (
 )
 from app.models import EncoderParams, MilvusMetadataEnum, OpenAIModelEnum
 from app.splitters import chunk_elements_by_title, chunk_str
+from app.summarization import summarize_langchain
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
@@ -353,78 +353,6 @@ def source_exists(collection_name: str, url: str) -> bool:
 
     return len(q) > 0
 
-@observe(capture_input=False)
-def upload_data_json(
-    collection_name: str,
-    vectors: list[list[float]],
-    texts: list[str],
-    metadatas: list[dict],
-    batch_size: int = 1000,
-) -> dict[str, str]:
-    """Upload data to a collection with json format.
-
-    Parameters
-    ----------
-    texts : list[str]
-        The text to be uploaded.
-    vectors : list[list[float]]
-        The vectors to be uploaded.
-    metadatas : list[dict]
-        The metadata to be uploaded.
-    collection_name : str
-        The name of the Milvus collection.
-    batch_size : int, optional
-        The number of records to be uploaded at a time, by default 1000.
-
-    Returns
-    -------
-    dict[str, str]
-        With a `message`, `insert_count` on success
-
-    """
-    data = [vectors, texts, metadatas]
-    collection = Collection(collection_name)
-    pks = []
-    insert_count = 0
-    for i in range(0, len(texts), batch_size):
-        batch_vector = data[0][i: i + batch_size]
-        batch_text = data[1][i: i + batch_size]
-        batch_metadata = data[2][i: i + batch_size]
-        batch = [batch_vector, batch_text, batch_metadata]
-        current_batch_size = len(batch[0])
-        res = collection.insert(batch)
-        print(res)
-        pks += res.primary_keys
-        insert_count += res.insert_count
-        if res.insert_count != current_batch_size:
-            # the upload failed, try deleting any partially uploaded data
-            bad_deletes = []
-            for pk in pks:
-                delete_res = collection.delete(expr=f"pk=={pk}")
-                if delete_res.delete_count != 1:
-                    bad_deletes.append(pk)
-            bad_insert = (
-                f"Failure: expected {current_batch_size} insertions but got "
-                f"{res.insert_count}. "
-            )
-            if bad_deletes:
-                logging.error(
-                    "dangling data",
-                    extra={"pks": bad_deletes},
-                )
-                bad_insert += (
-                    "We were unable to delete some of your partially uploaded data. "
-                    "This has been logged, and your data will eventually be deleted. "
-                    "If you would like more information, please email "
-                    "contact@openprobono.com."
-                )
-            else:
-                bad_insert += "Any partially uploaded data has been deleted."
-            return {"message": bad_insert}
-    return {"message": "Success", "insert_count": insert_count}
-
-
-@observe(capture_input=False)
 def upload_data(
     collection_name: str,
     data: list[dict],
@@ -482,6 +410,54 @@ def upload_data(
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
+    return {"message": "Success", "insert_count": insert_count}
+
+
+def upload_data_firebase(
+    coll_name: str,
+    data: list[dict],
+    source_ids: set | None = None,
+) -> dict:
+    """Insert chunk data into Firebase.
+
+    Parameters
+    ----------
+    coll_name : str
+        The name of the Firebase collection.
+    data : list[dict]
+        Each element must contain `text`, `chunk_index`, `source_id`.
+    source_ids : set | None, optional
+        A set of source_ids that have already been inserted into the database,
+        by default None.
+
+    Returns
+    -------
+    dict
+        Containing a message and insert count
+
+    """
+    if source_ids is None:
+        source_ids = set()
+    db_batch = get_batch()
+    insert_count = len(data)
+    for i in range(insert_count):
+        text = data[i]["text"]
+        chunk_idx = data[i]["chunk_index"]
+        source_id = data[i]["source_id"]
+        if source_id not in source_ids:
+            source_ids.add(source_id)
+            db_source = load_vdb_source(coll_name, source_id)
+            del data[i]["text"]
+            del data[i]["chunk_index"]
+            del data[i]["source_id"]
+            db_batch.set(db_source, data[i])
+        chunk_data = {"text": text, "chunk_index": chunk_idx}
+        db_chunk = load_vdb_chunk(coll_name, source_id, data[i]["pk"])
+        db_batch.set(db_chunk, chunk_data)
+        if i % 1000 == 0:
+            db_batch.commit()
+            db_batch = get_batch()
+    db_batch.commit()
     return {"message": "Success", "insert_count": insert_count}
 
 
@@ -699,24 +675,32 @@ def upload_courtlistener(
     # cited opinions take up a lot of tokens and are included in the text
     if "opinions_cited" in opinion:
         del opinion["opinions_cited"]
-
-    metadatas = [opinion] * len(texts)
     # upload
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
-    return upload_data_json(collection_name, vectors, texts, metadatas)
+    data = [{
+        "vector": vectors[i],
+        "metadata": opinion,
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(collection_name, data)
 
 
 def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
     create_collection(collection_name, description=description)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
-    strs, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
-    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+    texts, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
+    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
     encoder = load_vdb_param(collection_name, "encoder")
-    vectors = embed_strs(strs, encoder)
-    upload_data_json(collection_name, vectors, strs, metadatas)
+    vectors = embed_strs(texts, encoder)
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    upload_data(collection_name, data)
     print("new_urls: ", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
@@ -731,7 +715,12 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
             vectors = embed_strs(strs, encoder)
-            upload_data_json(collection_name, vectors, strs, metadatas)
+            data = [{
+                "vector": vectors[i],
+                "metadata": metadatas[i],
+                "text": texts[i],
+            } for i in range(len(texts))]
+            upload_data(collection_name, data)
             prev_elements = cur_elements
     print(urls)
     return urls
@@ -756,14 +745,19 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
     elements = scrape(url)
     if len(elements) == 0:
         return {"message": f"Failure: no elements found at {url}"}
-    strs, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
-    vectors = embed_strs(strs, load_vdb_param(collection_name, "encoder"))
-    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+    texts, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
+    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
+    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     for metadata in metadatas:
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
-    return upload_data_json(collection_name, vectors, strs, metadatas)
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(collection_name, data)
 
 
 def session_upload_ocr(
@@ -795,9 +789,9 @@ def session_upload_ocr(
 
     """
     reader = quickstart_ocr(file)
-    strs = chunk_str(reader, max_chunk_size, chunk_overlap)
-    vectors = embed_strs(strs, load_vdb_param(SESSION_DATA, "encoder"))
-    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+    texts = chunk_str(reader, max_chunk_size, chunk_overlap)
+    vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
+    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     metadata = {
         "session_id": session_id,
         "source": file.filename,
@@ -806,7 +800,12 @@ def session_upload_ocr(
     if summary is not None:
         metadata["user_summary"] = summary
     # upload
-    return upload_data_json(SESSION_DATA, vectors, strs, [metadata] * len(strs))
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadata,
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(SESSION_DATA, data)
 
 
 def file_upload(
@@ -843,7 +842,12 @@ def file_upload(
     for i in range(len(metadatas)):
         metadatas[i]["session_id"] = session_id
     # upload
-    return upload_data_json(SESSION_DATA, vectors, texts, metadatas)
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(SESSION_DATA, data)
 
 
 def session_source_summaries(

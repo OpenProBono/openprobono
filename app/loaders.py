@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import io
-import json
 import mimetypes
 import os
+import pathlib
 import time
-from pathlib import Path
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING
 
 import requests
 from bs4 import BeautifulSoup
@@ -24,6 +23,7 @@ from unstructured.partition.rtf import partition_rtf
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
+    from openai.types import Batch
     from unstructured.documents.elements import Element
 
 
@@ -287,7 +287,7 @@ def upload_jsonl_openai(
 
     """
     client = OpenAI() if client is None else client
-    res = client.files.create(file=Path.open(jsonl_path, "rb"), purpose=purpose)
+    res = client.files.create(file=pathlib.Path.open(jsonl_path, "rb"), purpose=purpose)
     return res.id
 
 
@@ -308,79 +308,126 @@ def create_batch_openai(
     return batch.id
 
 
-def download_file_openai(file_id: str, client: OpenAI | None = None) -> str:
-    """Download a file from OpenAI.
+def download_batch_output(
+    client: OpenAI,
+    batch: Batch,
+    output_filename: str,
+    basedir: str,
+) -> None:
+    """Download a batch output file from OpenAI."""
+    output_file_id = batch.output_file_id
+    if not pathlib.Path(basedir + output_filename).exists():
+        result = client.files.content(output_file_id).content
+        with pathlib.Path(basedir + output_filename).open("wb") as f:
+            f.write(result)
+
+
+def wait_for_batches(wait_time: int = 10 * 60) -> None:
+    """After submitting batches to OpenAI, wait for them to complete or fail.
 
     Parameters
     ----------
-    file_id : str
-        The file identifier
-    client : OpenAI | None, optional
-        An OpenAI client to use, by default None
-
-    Returns
-    -------
-    str
-        The file content
+    wait_time : int, optional
+        Time to wait between checks, by default 10*60
 
     """
-    client = OpenAI() if client is None else client
-    res = client.files.content(file_id)
-    return res.text
+    completed_or_failed = False
+    count = 1
+    while not completed_or_failed:
+        time.sleep(wait_time)
+        print(f"waited {count} times, checking batches")
+        client = OpenAI()
+        completed_or_failed = True
+        batches = client.batches.list()
+        for page in batches.iter_pages():
+            for batch in page.data:
+                if batch.status not in ("completed", "failed"):
+                    completed_or_failed = False
+                    break
+            if not completed_or_failed:
+                break
+        count += 1
 
 
-def yield_batch_output(basedir: str) -> Generator[tuple[list, list, list]]:
+def delete_completed_batches(basedir: str) -> None:
     client = OpenAI()
-    openai_files = client.files.list()
     batches = client.batches.list()
-    for batch in batches.data:
-        metadatas, texts, vectors = [], [], []
-        if batch.status != "completed":
-            continue
+    files = client.files.list()
+    for page in batches.iter_pages():
+        for batch in page.data:
+            # handle completed batches
+            if batch.status != "completed":
+                continue
+            print(f"batch {batch.id} completed")
+            in_exists, out_exists = False, False
+            in_fname, out_fname = None, None
+            for fpage in files.iter_pages():
+                for f in fpage.data:
+                    if f.id == batch.input_file_id:
+                        print(f.filename)
+                        in_exists = True
+                        in_fname = f.filename
+                        split_fname = f.filename.split(".")
+                        out_fname = split_fname[0] + "_out.jsonl"
+                    elif f.id == batch.output_file_id:
+                        print(f.filename)
+                        out_exists = True
+                if in_exists and out_exists:
+                    break
+            if in_exists:
+                print("deleted input file in API")
+                client.files.delete(batch.input_file_id)
+                # move file from basedir to basedir + completed
+                pathlib.Path(basedir + in_fname).rename(basedir + "completed/" + in_fname)
+                print(f"moved {in_fname} to completed/")
+                pathlib.Path(basedir + out_fname).rename(basedir + "completed/" + out_fname)
+                print(f"moved {out_fname} to completed/")
+                if batch.error_file_id is not None:
+                    print("batch contains an error file, downloading")
+                    client.files.content(batch.error_file_id)
+                    result = client.files.content(batch.error_file_id).content
+                    with pathlib.Path(basedir + "completed/errors/errors_" + in_fname).open("wb") as f:
+                        f.write(result)
+                    print(f"downloaded errors for {in_fname}")
+            if out_exists:
+                print("deleted output file")
+                client.files.delete(batch.output_file_id)
 
-        input_file = next(
-            (f for f in openai_files if batch.input_file_id == f.id),
-            None,
-        )
-        if input_file is None:
-            print("input file not found for " + batch.input_file_id)
-            continue
 
-        input_filename = input_file.filename
-        print(input_filename)
-
-        result_file_id = batch.output_file_id
-        result_file_name = input_filename.split(".")[0] + "_out.jsonl"
-        if not Path(basedir + result_file_name).exists():
-            result = client.files.content(result_file_id).content
-            with Path(basedir + result_file_name).open("wb") as f:
-                f.write(result)
-        with Path(basedir + result_file_name).open("r") as f:
-            for i, line in enumerate(f, start=1):
-                output = json.loads(line)
-                with Path(basedir + input_filename).open("r") as in_f:
-                    input_line = in_f.readline()
-                    input_data = json.loads(input_line)
-                    while input_line and input_data["custom_id"] != output["custom_id"]:
-                        input_line = in_f.readline()
-                        input_data = json.loads(input_line)
-                custom_id_split = output["custom_id"].split("-")
-                cluster_id = int(custom_id_split[0])
-                opinion_id = int(custom_id_split[1])
-                metadata = {}
-                # metadata.update(cluster_data[cluster_id])
-                # metadata.update(opinion_data[opinion_id])
-                # metadata.update(docket_data[metadata["docket_id"]])
-                text = input_data["body"]["input"]
-                vector = output["response"]["body"]["data"][0]["embedding"]
-                metadatas.append(metadata)
-                texts.append(text)
-                vectors.append(vector)
-                if i % 5000 == 0:
-                    print(f"i = {i}")
-                if len(metadatas) == 1000:
-                    yield metadatas, texts, vectors
-                    metadatas, texts, vectors = [], [], []
-        # return the last (< batch_size) lines
-        if len(metadatas) > 0:
-            yield metadatas, texts, vectors
+def retry_failed_batches() -> None:
+    client = OpenAI()
+    batches = client.batches.list()
+    files = client.files.list()
+    restarted_infile_ids = set()
+    count = 0
+    for page in batches.iter_pages():
+        for batch in page.data:
+            # handle failed batches
+            if batch.status != "failed":
+                continue
+            in_file_id = batch.input_file_id
+            in_exists = False
+            for fpage in files.iter_pages():
+                for f in fpage.data:
+                    if f.id == in_file_id:
+                        print(f.filename)
+                        in_exists = True
+                        break
+                if in_exists:
+                    break
+            if not in_exists:
+                print(f"batch {batch.id} input file not found, skipping")
+                continue
+            if in_file_id in restarted_infile_ids:
+                print(f"batch {batch.id} input file already restarted in another batch, skipping")
+                continue
+            print(f"batch {batch.id} failed and has input file, recreating")
+            client.batches.create(
+                completion_window="24h",
+                endpoint="/v1/embeddings",
+                input_file_id=in_file_id,
+            )
+            restarted_infile_ids.add(in_file_id)
+            count += 1
+            if count == 25:
+                return
