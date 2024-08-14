@@ -11,6 +11,7 @@ from app.models import (
     InitializeSession,
     OpenAIModelEnum,
 )
+from app.prompts import FILTERED_CASELAW_PROMPT
 
 client = TestClient(main.api, headers={"X-API-KEY": os.environ["OPB_TEST_API_KEY"]})
 
@@ -99,7 +100,7 @@ class TestApi:
         search_tool = {
             "name": "filtered-case-search",
             "method": "courtlistener",
-            "prompt": "Use to find case law and optionally filter by jurisdiction and date."
+            "prompt": FILTERED_CASELAW_PROMPT,
         }
         test_bot_request = BotRequest(
             chat_model=ChatModelParams(engine=EngineEnum.openai),

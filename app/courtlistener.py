@@ -1,36 +1,28 @@
 """A module for interacting with the CourtListener API. Written by Arman Aydemir."""
 from __future__ import annotations
 
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextvars import copy_context
-from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-import requests
 from langfuse.decorators import observe
 
-from app.milvusdb import query, upload_courtlistener
+from app.milvusdb import fuzzy_keyword_query, query
 
-courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
-courtlistener_header = {"Authorization": "Token " + courtlistener_token}
-base_url = "https://www.courtlistener.com/api/rest/v3"
-search_url = base_url + "/search/?q="
-opinion_url = base_url + "/opinions/?id="
-cluster_url = base_url + "/clusters/?id="
-docket_url = base_url + "/dockets/?id="
-court_url = base_url + "/courts/?id="
-people_url = base_url + "/people/?id="
+if TYPE_CHECKING:
+    from app.models import OpinionSearchRequest
 
-courtlistener_collection = "courtlistener"
-
-courtlistener_timeout = 30 #seconds
-
+courtlistener_collection = "courtlistener_bulk"
 courtlistener_tool_args = {
     "jurisdiction": {
         "type": "string",
         "description": (
             "The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX', "
             "to filter query results by jurisdiction. Use 'US' for federal courts."
+        ),
+    },
+    "keyword-qr": {
+        "type": "string",
+        "description": (
+            "A keyword query to search for exact names and terms."
         ),
     },
     "after-date": {
@@ -50,16 +42,34 @@ courtlistener_tool_args = {
 }
 
 # https://github.com/freelawproject/courtlistener/discussions/3114
-# manual mapping from two-letter state abbreviations to court_id affixes
-# for some ambiguous states
+# manual mapping from two-letter state abbreviations to courtlistener court_id format
 jurisdiction_codes = {
-    "us": "scotus ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca tecoa reglrailreorgct kingsbench",
+    "us-app": "ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc",
+    "us-dis": (
+        "dcd almd alnd alsd akd azd ared arwd cacd caed cand casd cod ctd ded flmd "
+        "flnd flsd gamd gand gasd hid idd ilcd ilnd ilsd innd insd iand iasd ksd kyed "
+        "kywd laed lamd lawd med mdd mad mied miwd mnd msnd mssd moed mowd mtd ned nvd "
+        "nhd njd nmd nyed nynd nysd nywd nced ncmd ncwd ndd ohnd ohsd oked oknd okwd "
+        "ord paed pamd pawd rid scd sdd tned tnmd tnwd txed txnd txsd txwd utd vtd "
+        "vaed vawd waed wawd wvnd wvsd wied wiwd wyd gud nmid prd vid californiad "
+        "illinoised illinoisd indianad orld ohiod pennsylvaniad southcarolinaed "
+        "southcarolinawd tennessed canalzoned"
+    ),
+    "us-sup": "scotus",
+    "us-misc": (
+        "bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc "
+        "mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca "
+        "tecoa reglrailreorgct kingsbench"
+    ),
     "al": "almd alnd alsd almb alnb alsb ala alactapp alacrimapp alacivapp",
     "ak": "akd akb alaska alaskactapp",
     "az": "azd arb ariz arizctapp ariztaxct",
     "ar": "ared arwd areb arwb ark arkctapp arkworkcompcom arkag",
     "as": "amsamoa amsamoatc",
-    "ca": "cacd caed cand casd californiad cacb caeb canb casb cal calctapp calappdeptsuper calag",
+    "ca": (
+        "cacd caed cand casd californiad cacb caeb canb casb cal calctapp "
+        "calappdeptsuper calag"
+    ),
     "co": "cod cob colo coloctapp coloworkcompcom coloag",
     "ct": "ctd ctb conn connappct connsuperct connworkcompcom",
     "de": "ded deb del delch delorphct delsuperct delctcompl delfamct deljudct",
@@ -88,20 +98,32 @@ jurisdiction_codes = {
     "nh": "nhd nhb nh",
     "nj": "njd njb nj njsuperctappdiv njtaxct njch",
     "nm": "nmd nmb nm nmctapp",
-    "ny": "nyed nynd nysd nywd nyeb nynb nysb nywb ny nyappdiv nyappterm nysupct nycountyctny nydistct nyjustct nyfamct nysurct nycivct nycrimct nyag",
+    "ny": (
+        "nyed nynd nysd nywd nyeb nynb nysb nywb ny nyappdiv nyappterm nysupct "
+        "nycountyctny nydistct nyjustct nyfamct nysurct nycivct nycrimct nyag"
+    ),
     "nc": "nced ncmd ncwd nceb ncmb ncwb nc ncctapp ncsuperct ncworkcompcom",
     "nd": "ndd ndb nd ndctapp",
     "mp": "nmariana cnmisuperct cnmitrialct",
     "oh": "ohnd ohsd ohiod ohnb ohsb ohio ohioctapp ohioctcl",
-    "ok": "oked oknd okwd okeb oknb okwb okla oklacivapp oklacrimapp oklajeap oklacoj oklaag",
+    "ok": (
+        "oked oknd okwd okeb oknb okwb okla oklacivapp oklacrimapp oklajeap "
+        "oklacoj oklaag"
+    ),
     "or": "ord orb or orctapp ortc",
     "pa": "paed pamd pawd pennsylvaniad paeb pamb pawb pa pasuperct pacommwct cjdpa",
     "pr": "prsupreme prapp prd prb",
     "ri": "rid rib ri risuperct",
     "sc": "scd southcarolinaed southcarolinawd scb sc scctapp",
     "sd": "sdd sdb sd",
-    "tn": "tned tnmd tnwd tennessed tneb tnmb tnwb tennesseeb tenn tennctapp tenncrimapp tennworkcompcl tennworkcompapp tennsuperct",
-    "tx": "txed txnd txsd txwd txeb txnb txsb txwb tex texapp texcrimapp texreview texjpml texag",
+    "tn": (
+        "tned tnmd tnwd tennessed tneb tnmb tnwb tennesseeb tenn tennctapp "
+        "tenncrimapp tennworkcompcl tennworkcompapp tennsuperct"
+    ),
+    "tx": (
+        "txed txnd txsd txwd txeb txnb txsb txwb tex texapp texcrimapp "
+        "texreview texjpml texag"
+    ),
     "ut": "utd utb utah utahctapp",
     "vt": "vtd vtb vt vtsuperct",
     "va": "vaed vawd vaeb vawb va vactapp",
@@ -112,274 +134,14 @@ jurisdiction_codes = {
     "wy": "wyd wyb wyo",
 }
 
-
-def search(q: str) -> dict:
-    """Call the general search api from courtlistener.
-
-    Parameters
-    ----------
-    q : str
-        the query
-
-    Returns
-    -------
-    dict
-        dict containing the results
-
-    """
-    response = requests.get(search_url + q,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-    return response.json()
-
-def get_opinion(result:dict) -> dict:
-    """Get the full opinion info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        a single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Opinion info
-
-    """
-    # get the opinion id
-    opinion_id = str(result["id"])
-
-    response = requests.get(opinion_url + opinion_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    op = response.json()["results"][0]  # the actual opinion
-
-    # getting the text, in the best format possible
-    op["text"] = op["plain_text"]
-    # these are backup formats
-    backups = ["html", "html_with_citations", "html_lawbox", "html_columbia"]
-    b_index = 0
-    while op["text"] == "" and b_index < len(backups):
-        op["text"] = op[backups[b_index]]
-        b_index += 1
-    return op
-
-
-def get_cluster(result: dict) -> dict:
-    """Get the full cluster info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Cluster info
-
-    """
-    cid = str(result["cluster_id"])
-    response = requests.get(cluster_url + cid,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_docket(result: dict) -> dict:
-    """Get the full docket info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Docket info
-
-    """
-    docket_id = str(result["docket_id"])
-    response = requests.get(docket_url + docket_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_court(result: dict) -> dict:
-    """Get the full court info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Court info
-
-    """
-    court_id = str(result["court_id"])
-    response = requests.get(court_url + court_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_person(result: dict) -> dict:
-    """Get the full person info for a search result from search().
-
-    Parameters
-    ----------
-    result : dict
-        A single result from search()
-
-    Returns
-    -------
-    dict
-        dict containing the Person info
-
-    """
-    author_id = str(result["author_id"])
-    response = requests.get(people_url + author_id,
-                            headers=courtlistener_header,
-                            timeout=courtlistener_timeout)
-
-    return response.json()["results"][0]
-
-def get_search_date(date_plus_timerange: str) -> str:
-    split_date = date_plus_timerange.split("T")
-    date_filed = split_date[0]
-    split_time = split_date[1].split("-")
-    len_split = 2
-    if len(split_time) == len_split and split_time[0] > split_time[1]:
-        # the time range goes overnight, so add one day to the date
-        dt = datetime.strptime(date_filed, "%Y-%m-%d").replace(tzinfo=UTC)
-        dt += timedelta(days=1)
-        date_filed = dt.strftime("%Y-%m-%d")
-    return date_filed
-
-def get_case_name(result: dict) -> str:
-    if result["caseName"]:
-        return result["caseName"]
-    # cluster level data: case name
-    cluster = get_cluster(result)
-    # prefer short name to full name
-    if cluster["case_name"]:
-        return cluster["case_name"]
-    if cluster["case_name_short"]:
-        return cluster["case_name_short"]
-    return cluster["case_name_full"]
-
-def get_author_name(result: dict) -> str:
-    # person level data: author name
-    author = get_person(result)
-    full_name = ""
-    if author["name_first"]:
-        full_name += author["name_first"]
-    if author["name_middle"]:
-        full_name += (" " if full_name else "") + author["name_middle"]
-    if author["name_last"]:
-        full_name += (" " if full_name else "") + author["name_last"]
-    return full_name
-
-def upload_search_result(result: dict) -> None:
-    opinion = get_opinion(result)
-    opinion["cluster_id"] = result["cluster_id"]
-    opinion["court_id"] = result["court_id"]
-    opinion["date_filed"] = get_search_date(result["dateFiled"])
-    opinion["docket_id"] = result["docket_id"]
-    opinion["court_name"] = result["court"]
-    opinion["citations"] = result["citation"]
-    opinion["case_name"] = get_case_name(result)
-    if result["author_id"]:
-        opinion["author_id"] = result["author_id"]
-        opinion["author_name"] = get_author_name(result)
-    upload_courtlistener(courtlistener_collection, opinion)
-
-@observe()
-def courtlistener_search(
-    q: str,
-    k: int = 3,
-    jurisdiction: str | None = None,
-    after_date: str | None = None,
-    before_date: str | None = None,
-) -> dict:
-    """Search courtlistener for a query.
-
-    Search, get opinion text, upload the opinion data to milvus, and query it.
-
-    Parameters
-    ----------
-    q : str
-        The query
-    k : int, optional
-        The number of results to return, by default 3
-    jurisdiction : str | None, optional
-        The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
-        to filter query results by state. Use 'US' for federal courts. By default None.
-    after_date : str | None, optional
-        The after date for the query date range in YYYY-MM-DD format, by default None
-    before_date : str | None, optional
-        The before date for the query date range in YYYY-MM-DD format, by default None
-
-    Returns
-    -------
-    dict
-        the response with relevant info from courtlistener
-
-    """
-    query_str = q
-    # add options to query string
-    if jurisdiction and jurisdiction in jurisdiction_codes:
-        query_str += f"&court={jurisdiction_codes[jurisdiction]}"
-    if after_date:
-        dt = after_date.split("-")
-        # needs to be in MM-DD-YYYY format
-        query_str += f"&filed_after={dt[1]}-{dt[2]}-{dt[0]}"
-    if before_date:
-        dt = before_date.split("-")
-        # needs to be in MM-DD-YYYY format
-        query_str += f"&filed_before={dt[1]}-{dt[2]}-{dt[0]}"
-
-    with ThreadPoolExecutor() as executor:
-        futures = []
-        for result in search(query_str)["results"][:k]:
-            ctx = copy_context()
-            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(upload_search_result, r)
-            futures.append(executor.submit(task))
-
-        for future in as_completed(futures):
-            _ = future.result()
-
-    return courtlistener_query(q, k, jurisdiction, after_date, before_date)
-
-def courtlistener_query(
-    q: str,
-    k: int,
-    jurisdiction: str | None = None,
-    after_date: str | None = None,
-    before_date: str | None = None,
-) -> dict:
+@observe(capture_output=False)
+def courtlistener_query(request: OpinionSearchRequest) -> dict:
     """Query Courtlistener data.
 
     Parameters
     ----------
-    q : str
-        The query text
-    k : int
-        How many chunks to return
-    jurisdiction : str | None, optional
-        The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX',
-        to filter query results by state. Use 'US' for federal courts. By default None.
-    after_date : str | None, optional
-        The after date for the query date range in YYYY-MM-DD format, by default None
-    before_date : str | None, optional
-        The before date for the query date range in YYYY-MM-DD format, by default None
+    request : OpinionSearchRequest
+        The opinion search request object
 
     Returns
     -------
@@ -388,15 +150,24 @@ def courtlistener_query(
 
     """
     expr = ""
-    if jurisdiction and jurisdiction in jurisdiction_codes:
-        code_list = jurisdiction_codes[jurisdiction].split(" ")
-        expr = f"metadata['court_id'] in {code_list}"
-    if after_date:
-        if expr:
-            expr += " and "
-        expr += f"metadata['date_filed']>'{after_date}'"
-    if before_date:
-        if expr:
-            expr += " and "
-        expr += f"metadata['date_filed']<'{before_date}'"
-    return query(courtlistener_collection, q, k, expr)
+    # copy keyword query to semantic if not given
+    if request.jurisdictions:
+        valid_jurisdics = []
+        # look up each str in dictionary, append matches as lists
+        for juris in request.jurisdictions:
+            if juris.lower() in jurisdiction_codes:
+                valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+        # clear duplicate federal district jurisdictions if they exist
+        valid_jurisdics = list(set(valid_jurisdics))
+        expr = f"metadata['court_id'] in {valid_jurisdics}"
+    if request.after_date:
+        expr += (" and " if expr else "")
+        expr += f"metadata['date_filed']>'{request.after_date}'"
+    if request.before_date:
+        expr += (" and " if expr else "")
+        expr += f"metadata['date_filed']<'{request.before_date}'"
+    if request.keyword_query:
+        keyword_query = fuzzy_keyword_query(request.keyword_query)
+        expr += (" and " if expr else "")
+        expr += f"text like '% {keyword_query} %'"
+    return query(courtlistener_collection, request.query, request.k, expr)

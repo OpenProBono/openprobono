@@ -14,6 +14,11 @@ def get_uuid_id() -> str:
     """Get a string UUID4 ID."""
     return str(uuid.uuid4())
 
+def get_int64() -> int:
+    """Get a 64-bit integer ID."""
+    max_int64 = 2 ** 63 - 1
+    int64 = uuid.uuid1().int>>64
+    return int64 % max_int64
 
 @unique
 class SearchMethodEnum(str, Enum):
@@ -141,6 +146,7 @@ class EngineEnum(str, Enum):
 class AnthropicModelEnum(str, Enum):
     """Enumeration class representing different Anthropic chat models."""
 
+    claude_3_5_sonnet = "claude-3-5-sonnet-20240620"
     claude_3_opus = "claude-3-opus-20240229"
     claude_3_sonnet = "claude-3-sonnet-20240229"
     claude_3_haiku = "claude-3-haiku-20240307"
@@ -170,6 +176,7 @@ class OpenAIModelEnum(str, Enum):
     gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
     gpt_4 = "gpt-4"
     gpt_4o = "gpt-4o"
+    gpt_4o_mini = "gpt-4o-mini"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
     mod_stable = "text-moderation-stable"
@@ -245,3 +252,34 @@ class BotRequest(BaseModel):
     vdb_tools: List[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
     api_key: str = ""
+
+
+class OpinionSearchRequest(BaseModel):
+    """Model class representing an opinion search request.
+
+    Attributes
+    ----------
+    query : str
+        The query
+    k : int, optional
+        The number of results to return, by default 3
+    jurisdictions : list[str] | None, optional
+        The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX',
+        to filter query results by state. Use 'us-app' for federal appellate,
+        'us-dis' for federal district, 'us-sup' for supreme court, 'us-misc'
+        for federal special. By default None.
+    keyword_query: str | None, optional
+        The users keyword query, by default None
+    after_date : str | None, optional
+        The after date for the query date range in YYYY-MM-DD format, by default None
+    before_date : str | None, optional
+        The before date for the query date range in YYYY-MM-DD format, by default None
+
+    """
+
+    query: str
+    k: int = 4
+    jurisdictions: list[str] | None = None
+    keyword_query: str | None = None
+    after_date: str | None = None
+    before_date: str | None = None

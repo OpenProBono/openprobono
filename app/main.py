@@ -34,9 +34,11 @@ from app.models import (
     EngineEnum,
     FetchSession,
     InitializeSession,
+    OpinionSearchRequest,
     get_uuid_id,
 )
-from app.opinion_search import opinion_search
+from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
+from app.prompts import FILTERED_CASELAW_PROMPT  # noqa: TCH001
 
 # this is to ensure tracing with langfuse
 # @asynccontextmanager
@@ -306,7 +308,7 @@ def create_bot(
                                 {
                                     "name": "case-search",
                                     "method": "courtlistener",
-                                    "prompt": "Use to find case law.",
+                                    "prompt": FILTERED_CASELAW_PROMPT,
                                 },
                             ],
                             "vdb_tools": [
@@ -537,20 +539,37 @@ def vectordb_upload_site(site: str, collection_name: str,
     return crawl_upload_site(collection_name, description, site)
 
 
-@api.get("/search_opinions", tags=["Opinion Search"])
+@api.post("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
-    query: str,
-    jurisdiction: str | None = None,
-    after_date: str | None = None,
-    before_date: str | None = None,
-    k: int = 4,
+    req: OpinionSearchRequest,
     api_key: str = Security(api_key_auth),
 ) -> dict:
     if not api_key_check(api_key):
         return {"message": "Failure: API key invalid"}
     try:
-        results = opinion_search(query, jurisdiction, after_date, before_date, k)
+        results = opinion_search(req)
     except Exception as error:
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "results": results}
+
+
+@api.get("/get_opinion_summary", tags=["Opinion Search"])
+def get_opinion_summary(
+    opinion_id: int,
+    api_key: str = Security(api_key_auth),
+) -> dict:
+    if not api_key_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    try:
+        summary = add_opinion_summary(opinion_id)
+    except Exception as error:
+        return {"message": "Failure: Internal Error: " + str(error)}
+    else:
+        return {"message": "Success", "result": summary}
+
+@api.get("/get_opinion_count", tags=["Opinion Search"])
+def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
+    if not api_key_check(api_key):
+        return {"message": "Failure: API key invalid"}
+    return {"message": "Success", "opinion_count": count_opinions()}

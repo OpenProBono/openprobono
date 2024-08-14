@@ -8,7 +8,7 @@ from json import loads
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 from pymilvus import (
     Collection,
     CollectionSchema,
@@ -18,15 +18,21 @@ from pymilvus import (
     utility,
 )
 
-from app.chat_models import summarize_langchain
-from app.db import load_vdb, store_vdb
+from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
-from app.loaders import partition_uploadfile, quickstart_ocr, scrape, scrape_with_links
+from app.loaders import (
+    partition_uploadfile,
+    quickstart_ocr,
+    scrape,
+    scrape_with_links,
+)
 from app.models import EncoderParams, MilvusMetadataEnum, OpenAIModelEnum
 from app.splitters import chunk_elements_by_title, chunk_str
+from app.summarization import summarize_langchain
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
+    from pymilvus.orm.iterator import QueryIterator
 
 
 connection_args = loads(os.environ["Milvus"])
@@ -57,6 +63,7 @@ MAX_K = 16384
 
 # core features
 
+@observe()
 def load_vdb_param(
     collection_name: str,
     param_name: str,
@@ -105,6 +112,7 @@ def load_vdb_param(
     return COLLECTION_PARAMS[collection_name][param_name]
 
 
+@observe()
 def create_collection(
     name: str,
     encoder: EncoderParams | None = None,
@@ -220,38 +228,6 @@ def create_collection(
     return coll
 
 
-def query_check(collection_name: str, query: str, k: int, session_id: str = "") -> dict:
-    """Check query parameters.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of the collection
-    query : str
-        The query for the collection
-    k : int
-        The number of vectors to return from the collection
-    session_id : str, optional
-        The session id if the query is to a session collection, by default ""
-
-    Returns
-    -------
-    dict
-        Contains a `message` if there was an error, otherwise empty
-
-    """
-    msg = {}
-    if not utility.has_collection(collection_name):
-        msg["message"] = f"Failure: collection {collection_name} not found"
-    if not query or query == "":
-        msg["message"] = "Failure: query not found"
-    if k < 1 or k > MAX_K:
-        msg["message"] = f"Failure: k = {k} out of range [1, {MAX_K}]"
-    if not session_id and collection_name == SESSION_DATA:
-        msg["message"] = "Failure: session_id not found"
-    return msg
-
-
 @observe()
 def query(
     collection_name: str,
@@ -281,11 +257,7 @@ def query(
         With message and result on success, just message on failure
 
     """
-    if query_check(collection_name, query, k, session_id):
-        return query_check(collection_name, query, k, session_id)
-
     coll = Collection(collection_name)
-    coll.load()
     encoder = load_vdb_param(collection_name, "encoder")
     data = embed_strs([query], encoder)
     search_params = {
@@ -301,12 +273,10 @@ def query(
             search_params["output_fields"] += ["metadata"]
         case MilvusMetadataEnum.field:
             search_params["output_fields"] += load_vdb_param(collection_name, "fields")
+    if session_id:
+        expr += (" and " if expr else "") + f"session_id=='{session_id}'"
     if expr:
         search_params["expr"] = expr
-    if session_id:
-        if expr:
-            expr += " and "
-        expr += f"session_id=='{session_id}'"
     res = coll.search(**search_params)
     if res:
         # on success, returns a list containing a single inner list containing
@@ -317,14 +287,51 @@ def query(
                 [hit.to_dict() for hit in res[0]],
                 key=lambda h: h["distance"],
             )
-            # delete pks
-            for hit in hits:
-                if "metadata" in hit["entity"] and "orig_elements" in hit["entity"]["metadata"]:
-                    del hit["entity"]["metadata"]["orig_elements"]
-                del hit["id"]
+            # format output for tracing
+            pks = [hit["id"] for hit in hits]
+            langfuse_context.update_current_observation(
+                output=pks,
+            )
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
+
+
+def fuzzy_keyword_query(keyword_query: str) -> str:
+    """Create a fuzzy* version of a keyword query.
+
+    *Replaces uppercase letters and the first letter of every word
+    with a wildcard character (_). Mainly for case-insensitivity.
+
+    Parameters
+    ----------
+    keyword_query : str
+        the original keyword query
+
+    Returns
+    -------
+    str
+        A fuzzy version of the keyword query
+
+    """
+    min_length_fuzzy = 6
+    keywords = keyword_query.split()
+    fuzzy_keywords = [
+        "".join([
+            c if not c.isupper() or len(kw) < min_length_fuzzy else "_"
+            for c in kw
+        ])
+        for kw in keywords
+    ]
+    fuzzy_keywords = [
+        kw if len(kw) < min_length_fuzzy else "_" + kw[1:]
+        for kw in fuzzy_keywords
+    ]
+    fuzzy_keywords_str = " ".join(fuzzy_keywords)
+    fuzzy_keywords_str = fuzzy_keywords_str.replace("%", "\\\\%")
+    fuzzy_keywords_str = fuzzy_keywords_str.replace('"', '\\"')
+    return fuzzy_keywords_str.replace("'", "\\'")
+
 
 def source_exists(collection_name: str, url: str) -> bool:
     """Check if a url source exists in a collection.
@@ -347,26 +354,22 @@ def source_exists(collection_name: str, url: str) -> bool:
 
     return len(q) > 0
 
-@observe(capture_input=False)
-def upload_data_json(
+
+@observe()
+def upload_data(
     collection_name: str,
-    vectors: list[list[float]],
-    texts: list[str],
-    metadatas: list[dict],
+    data: list[dict],
     batch_size: int = 1000,
 ) -> dict[str, str]:
     """Upload data to a collection with json format.
 
     Parameters
     ----------
-    texts : list[str]
-        The text to be uploaded.
-    vectors : list[list[float]]
-        The vectors to be uploaded.
-    metadatas : list[dict]
-        The metadata to be uploaded.
     collection_name : str
         The name of the Milvus collection.
+    data : list[dict]
+        The data to upload. Format should match collection schema.
+        Example: `[{'vector': [], 'text': '', 'metadata': {}}]`
     batch_size : int, optional
         The number of records to be uploaded at a time, by default 1000.
 
@@ -376,17 +379,22 @@ def upload_data_json(
         With a `message`, `insert_count` on success
 
     """
-    data = [vectors, texts, metadatas]
+    data_count = len(data)
+    langfuse_context.update_current_observation(
+        input={
+            "collection_name":collection_name,
+            "data_count": data_count,
+        },
+    )
     collection = Collection(collection_name)
     pks = []
-    for i in range(0, len(texts), batch_size):
-        batch_vector = data[0][i: i + batch_size]
-        batch_text = data[1][i: i + batch_size]
-        batch_metadata = data[2][i: i + batch_size]
-        batch = [batch_vector, batch_text, batch_metadata]
-        current_batch_size = len(batch[0])
+    insert_count = 0
+    for i in range(0, data_count, batch_size):
+        batch = data[i: i + batch_size]
+        current_batch_size = len(batch)
         res = collection.insert(batch)
         pks += res.primary_keys
+        insert_count += res.insert_count
         if res.insert_count != current_batch_size:
             # the upload failed, try deleting any partially uploaded data
             bad_deletes = []
@@ -412,9 +420,58 @@ def upload_data_json(
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
             return {"message": bad_insert}
-    return {"message": "Success", "insert_count": res.insert_count}
+    return {"message": "Success", "insert_count": insert_count}
 
 
+def upload_data_firebase(
+    coll_name: str,
+    data: list[dict],
+    source_ids: set | None = None,
+) -> dict:
+    """Insert chunk data into Firebase.
+
+    Parameters
+    ----------
+    coll_name : str
+        The name of the Firebase collection.
+    data : list[dict]
+        Each element must contain `text`, `chunk_index`, `source_id`.
+    source_ids : set | None, optional
+        A set of source_ids that have already been inserted into the database,
+        by default None.
+
+    Returns
+    -------
+    dict
+        Containing a message and insert count
+
+    """
+    if source_ids is None:
+        source_ids = set()
+    db_batch = get_batch()
+    insert_count = len(data)
+    for i in range(insert_count):
+        text = data[i]["text"]
+        chunk_idx = data[i]["chunk_index"]
+        source_id = data[i]["source_id"]
+        if source_id not in source_ids:
+            source_ids.add(source_id)
+            db_source = load_vdb_source(coll_name, source_id)
+            del data[i]["text"]
+            del data[i]["chunk_index"]
+            del data[i]["source_id"]
+            db_batch.set(db_source, data[i])
+        chunk_data = {"text": text, "chunk_index": chunk_idx}
+        db_chunk = load_vdb_chunk(coll_name, source_id, data[i]["pk"])
+        db_batch.set(db_chunk, chunk_data)
+        if i % 1000 == 0:
+            db_batch.commit()
+            db_batch = get_batch()
+    db_batch.commit()
+    return {"message": "Success", "insert_count": insert_count}
+
+
+@observe(capture_output=False)
 def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     """Get database entries according to a boolean expression.
 
@@ -433,12 +490,9 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         Contains `message`, `result` list if successful
 
     """
-    if not utility.has_collection(collection_name):
-        return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
-    coll.load()
     collection_format = load_vdb_param(collection_name, "metadata_format")
-    output_fields = ["vector", "text"]
+    output_fields = ["text", "vector"]
     match collection_format:
         case MilvusMetadataEnum.field:
             output_fields += [*load_vdb_param(collection_name, "fields")]
@@ -452,15 +506,16 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
     hits = []
     res = q_iter.next()
     while len(res) > 0:
-        # delete pks
-        for hit in res:
-            del hit["pk"]
         hits += res
         res = q_iter.next()
     q_iter.close()
+    langfuse_context.update_current_observation(
+        output=f"{len(hits)} hits",
+    )
     return {"message": "Success", "result": hits}
 
 
+@observe()
 def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     """Delete database entries according to a boolean expression.
 
@@ -477,15 +532,13 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
         Contains `message`, `delete_count` if successful
 
     """
-    if not utility.has_collection(collection_name):
-        return {"message": f"Failure: collection {collection_name} does not exist"}
     coll = Collection(collection_name)
-    coll.load()
     ids = coll.delete(expr=expr)
     return {"message": "Success", "delete_count": ids.delete_count}
 
 
-def upsert_expr_json(
+@observe()
+def upsert_expr(
     collection_name: str,
     expr: str,
     upsert_data: list[dict],
@@ -507,13 +560,19 @@ def upsert_expr_json(
         Contains `message` and `insert_count` if successful.
 
     """
+    langfuse_context.update_current_observation(
+        input={
+            "collection_name":collection_name,
+            "expr": expr,
+            "upsert_data_count": len(upsert_data),
+        },
+    )
     delete_result = delete_expr(collection_name, expr)
     if delete_result["message"] != "Success":
         return delete_result
-    vectors = [d["vector"] for d in upsert_data]
-    texts = [d["text"] for d in upsert_data]
-    metadatas = [d["metadata"] for d in upsert_data]
-    return upload_data_json(collection_name, vectors, texts, metadatas)
+    delete_count = delete_result["delete_count"]
+    insert_result = upload_data(collection_name, upsert_data)
+    return {"delete_count": delete_count, **insert_result}
 
 
 def fields_to_json(fields_entry: dict) -> dict:
@@ -540,81 +599,57 @@ def fields_to_json(fields_entry: dict) -> dict:
     }
     return d
 
-# application level features
-@observe(capture_input=False)
-def upload_courtlistener(collection_name: str, opinion: dict, max_chunk_size:int=10000, chunk_overlap:int=1000) -> dict:
-    """Upload a courtlistener opinion to Milvus.
+
+def query_iterator(
+    collection_name: str,
+    expr: str,
+    output_fields: list[str],
+    batch_size: int,
+) -> QueryIterator:
+    """Get a query iterator for a collection.
 
     Parameters
     ----------
     collection_name : str
-        name of collection to upload to
-    opinion : dict
-        The opinion to upload
-    max_chunk_size : int, optional
-        the max chunk size to be uploaded to milvus, by default 10000
-    chunk_overlap : int, optional
-        chunk overlap to be uploaded to milvus, by default 1000
+        The name of the collection
+    expr : str
+        The boolean expression to filter entities in the collection
+    output_fields : list[str]
+        the fields to return for each entity
+    batch_size : int
+        the number of entities to process at a time
 
     Returns
     -------
-    dict
-        With a `message` indicating success or failure and an `insert_count` on success
+    QueryIterator
+        An iterator over the chosen entities in the collection
 
     """
-    if "text" not in opinion or not opinion["text"]:
-        return {"message": "Failure: no opinion text found"}
+    coll = Collection(collection_name)
+    return coll.query_iterator(
+        expr=expr,
+        output_fields=output_fields,
+        batch_size=batch_size,
+    )
 
-    # check if the opinion is already in the collection
-    expr = f"metadata['id']=={opinion['id']}"
-    hits = get_expr(collection_name, expr)
-    if hits["result"] and len(hits["result"]) > 0:
-        # check if opinion in collection does not have citations
-        # TODO(Nick) remove this and do the rest manually later
-        if "citations" not in hits["result"][0]["metadata"]:
-            # upsert data with added metadata
-            for hit in hits["result"]:
-                hit["metadata"]["citations"] = opinion["citations"]
-            upsert_expr_json(collection_name, expr, hits["result"])
-        return {"message": "Success"}
-
-    # chunk
-    texts = chunk_str(opinion["text"], max_chunk_size, chunk_overlap)
-
-    # metadata
-    del opinion["text"]
-    #delete fields which are empty or over 1000 characters
-    maxlen = 1000
-    keys_to_remove = [
-        key for key in opinion
-        if not opinion[key] or (isinstance(opinion[key], str) and len(opinion[key])) > maxlen
-    ]
-    for key in keys_to_remove:
-        del opinion[key]
-    # cited opinions take up a lot of tokens and are included in the text
-    if "opinions_cited" in opinion:
-        del opinion["opinions_cited"]
-
-    summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
-    opinion["ai_summary"] = summary
-
-    metadatas = [opinion] * len(texts)
-    # upload
-    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
-    return upload_data_json(collection_name, vectors, texts, metadatas)
-
+# application level features
 
 def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
     create_collection(collection_name, description=description)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
-    strs, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
-    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+    texts, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
+    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
     encoder = load_vdb_param(collection_name, "encoder")
-    vectors = embed_strs(strs, encoder)
-    upload_data_json(collection_name, vectors, strs, metadatas)
+    vectors = embed_strs(texts, encoder)
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    upload_data(collection_name, data)
     print("new_urls: ", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
@@ -629,10 +664,16 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
             vectors = embed_strs(strs, encoder)
-            upload_data_json(collection_name, vectors, strs, metadatas)
+            data = [{
+                "vector": vectors[i],
+                "metadata": metadatas[i],
+                "text": texts[i],
+            } for i in range(len(texts))]
+            upload_data(collection_name, data)
             prev_elements = cur_elements
     print(urls)
     return urls
+
 
 @observe(capture_output=False)
 def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_chars=2500, overlap=500) -> dict[str, str]:
@@ -654,14 +695,19 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
     elements = scrape(url)
     if len(elements) == 0:
         return {"message": f"Failure: no elements found at {url}"}
-    strs, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
-    vectors = embed_strs(strs, load_vdb_param(collection_name, "encoder"))
-    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+    texts, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
+    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
+    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     for metadata in metadatas:
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
-    return upload_data_json(collection_name, vectors, strs, metadatas)
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(collection_name, data)
 
 
 def session_upload_ocr(
@@ -693,9 +739,9 @@ def session_upload_ocr(
 
     """
     reader = quickstart_ocr(file)
-    strs = chunk_str(reader, max_chunk_size, chunk_overlap)
-    vectors = embed_strs(strs, load_vdb_param(SESSION_DATA, "encoder"))
-    ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+    texts = chunk_str(reader, max_chunk_size, chunk_overlap)
+    vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
+    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
     metadata = {
         "session_id": session_id,
         "source": file.filename,
@@ -704,7 +750,12 @@ def session_upload_ocr(
     if summary is not None:
         metadata["user_summary"] = summary
     # upload
-    return upload_data_json(SESSION_DATA, vectors, strs, [metadata] * len(strs))
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadata,
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(SESSION_DATA, data)
 
 
 def file_upload(
@@ -741,7 +792,12 @@ def file_upload(
     for i in range(len(metadatas)):
         metadatas[i]["session_id"] = session_id
     # upload
-    return upload_data_json(SESSION_DATA, vectors, texts, metadatas)
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(SESSION_DATA, data)
 
 
 def session_source_summaries(
@@ -765,7 +821,6 @@ def session_source_summaries(
 
     """
     coll = Collection(SESSION_DATA)
-    coll.load()
     q_iter = coll.query_iterator(
         expr=f"session_id=='{session_id}'",
         output_fields=["metadata"],

@@ -4,12 +4,14 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /api
 
-COPY requirements.txt /api
+RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 poppler-utils tesseract-ocr -y
 
-RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 poppler-utils -y
+COPY requirements.txt /api/requirements.txt
 
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt --no-cache-dir
 
-COPY . /api
+RUN python -c 'import nltk; nltk.download("punkt"); nltk.download("averaged_perceptron_tagger");'
+
+COPY app/ /api/app
 
 CMD uvicorn app.main:api --port=8080 --host=0.0.0.0

@@ -27,6 +27,8 @@ from app.models import (
 VERSION = "_vj1"
 BOT_COLLECTION = "bots"
 MILVUS_COLLECTION = "milvus"
+MILVUS_SOURCES = "sources"
+MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
 
 firebase_config = loads(os.environ["Firebase"])
@@ -273,3 +275,74 @@ def store_vdb(
         data["fields"] = fields
     db.collection(MILVUS_COLLECTION).document(collection_name).set(data)
     return True
+
+def load_vdb_source(
+    collection_name: str,
+    source_id: int,
+) -> firestore.firestore.DocumentReference:
+    """Load source data for entities in a Milvus collection from Firebase.
+
+    This can be used to load an existing source or create a new one.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the Milvus collection containing the source.
+    source_id : int
+        The id of the source.
+
+    Returns
+    -------
+    DocumentReference
+        The source as a document reference object.
+
+    """
+    milvus = db.collection(MILVUS_COLLECTION)
+    milvus_coll = milvus.document(collection_name)
+    coll_sources = milvus_coll.collection(MILVUS_SOURCES)
+    return coll_sources.document(str(source_id))
+
+def load_vdb_chunk(
+    collection_name: str,
+    source_id: int,
+    chunk_id: int,
+) -> firestore.firestore.DocumentReference:
+    """Load chunk data for an entity in a Milvus collection in Firebase.
+
+    This can be used to load an existing chunk or create a new one.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the Milvus collection containing the chunk.
+    source_id : int
+        The id of the source from which the chunk originated.
+    chunk_id : int
+        The id of the chunk.
+
+    Returns
+    -------
+    DocumentReference
+        The chunk as a document reference object.
+
+    """
+    milvus = db.collection(MILVUS_COLLECTION)
+    milvus_coll = milvus.document(collection_name)
+    coll_sources = milvus_coll.collection(MILVUS_SOURCES)
+    source = coll_sources.document(str(source_id))
+    source_chunks = source.collection(MILVUS_CHUNKS)
+    return source_chunks.document(str(chunk_id))
+
+def get_batch() -> firestore.firestore.WriteBatch:
+    """Get a batch object for use with Firestore.
+
+    Used to batch write operations. See:
+    https://firebase.google.com/docs/firestore/manage-data/transactions
+
+    Returns
+    -------
+    WriteBatch
+        A batch to use with Firestore.
+
+    """
+    return db.batch()

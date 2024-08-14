@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from datasets import Dataset, load_dataset
 
-from chat_models import chat as llm_chat
-from main import chat
-from models import ChatModelParams, ChatRequest
-from prompts import EVALUATION_PROMPT
+from app.chat_models import chat as llm_chat
+from app.main import chat
+from app.models import ChatModelParams, ChatRequest
+from app.prompts import EVALUATION_PROMPT
 
 if TYPE_CHECKING:
     import pandas as pd

@@ -182,7 +182,15 @@ Score 5: The response is completely correct, accurate, and factual.
 
 ###Feedback:"""
 
-FILTERED_CASELAW_PROMPT = "Use to find case law and optionally filter by a jurisdiction and date range."
+FILTERED_CASELAW_PROMPT = (
+    "Use to find case law and optionally filter by jurisdiction and date range. "
+    "You can search by semantic or keyword. For example, to search for "
+    "cases related to workers compensation that cite the Jones Act, you "
+    'can search semantically for "workers compensation" and search by '
+    'keyword for "Jones Act". Be sure to enter dates in YYYY-MM-DD format. '
+    "The citation for this tool should include a link in the following format: "
+    "https://www.courtlistener.com/ + metadata['absolute_url']. "
+)
 
 VDB_PROMPT = (
     "This tool queries a database named {collection_name} "
@@ -216,3 +224,25 @@ After you have written out your analysis, determine which of the two answers you
 
 The output format should look as follows: \"Feedback: {{Write out your analysis and reasoning}} [RESULT] {{A or B or Tie}}\"
 Please do not generate any other opening, closing, and explanations. Be sure to include [RESULT] in your output."""
+
+
+OPINION_SUMMARY_BASE_PROMPT = """Write your summary as a list of bullet points in the following format:
+
+- **Parties**: <parties>
+- **Introduction**: <introduction>
+- **Background**: <background>
+- **Procedural History**: <procedural history>
+- **Issues Presented**: <issues presented>
+- **Analysis**: <analysis>
+- **Holding**: <holding>
+
+Each bullet point should be no longer than 3 sentences. Only include the bullets above, and do not change the titles."""
+
+OPINION_SUMMARY_MAP_PROMPT = \
+    "Your task is to summarize a judicial opinion. " +\
+    OPINION_SUMMARY_BASE_PROMPT +\
+    """ If there is not any information related to a title, write "I could not find any information." for that bullet point."""
+
+OPINION_SUMMARY_REDUCE_PROMPT = \
+    """Your task is to combine partial summaries of a judicial opinion into a single, comprehensive summary.""" +\
+    OPINION_SUMMARY_BASE_PROMPT
