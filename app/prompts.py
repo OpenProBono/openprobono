@@ -189,7 +189,7 @@ FILTERED_CASELAW_PROMPT = (
     'can search semantically for "workers compensation" and search by '
     'keyword for "Jones Act". Be sure to enter dates in YYYY-MM-DD format. '
     "The citation for this tool should include a link in the following format: "
-    "https://www.courtlistener.com/ + metadata['absolute_url']. "
+    "https://www.courtlistener.com/opinion/ + metadata['id'] + '/' + metadata['slug']"
 )
 
 VDB_PROMPT = (

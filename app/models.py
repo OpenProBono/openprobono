@@ -265,7 +265,7 @@ class OpinionSearchRequest(BaseModel):
     query : str
         The query
     k : int, optional
-        The number of results to return, by default 3
+        The number of results to return, by default 10
     jurisdictions : list[str] | None, optional
         The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'us-app' for federal appellate,
@@ -281,7 +281,7 @@ class OpinionSearchRequest(BaseModel):
     """
 
     query: str
-    k: int = 4
+    k: int = 10
     jurisdictions: list[str] | None = None
     keyword_query: str | None = None
     after_date: str | None = None

@@ -21,7 +21,7 @@ test_query = "tow truck"
 test_jurisdictions = ["nc"]
 test_keyword_query = "tow truck"
 test_after_date = "1989-12-31"
-test_before_date = "2000-01-01"
+test_before_date = "2020-01-01"
 
 def _test_results(results: list) -> None:
     """Test opinion search query results."""

@@ -9,13 +9,12 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
 from app.chat_models import chat, chat_history
-from app.moderation import moderate
 from app.milvusdb import check_session_data
 from app.models import BotRequest, ChatRequest, VDBTool
+from app.moderation import moderate
 from app.prompts import (
     MAX_NUM_TOOLS,
     MULTIPLE_TOOLS_PROMPT,
-    VDB_PROMPT,
 )
 from app.search_tools import (
     run_search_tool,
@@ -231,7 +230,6 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 
     kwargs = {
-        "client": client,
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
         "temperature": 0,
@@ -242,8 +240,10 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     )
     langfuse_context.update_current_trace(
         session_id=r.session_id,
-        metadata={"bot_id": r.bot_id},
+        metadata={"bot_id": r.bot_id} | kwargs,
     )
+
+    kwargs["client"] = client
 
     # response is a ChatCompletion object
     response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)

@@ -498,12 +498,12 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
-            tool_jurisdiction = None
+            tool_jurisdictions = None
             tool_kw_query = None
             tool_after_date = None
             tool_before_date = None
-            if "jurisdiction" in function_args:
-                tool_jurisdiction = function_args["jurisdiction"].lower()
+            if "jurisdictions" in function_args:
+                tool_jurisdictions = [jurisdiction.lower() for jurisdiction in function_args["jurisdictions"]]
             if "keyword-qr" in function_args:
                 tool_kw_query = function_args["keyword-qr"]
             if "after-date" in function_args:
@@ -512,8 +512,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
                 tool_before_date = function_args["before-date"]
             request = OpinionSearchRequest(
                 query=qr,
-                k=3,
-                jurisdictions=tool_jurisdiction,
+                jurisdictions=tool_jurisdictions,
                 keyword_query=tool_kw_query,
                 after_date=tool_after_date,
                 before_date=tool_before_date,

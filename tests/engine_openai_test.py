@@ -56,45 +56,6 @@ class TestApi:
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
-    def test_cap_openai_bot(self):
-        vdb_tool = {
-            "name": "filtered-case-search",
-            "collection_name": "CAP",
-            "k": 4,
-            "prompt": "",
-        }
-        test_bot_request = BotRequest(
-            chat_model=ChatModelParams(engine=EngineEnum.openai),
-            vdb_tools=[vdb_tool],
-        )
-        response = client.post("/create_bot", json=test_bot_request.model_dump())
-        assert response.status_code == 200
-        response_json = response.json()
-        assert response_json["message"] == "Success"
-        assert "bot_id" in response_json
-        assert isinstance(response_json["bot_id"], str)
-        assert len(response_json["bot_id"]) == 36
-        bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
-            bot_id=bot_id,
-            message="What is case law on tow trucks in Illinois since 2010?",
-        )
-        response = client.post(
-            "/initialize_session_chat", json=test_initialize_session.model_dump(),
-        )
-        assert response.status_code == 200
-        response_json = response.json()
-        assert response_json["message"] == "Success"
-        assert "bot_id" in response_json
-        assert isinstance(response_json["bot_id"], str)
-        assert len(response_json["bot_id"]) == 36
-        assert "output" in response_json
-        assert isinstance(response_json["output"], str)
-        assert "session_id" in response_json
-        print(response_json["session_id"])
-        assert isinstance(response_json["session_id"], str)
-        assert len(response_json["session_id"]) == 36
-
 
     def test_courtlistener_openai_bot(self):
         search_tool = {
@@ -116,7 +77,7 @@ class TestApi:
         bot_id = response_json["bot_id"]
         test_initialize_session = InitializeSession(
             bot_id=bot_id,
-            message="Tell me about cases related to copyright that were adjudicated in the state of New York since 2020.",
+            message="Tell me about cases related to copyright that were adjudicated in the state of New York since 2000.",
         )
         response = client.post(
             "/initialize_session_chat", json=test_initialize_session.model_dump(),

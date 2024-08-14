@@ -12,10 +12,13 @@ if TYPE_CHECKING:
 
 courtlistener_collection = "courtlistener_bulk"
 courtlistener_tool_args = {
-    "jurisdiction": {
-        "type": "string",
+    "jurisdictions": {
+        "type": "array",
+        "items": {
+            "type": "string",
+        },
         "description": (
-            "The two-letter abbreviation of a state or territory, e.g. 'NJ' or 'TX', "
+            "The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX', "
             "to filter query results by jurisdiction. Use 'US' for federal courts."
         ),
     },
@@ -28,22 +31,20 @@ courtlistener_tool_args = {
     "after-date": {
         "type": "string",
         "description": (
-            "The after date for the query date range in YYYY-MM-DD "
+            "The exclusive after date for the query date range in YYYY-MM-DD "
             "format."
         ),
     },
     "before-date": {
         "type": "string",
         "description": (
-            "The before date for the query date range in YYYY-MM-DD "
+            "The exclusive before date for the query date range in YYYY-MM-DD "
             "format."
         ),
     },
 }
 
-# https://github.com/freelawproject/courtlistener/discussions/3114
-# manual mapping from two-letter state abbreviations to courtlistener court_id format
-jurisdiction_codes = {
+us_federal_dict = {
     "us-app": "ca1 ca2 ca3 ca4 ca5 ca6 ca7 ca8 ca9 ca10 ca11 cadc cafc",
     "us-dis": (
         "dcd almd alnd alsd akd azd ared arwd cacd caed cand casd cod ctd ded flmd "
@@ -60,7 +61,12 @@ jurisdiction_codes = {
         "bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc "
         "mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca "
         "tecoa reglrailreorgct kingsbench"
-    ),
+    )
+}
+# https://github.com/freelawproject/courtlistener/discussions/3114
+# manual mapping from two-letter state abbreviations to courtlistener court_id format
+jurisdiction_codes = us_federal_dict | {
+    "us": " ".join(us_federal_dict.values()), #gather all federal courts to a general us key
     "al": "almd alnd alsd almb alnb alsb ala alactapp alacrimapp alacivapp",
     "ak": "akd akb alaska alaskactapp",
     "az": "azd arb ariz arizctapp ariztaxct",
