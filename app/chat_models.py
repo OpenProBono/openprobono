@@ -230,7 +230,7 @@ def chat_openai(
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
     seed = kwargs.pop("seed", 0)
-    response: ChatCompletion = client.chat.completions.create(
+    response = client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
@@ -238,18 +238,22 @@ def chat_openai(
         seed=seed,
         **kwargs,
     )
-    usage = {
-        "input": response.usage.prompt_tokens,
-        "output": response.usage.completion_tokens,
-        "total": response.usage.total_tokens,
-    }
-    langfuse_context.update_current_observation(
-        input=messages,
-        output=response.choices[0].message,
-        model=model,
-        usage=usage,
-    )
-    return response
+    try:
+        usage = {
+            "input": response.usage.prompt_tokens,
+            "output": response.usage.completion_tokens,
+            "total": response.usage.total_tokens,
+        }
+        langfuse_context.update_current_observation(
+            input=messages,
+            output=response.choices[0].message,
+            model=model,
+            usage=usage,
+        )
+        return response
+    except:
+        print("error in usage stats, bc we are streaming")
+        return response
 
 
 @observe(as_type="generation")

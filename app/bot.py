@@ -90,32 +90,35 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
 
     """
     if r.history[-1]["content"].strip() == "":
-        return "Hi, how can I assist you today?"
-    if chat_models.moderate(r.history[-1]["content"].strip()):
-        return (
+        yield "Hi, how can I assist you today?"
+    elif chat_models.moderate(r.history[-1]["content"].strip()):
+        yield (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
+    else:
+        client = OpenAI()
+        messages = r.history
+        yield r.session_id #return the session id first
+        yield "\n"
+        messages.append({"role": "system", "content": bot.system_prompt})
+        toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+        kwargs = {
+            "client": client,
+            "tools": toolset,
+            "tool_choice": "auto",  # auto is default, but we'll be explicit
+            "temperature": 0,
+            "stream": True,
+        }
 
-    client = OpenAI()
-    messages = r.history
-    messages.append({"role": "system", "content": bot.system_prompt})
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
-    kwargs = {
-        "client": client,
-        "tools": toolset,
-        "tool_choice": "auto",  # auto is default, but we'll be explicit
-        "temperature": 0,
-        "stream": True,
-    }
-
-    # response is a ChatCompletion object
-    response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
-    tool_calls, current_dict = yield from stream_openai_response(response)
-    # Step 2: check if the model wanted to call a function
-    if tool_calls:
-        messages.append(current_dict)
-        yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
+        # response is a ChatCompletion object
+        response: ChatCompletion = chat_models.chat(messages, bot.chat_model, **kwargs)
+        tool_calls, current_dict = yield from stream_openai_response(response)
+        # Step 2: check if the model wanted to call a function
+        if tool_calls:
+            messages.append(current_dict)
+            yield "\n"
+            yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
 
 def openai_tools_stream(
     messages: list[dict],
@@ -185,7 +188,6 @@ def openai_tools_stream(
         yield "\nAnalyzing tool results\n"
         response = chat_models.chat(messages, bot.chat_model, **kwargs)
         tool_calls, current_dict = yield from stream_openai_response(response)
-        messages.append(current_dict)
 
 
 @observe(capture_input=False)
