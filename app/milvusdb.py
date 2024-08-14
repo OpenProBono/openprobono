@@ -17,6 +17,7 @@ from pymilvus import (
     connections,
     utility,
 )
+from requests import session
 
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
@@ -534,6 +535,7 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     """
     coll = Collection(collection_name)
     ids = coll.delete(expr=expr)
+    coll.flush()
     return {"message": "Success", "delete_count": ids.delete_count}
 
 
@@ -782,15 +784,14 @@ def file_upload(
     """
     # extract text
     elements = partition_uploadfile(file)
-    if summary is not None:
-        for i in range(len(elements)):
-            elements[i].metadata["user_summary"] = summary
     # chunk text
     texts, metadatas = chunk_elements_by_title(elements)
     vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
     # add session id to metadata
     for i in range(len(metadatas)):
         metadatas[i]["session_id"] = session_id
+        if summary:
+            metadatas[i]["user_summary"] = summary
     # upload
     data = [{
         "vector": vectors[i],
@@ -798,6 +799,38 @@ def file_upload(
         "text": texts[i],
     } for i in range(len(texts))]
     return upload_data(SESSION_DATA, data)
+
+def check_session_data(session_id: str) -> bool:
+    """Check if user uploaded a file in a specific session.
+
+    Parameters
+    ----------
+    session_id : str
+        the session id
+
+    Returns
+    -------
+    bool
+        true if file was uploaded, false if it is empty
+
+    """
+    expr = f'metadata["session_id"] == "{session_id}"'
+    data = get_expr(SESSION_DATA, expr, 1)
+    return len(data["result"]) != 0
+
+def fetch_session_data_files(
+    session_id: str,
+    batch_size: int = 1000,
+) -> dict[str, dict[str, str]]:
+    coll = Collection(SESSION_DATA)
+    coll.load()
+    query = coll.query(
+        expr=f"metadata[\"session_id\"] in [\"{session_id}\"]",
+        output_fields=["metadata"],
+        batch_size=batch_size,
+    )
+    files = [data["metadata"]["filename"] for data in query]
+    return set(files)
 
 
 def session_source_summaries(

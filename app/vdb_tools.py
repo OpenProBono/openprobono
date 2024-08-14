@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pymilvus import Collection
 
-from app.milvusdb import query
+from app.milvusdb import SESSION_DATA, query
 from app.models import BotRequest, EngineEnum, VDBTool
 from app.prompts import VDB_PROMPT
 
@@ -115,7 +115,10 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
     collection_name = t.collection_name
     k = t.k
     tool_query = function_args["query"]
-    function_response = query(collection_name, tool_query, k)
+    if collection_name == SESSION_DATA:
+        function_response = query(collection_name, tool_query, k, session_id=t.session_id)
+    else:
+        function_response = query(collection_name, tool_query, k)
     return str(function_response)
 
 

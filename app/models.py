@@ -66,6 +66,7 @@ class VDBTool(BaseModel):
     collection_name: str
     k: int
     prompt: str = ""
+    session_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -222,6 +223,8 @@ class ChatModelParams(BaseModel):
 
     engine: EngineEnum = EngineEnum.openai
     model: str = OpenAIModelEnum.gpt_3_5.value
+    seed: int = 0
+    temperature: float = 0.0
 
 
 class EncoderParams(BaseModel):

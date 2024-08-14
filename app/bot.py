@@ -9,11 +9,13 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
 from app.chat_models import chat, chat_history
-from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
+from app.milvusdb import check_session_data
+from app.models import BotRequest, ChatRequest, VDBTool
 from app.prompts import (
     MAX_NUM_TOOLS,
     MULTIPLE_TOOLS_PROMPT,
+    VDB_PROMPT,
 )
 from app.search_tools import (
     run_search_tool,
@@ -87,32 +89,35 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
 
     """
     if r.history[-1]["content"].strip() == "":
-        return "Hi, how can I assist you today?"
-    if moderate(r.history[-1]["content"].strip()):
-        return (
+        yield "Hi, how can I assist you today?"
+    elif moderate(r.history[-1]["content"].strip()):
+        yield (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
+    else:
+        client = OpenAI()
+        messages = r.history
+        yield r.session_id #return the session id first
+        yield "\n"
+        messages.append({"role": "system", "content": bot.system_prompt})
+        toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+        kwargs = {
+            "client": client,
+            "tools": toolset,
+            "tool_choice": "auto",  # auto is default, but we'll be explicit
+            "temperature": 0,
+            "stream": True,
+        }
 
-    client = OpenAI()
-    messages = r.history
-    messages.append({"role": "system", "content": bot.system_prompt})
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
-    kwargs = {
-        "client": client,
-        "tools": toolset,
-        "tool_choice": "auto",  # auto is default, but we'll be explicit
-        "temperature": 0,
-        "stream": True,
-    }
-
-    # response is a ChatCompletion object
-    response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
-    tool_calls, current_dict = yield from stream_openai_response(response)
-    # Step 2: check if the model wanted to call a function
-    if tool_calls:
-        messages.append(current_dict)
-        yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
+        # response is a ChatCompletion object
+        response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
+        tool_calls, current_dict = yield from stream_openai_response(response)
+        # Step 2: check if the model wanted to call a function
+        if tool_calls:
+            messages.append(current_dict)
+            yield "\n"
+            yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
 
 def openai_tools_stream(
     messages: list[dict],
@@ -182,7 +187,6 @@ def openai_tools_stream(
         yield "\nAnalyzing tool results\n"
         response = chat(messages, bot.chat_model, **kwargs)
         tool_calls, current_dict = yield from stream_openai_response(response)
-        messages.append(current_dict)
 
 
 @observe(capture_input=False)
@@ -213,7 +217,19 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     client = OpenAI()
     messages = r.history
     messages.append({"role": "system", "content": bot.system_prompt})
+
+    #vdb tool for user uploaded files
+    if(check_session_data(r.session_id)):
+        bot.vdb_tools.append(VDBTool(
+            name="session_data",
+            collection_name="SessionData",
+            k=5,
+            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
+            session_id=r.session_id,
+        ))
+
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+
     kwargs = {
         "client": client,
         "tools": toolset,

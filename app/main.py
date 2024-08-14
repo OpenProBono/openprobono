@@ -1,17 +1,20 @@
 """Written by Arman Aydemir. This file contains the main API code for the backend."""
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Annotated
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Security, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Security, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
+from numpy import full
 
 from app.bot import anthropic_bot, openai_bot, openai_bot_stream
 from app.db import (
     admin_check,
     api_key_check,
+    browse_bots,
     fetch_session,
     load_bot,
     load_session,
@@ -23,6 +26,7 @@ from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
     delete_expr,
+    fetch_session_data_files,
     file_upload,
     session_source_summaries,
     session_upload_ocr,
@@ -77,15 +81,17 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
 
 
 
-def process_chat_stream(r: ChatRequest):
+async def process_chat_stream(r: ChatRequest):
     bot = load_bot(r.bot_id)
     if bot is None:
-        return {"message": "Failure: No bot found with bot id: " + r.bot_id}
-
-    if(bot.chat_model.engine != EngineEnum.openai):
-        raise Exception("Invalid bot engine for streaming")
-
-    return openai_bot_stream(r, bot)
+        yield {"message": "Failure: No bot found with bot id: " + r.bot_id}
+    elif(bot.chat_model.engine != EngineEnum.openai):
+        yield Exception("Invalid bot engine for streaming")
+    else:
+        for chunk in openai_bot_stream(r, bot):
+            yield chunk
+            # Add a small delay to avoid blocking the event loop
+            await asyncio.sleep(0)
 
 def process_chat(r: ChatRequest) -> dict:
     # try:
@@ -205,6 +211,7 @@ def init_session_stream(
                 },
             ),
         ],
+        background_tasks: BackgroundTasks,
         api_key: str = Security(api_key_auth)) -> dict:
     """Initialize a new session with a message."""
     request.api_key = api_key
@@ -218,7 +225,13 @@ def init_session_stream(
         api_key=request.api_key,
     )
     print("streaming response here")
-    return StreamingResponse(process_chat_stream(cr), media_type="text/event-stream")
+    async def stream_and_store(r: ChatRequest):
+        full_response = ""
+        async for chunk in process_chat_stream(r):
+            full_response += chunk
+            yield chunk
+        background_tasks.add_task(store_conversation, r, full_response)
+    return StreamingResponse(stream_and_store(cr), media_type="text/event-stream")
 
 
 
@@ -255,6 +268,40 @@ def chat_session(
         }
     except:
         return response
+
+@api.post("/chat_session_stream", tags=["Session Chat"])
+def chat_session_stream(
+        request: Annotated[
+            ChatBySession,
+            Body(
+                openapi_examples={
+                    "call a bot using session": {
+                        "summary": "call a bot using session",
+                        "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
+                                       "used, session_id: the session_id which was used}",
+                        "value": {
+                            "message": "hi, I need help",
+                            "session_id": "some session id",
+                        },
+                    },
+                },
+            ),
+        ],
+        background_tasks: BackgroundTasks,
+        api_key: str = Security(api_key_auth))  -> StreamingResponse:
+    """Continue a chat session with a message."""
+    request.api_key = api_key
+
+    cr = load_session(request)
+    print("streaming response here")
+    async def stream_and_store(r: ChatRequest):
+        full_response = ""
+        async for chunk in process_chat_stream(r):
+            full_response += chunk
+            yield chunk
+        background_tasks.add_task(store_conversation, r, full_response)
+    return StreamingResponse(stream_and_store(cr), media_type="text/event-stream")
+
 
 
 @api.post("/fetch_session", tags=["Session Chat"])
@@ -369,6 +416,9 @@ def create_bot(
 
     return {"message": "Success", "bot_id": bot_id}
 
+@api.post("/view_bots", tags=["Bot"])
+def view_bots(api_key: str = Security(api_key_auth)) -> dict:
+    return {"message": "Success", "data": browse_bots(api_key)}
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
@@ -383,6 +433,8 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
         the session to associate the file with.
     summary: str, optional
         A summary of the file written by the user, by default None.
+    api_key: str
+        The api key
 
     Returns
     -------
@@ -451,7 +503,7 @@ def vectordb_upload_ocr(file: UploadFile,
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_auth)):
+def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_auth)) -> dict[str, str]:
     """Delete a file from the sessions database.
 
     Parameters
@@ -460,6 +512,8 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
         filename to delete.
     session_id : str
         session to delete the file from.
+    api_key : str
+        api key
 
     """
     print(f"api_key {api_key} deleting file {filename}")
@@ -479,6 +533,8 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
         filenames to delete.
     session_id : str
         session to delete the file from
+    api_key : str
+        api key
 
     Returns
     -------
@@ -500,6 +556,8 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
     ----------
     session_id : str
         session to get files from.
+    api_key : str
+        api key
 
     Returns
     -------
@@ -508,8 +566,8 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
 
     """
     print(f"api_key {api_key} getting session files for session {session_id}")
-    source_summaries = session_source_summaries(session_id)
-    files = list(source_summaries.keys())
+
+    files = fetch_session_data_files(session_id=session_id)
     return {"message": f"Success: found {len(files)} files", "result": files}
 
 
@@ -528,7 +586,7 @@ def delete_session_files(session_id: str, api_key: str = Security(api_key_auth))
         _description_
     """
     print(f"api_key {api_key} deleting session files for session {session_id}")
-    return delete_expr(SESSION_DATA, f"session_id=='{session_id}'")
+    return delete_expr(SESSION_DATA, f'metadata["session_id"] in ["{session_id}"]')
 
 
 @api.post("/upload_site", tags=["Admin Upload"])

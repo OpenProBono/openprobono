@@ -271,11 +271,13 @@ def chat_openai(
     client = kwargs.pop("client", OpenAI())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
     temperature = kwargs.pop("temperature", 0.0)
-    response: ChatCompletion = client.chat.completions.create(
+    seed = kwargs.pop("seed", 0)
+    response = client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
+        seed=seed,
         **kwargs,
     )
     if not isinstance(response, Stream):
