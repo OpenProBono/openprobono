@@ -133,6 +133,10 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         tool_calls, current_dict = yield from stream_openai_response(response)
         # Step 2: check if the model wanted to call a function
         if tool_calls:
+            #sometimes doesnt capture the role with streaming + multiple tool calls
+            if("role" not in current_dict): current_dict["role"] = "assistant" 
+            if("content" not in current_dict): current_dict["content"] = None
+
             messages.append(current_dict)
             yield "  \n"
             yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)

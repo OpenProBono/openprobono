@@ -1,8 +1,10 @@
 import os
+import re
 
 from fastapi.testclient import TestClient
+from httpx import Response
 
-from app import bot, main
+from app import main
 from app.models import (
     BotRequest,
     ChatBySession,
@@ -456,7 +458,8 @@ class TestApi:
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
-        assert "woof" in response_json["output"].lower() or "bark" in response_json["output"].lower() #response like a dog
+        #response like a dog
+        assert "woof" in response_json["output"].lower() or "bark" in response_json["output"].lower() 
 
         # for msg in response_json["history"]:
         #     if(msg["role"] == "system"):
@@ -473,3 +476,43 @@ class TestApi:
     #         "/initialize_session_chat_stream", json=test_initialize_session.model_dump(),
     #     )
     #     print(response)
+
+
+    def test_multiple_tool_calls(self):
+        bot_id = "default_bot"
+        test_initialize_session = InitializeSessionChat(
+            bot_id=bot_id,
+            message="employment discrimination NC",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        response_json = response.json()
+        print(response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+
+    def test_multiple_tool_calls_stream(self):
+        bot_id = "default_bot"
+        test_initialize_session = InitializeSessionChat(
+            bot_id=bot_id,
+            message="employment discrimination NC",
+        )
+        response: Response = client.post(
+            "/initialize_session_chat_stream",
+            json=test_initialize_session.model_dump(),
+        )
+
+        assert response.status_code == 200  # noqa: PLR2004
+        assert "text/event-stream" in response.headers["content-type"]
+
+        accumulated_response = ""
+        for chunk in response.iter_text(chunk_size=1024):
+            if chunk:
+                accumulated_response += chunk
+        print(accumulated_response)
+        assert accumulated_response, "Response should not be empty"
+        #this only tests that it didnt fail
