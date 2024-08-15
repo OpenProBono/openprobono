@@ -15,7 +15,6 @@ from app.loaders import (
     wait_for_batches,
 )
 from app.milvusdb import MAX_K, query_iterator, upload_data
-from app.models import get_int64
 
 
 def load_cl_chunk_metadatas(basedir: str) -> dict:
@@ -207,6 +206,7 @@ def finishfile() -> None:
         chunk_metadatas,
         coll_name,
     )
+
 
 def upload_cl_completed_batches() -> None:
     """Upload CL data from locally downloaded batch files."""

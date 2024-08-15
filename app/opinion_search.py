@@ -1,7 +1,7 @@
 """Search court opinions using CAP and courtlistener data."""
 from __future__ import annotations
 
-from langfuse.decorators import langfuse_context, observe
+from langfuse.decorators import observe
 
 from app.courtlistener import courtlistener_collection, courtlistener_query
 from app.milvusdb import get_expr, upsert_expr
@@ -9,7 +9,7 @@ from app.models import ChatModelParams, OpinionSearchRequest
 from app.summarization import summarize_opinion
 
 
-@observe(capture_output=False)
+@observe(capture_input=False, capture_output=False)
 def opinion_search(request: OpinionSearchRequest) -> list[dict]:
     """Search CAP and courtlistener collections for relevant opinions.
 
@@ -26,10 +26,7 @@ def opinion_search(request: OpinionSearchRequest) -> list[dict]:
     """
     # get courtlistener results
     cl_result = courtlistener_query(request)
-    cl_hits = cl_result["result"]
-    pks = [hit["entity"]["metadata"]["id"] for hit in cl_hits]
-    langfuse_context.update_current_observation(output=pks)
-    return cl_hits
+    return cl_result["result"]
 
 
 @observe()

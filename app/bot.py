@@ -3,27 +3,18 @@ import json
 
 import openai
 from anthropic import Anthropic
-from anthropic.types.beta.tools import ToolsBetaContentBlock
+from anthropic.types.tool_use_block import ToolUseBlock
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 
-from app.chat_models import chat, chat_history
+from app.chat_models import chat
 from app.milvusdb import check_session_data
 from app.models import BotRequest, ChatRequest, VDBTool
 from app.moderation import moderate
-from app.prompts import (
-    MAX_NUM_TOOLS,
-    MULTIPLE_TOOLS_PROMPT,
-)
-from app.search_tools import (
-    run_search_tool,
-    search_toolset_creator,
-)
-from app.vdb_tools import (
-    run_vdb_tool,
-    vdb_toolset_creator,
-)
+from app.prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_PROMPT
+from app.search_tools import run_search_tool, search_toolset_creator
+from app.vdb_tools import run_vdb_tool, vdb_toolset_creator
 
 openai.log = "debug"
 
@@ -336,20 +327,24 @@ def openai_tools(
 
 @observe(capture_input=False)
 def anthropic_bot(r: ChatRequest, bot: BotRequest):
-    if r.history[-1][0].strip() == "":
+    if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
-    if moderate(r.history[-1][0].strip(), bot.chat_model):
+    if moderate(r.history[-1]["content"].strip(), bot.chat_model):
         return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    messages = chat_history(r.history, bot.chat_model.engine)
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
     client = Anthropic()
+    messages = r.history
+    #vdb tool for user uploaded files
+    session_data_toolset = session_data_toolset_creator(r)
+    if session_data_toolset:
+        bot.vdb_tools.append(session_data_toolset)
+    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+
     # Step 1: send the conversation and available functions to the model
     kwargs = {
         "tools": toolset,
-        "client": client,
         "system": MULTIPLE_TOOLS_PROMPT,
         "temperature": 0,
     }
@@ -363,20 +358,22 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     })
     langfuse_context.update_current_trace(
         session_id=r.session_id,
-        metadata={"bot_id": r.bot_id},
+        metadata={"bot_id": r.bot_id} | kwargs,
     )
+    # after tracing add client to kwargs
+    kwargs["client"] = client
 
     response = chat(messages, bot.chat_model, **kwargs)
     messages.append({"role": response.role, "content": response.content})
     # Step 2: check if the model wanted to call a function
-    tool_calls: list[ToolsBetaContentBlock] = [
+    tool_calls: list[ToolUseBlock] = [
         msg for msg in response.content if msg.type == "tool_use"
     ]
     return anthropic_tools(messages, tool_calls, bot, **kwargs)
 
 def anthropic_tools(
     messages: list[dict],
-    tool_calls: list[ToolsBetaContentBlock],
+    tool_calls: list[ToolUseBlock],
     bot: BotRequest,
     **kwargs: dict,
 ):
@@ -418,5 +415,5 @@ def anthropic_tools(
         response = chat(messages, bot.chat_model, **kwargs)
         messages.append({"role": response.role, "content": response.content})
         tool_calls = [msg for msg in response.content if msg.type == "tool_use"]
-    content: list[ToolsBetaContentBlock] = messages[-1]["content"]
+    content: list[ToolUseBlock] = messages[-1]["content"]
     return content[-1].text

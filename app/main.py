@@ -422,13 +422,13 @@ def create_bot(
                             "vdb_tools": [
                                 {
                                     "name": "name for tool",
-                                    "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
+                                    "collection_name": "name of database to query, must be one of: courtlistener",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",
                                     "prompt": "description for agent to know when to use the tool",
                                 },
                             ],
                             "chat_model": {
-                                "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic, huggingface. "  # noqa: E501
+                                "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic. "  # noqa: E501
                                       "Default is openai.",
                                 "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
                             },

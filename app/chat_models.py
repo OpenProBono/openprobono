@@ -16,7 +16,7 @@ from app.prompts import HIVE_QA_PROMPT
 
 if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
-    from anthropic.types.beta.tools import ToolsBetaMessage
+    from anthropic.types.tool_use_block import ToolUseBlock
     from langchain.llms.base import BaseLanguageModel
     from openai.types.chat import ChatCompletion
 
@@ -109,7 +109,7 @@ def chat(
     messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage | str:
+) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolUseBlock | str:
     """Chat with an LLM.
 
     Parameters
@@ -123,7 +123,7 @@ def chat(
 
     Returns
     -------
-    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolsBetaMessage
+    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolUseBlock
         The response from the LLM.
 
     Raises
@@ -310,7 +310,7 @@ def chat_anthropic(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> AnthropicMessage | ToolsBetaMessage:
+) -> AnthropicMessage | ToolUseBlock:
     """Chat with an LLM using the anthropic engine.
 
     Parameters
@@ -324,16 +324,14 @@ def chat_anthropic(
 
     Returns
     -------
-    AnthropicMessage | ToolsBetaMessage
+    AnthropicMessage | ToolUseBlock
         The response from the LLM.
 
     """
     client = kwargs.pop("client", anthropic.Anthropic())
     max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    tools = kwargs.get("tools", [])
     temperature = kwargs.pop("temperature", 0.0)
-    endpoint = client.beta.tools.messages if tools else client.messages
-    response: AnthropicMessage | ToolsBetaMessage = endpoint.create(
+    response: AnthropicMessage | ToolUseBlock = client.messages.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
