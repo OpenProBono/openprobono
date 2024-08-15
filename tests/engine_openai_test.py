@@ -2,13 +2,14 @@ import os
 
 from fastapi.testclient import TestClient
 
-from app import main
+from app import bot, main
 from app.models import (
     BotRequest,
     ChatBySession,
     ChatModelParams,
     EngineEnum,
     InitializeSession,
+    InitializeSessionChat,
     OpenAIModelEnum,
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
@@ -16,6 +17,31 @@ from app.prompts import FILTERED_CASELAW_PROMPT
 client = TestClient(main.api, headers={"X-API-KEY": os.environ["OPB_TEST_API_KEY"]})
 
 class TestApi:
+    def test_init_then_chat(self):
+        bot_id = "default_bot"
+        init_session_obj = InitializeSession(bot_id=bot_id)
+        response = client.post(
+            "/initialize_session", json=init_session_obj.model_dump(),
+        )
+        response_json = response.json()
+        assert response_json["message"] == "Success"
+        assert response_json["bot_id"] == bot_id
+        assert "session_id" in response_json
+        session_id = response_json["session_id"]
+
+        chat_obj = ChatBySession(message="What is the rule in Florida related to designating an email address for service in litigation?", session_id=session_id)
+        response = client.post(
+            "/chat_session", json=chat_obj.model_dump(),
+        )
+        assert response.status_code == 200
+        response_json = response.json()
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert "output" in response_json
+        print(response_json["output"])
+        assert isinstance(response_json["session_id"], str)
+        assert len(response_json["session_id"]) == 36
+
     def test_courtroom5_openai_bot(self):
         search_tool = {
             "name": "courtroom5",
@@ -35,7 +61,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -75,7 +101,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="Tell me about cases related to copyright that were adjudicated in the state of New York since 2000.",
         )
@@ -122,7 +148,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -170,7 +196,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -218,7 +244,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -266,7 +292,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -314,7 +340,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -362,7 +388,7 @@ class TestApi:
         assert isinstance(response_json["bot_id"], str)
         assert len(response_json["bot_id"]) == 36
         bot_id = response_json["bot_id"]
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="What is the rule in Florida related to designating an "
                     "email address for service in litigation?",
@@ -409,7 +435,7 @@ class TestApi:
 
     def test_custom_system_prompt(self):
         bot_id = "custom_system_prompt"
-        test_initialize_session = InitializeSession(
+        test_initialize_session = InitializeSessionChat(
             bot_id=bot_id,
             message="Hi",
         )
@@ -438,7 +464,7 @@ class TestApi:
 
     # def test_streaming(self):
     #     bot_id = "custom_4o_dynamic"
-    #     test_initialize_session = InitializeSession(
+    #     test_initialize_session = InitializeSessionChat(
     #         bot_id=bot_id,
     #         message="what is the rule in Florida related to designating an email address for service in litigation?",
     #     )

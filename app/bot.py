@@ -70,6 +70,19 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
         else:
             dict1[key] = dict2[key]
 
+def session_data_toolset_creator(r: ChatRequest) -> VDBTool | None:
+    #vdb tool for user uploaded files
+    if(check_session_data(r.session_id)):
+        return VDBTool(
+            name="session_data",
+            collection_name="SessionData",
+            k=5,
+            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
+            session_id=r.session_id,
+        )
+    else:
+        return None
+
 
 def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     """Call bot using openai engine.
@@ -97,10 +110,16 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     else:
         client = OpenAI()
         messages = r.history
-        yield r.session_id #return the session id first
-        yield "\n"
+        yield "  \n"
         messages.append({"role": "system", "content": bot.system_prompt})
+
+        #vdb tool for user uploaded files
+        session_data_toolset = session_data_toolset_creator(r)
+        if session_data_toolset:
+            bot.vdb_tools.append(session_data_toolset)
+
         toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+
         kwargs = {
             "client": client,
             "tools": toolset,
@@ -115,7 +134,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         # Step 2: check if the model wanted to call a function
         if tool_calls:
             messages.append(current_dict)
-            yield "\n"
+            yield "  \n"
             yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
 
 def openai_tools_stream(
@@ -158,7 +177,7 @@ def openai_tools_stream(
             # Step 3: call the function
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
-            yield f"\nRunning {function_name} tool with the following arguments: {function_args}"
+            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
             if vdb_tool:
                 tool_response = run_vdb_tool(
                     vdb_tool,
@@ -183,7 +202,7 @@ def openai_tools_stream(
             )  # extend conversation with function response
             tools_used += 1
         # get a new response from the model where it can see the function response
-        yield "\nAnalyzing tool results\n"
+        yield "  \nAnalyzing tool results  \n"
         response = chat(messages, bot.chat_model, **kwargs)
         tool_calls, current_dict = yield from stream_openai_response(response)
 
@@ -218,14 +237,9 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     messages.append({"role": "system", "content": bot.system_prompt})
 
     #vdb tool for user uploaded files
-    if(check_session_data(r.session_id)):
-        bot.vdb_tools.append(VDBTool(
-            name="session_data",
-            collection_name="SessionData",
-            k=5,
-            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
-            session_id=r.session_id,
-        ))
+    session_data_toolset = session_data_toolset_creator(r)
+    if session_data_toolset:
+        bot.vdb_tools.append(session_data_toolset)
 
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 

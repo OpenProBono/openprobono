@@ -275,7 +275,7 @@ def query(
         case MilvusMetadataEnum.field:
             search_params["output_fields"] += load_vdb_param(collection_name, "fields")
     if session_id:
-        expr += (" and " if expr else "") + f"session_id=='{session_id}'"
+        expr += (" and " if expr else "") + f"metadata[\"session_id\"]=='{session_id}'"
     if expr:
         search_params["expr"] = expr
     res = coll.search(**search_params)

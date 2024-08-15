@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Security, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
-from numpy import full
 
 from app.bot import anthropic_bot, openai_bot, openai_bot_stream
 from app.db import (
@@ -28,7 +26,6 @@ from app.milvusdb import (
     delete_expr,
     fetch_session_data_files,
     file_upload,
-    session_source_summaries,
     session_upload_ocr,
 )
 from app.models import (
@@ -38,6 +35,7 @@ from app.models import (
     EngineEnum,
     FetchSession,
     InitializeSession,
+    InitializeSessionChat,
     OpinionSearchRequest,
     get_uuid_id,
 )
@@ -150,11 +148,40 @@ def chat(
     request.api_key = api_key
     return process_chat(request)
 
-
-@api.post("/initialize_session_chat", tags=["Init Session"])
+@api.post("/initialize_session", tags=["Init Session"])
 def init_session(
         request: Annotated[
             InitializeSession,
+            Body(
+                openapi_examples={
+                    "init session": {
+                        "summary": "initialize a session",
+                        "description": "Returns: {message: 'Success', output: ai_reply, bot_id: the bot_id which was "  # noqa: E501
+                                       "used, session_id: the session_id which was created",
+                        "value": {
+                            "bot_id": "some bot id",
+                        },
+                    },
+                },
+            ),
+        ],
+        api_key: str = Security(api_key_auth)) -> dict:
+    """Initialize a new session with a message."""
+    request.api_key = api_key
+
+    session_id = get_uuid_id()
+    set_session_to_bot(session_id, request.bot_id)
+    return {
+        "message": "Success",
+        "bot_id": request.bot_id,
+        "session_id": session_id,
+    }
+
+
+@api.post("/initialize_session_chat", tags=["Init Session"])
+def init_session_chat(
+        request: Annotated[
+            InitializeSessionChat,
             Body(
                 openapi_examples={
                     "init session": {
@@ -193,9 +220,9 @@ def init_session(
         return response
 
 @api.post("/initialize_session_chat_stream", tags=["Init Session"], response_model=str)
-def init_session_stream(
+def init_session_chat_stream(
         request: Annotated[
-            InitializeSession,
+            InitializeSessionChat,
             Body(
                 openapi_examples={
                     "init session": {
@@ -224,13 +251,15 @@ def init_session_stream(
         session_id=session_id,
         api_key=request.api_key,
     )
-    print("streaming response here")
+
     async def stream_and_store(r: ChatRequest):
         full_response = ""
+        yield r.session_id #return the session id first (only in init)
         async for chunk in process_chat_stream(r):
             full_response += chunk
             yield chunk
         background_tasks.add_task(store_conversation, r, full_response)
+
     return StreamingResponse(stream_and_store(cr), media_type="text/event-stream")
 
 
@@ -293,13 +322,14 @@ def chat_session_stream(
     request.api_key = api_key
 
     cr = load_session(request)
-    print("streaming response here")
+
     async def stream_and_store(r: ChatRequest):
         full_response = ""
         async for chunk in process_chat_stream(r):
             full_response += chunk
             yield chunk
         background_tasks.add_task(store_conversation, r, full_response)
+
     return StreamingResponse(stream_and_store(cr), media_type="text/event-stream")
 
 

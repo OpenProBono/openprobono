@@ -102,9 +102,21 @@ class ChatBySession(BaseModel):
     session_id: str
     api_key: str = ""
 
-
 class InitializeSession(BaseModel):
     """Model class representing an initialize session request.
+
+    Attributes
+    ----------
+        bot_id (str): The ID of the bot.
+        api_key (str): The API key.
+
+    """
+
+    bot_id: str
+    api_key: str = ""
+
+class InitializeSessionChat(BaseModel):
+    """Model class representing an initialize session request with a message.
 
     Attributes
     ----------
