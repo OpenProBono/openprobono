@@ -144,6 +144,20 @@ class FetchSession(BaseModel):
     session_id: str
     api_key: str = ""
 
+class SessionFeedback(BaseModel):
+    """Model class representing a session feedback request.
+
+    Attributes
+    ----------
+        feedback_text (str): The feedback text from the consumer
+        session_id (str): The session ID.
+        api_key (str): The API key.
+
+    """
+    feedback_text: str
+    session_id: str
+    api_key: str = ""
+
 
 @unique
 class EngineEnum(str, Enum):
