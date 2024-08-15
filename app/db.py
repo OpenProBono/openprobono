@@ -16,6 +16,7 @@ from app.models import (
     EncoderParams,
     FetchSession,
     MilvusMetadataEnum,
+    SessionFeedback,
     get_uuid_id,
 )
 
@@ -104,6 +105,23 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
 
     return True
 
+def store_feedback(r: SessionFeedback) -> bool:
+    """Store feedback from consumers.
+
+    Parameters
+    ----------
+    r
+        SessionFeedback obj containing session_id and feedback_text
+
+    Returns
+    -------
+    bool
+       True if successful, False otherwise
+
+    """
+    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
+        {"feedback": r.feedback_text}, merge=True)
+    return True
 
 def set_session_to_bot(session_id: str, bot_id: str) -> bool:
     """Set the session to use the bot.
@@ -138,7 +156,7 @@ def load_session(r: ChatBySession) -> ChatRequest:
     session_data = (
         db.collection(CONVERSATION_COLLECTION + VERSION)
         .document(r.session_id).get()
-    ) 
+    )
 
     session_data = session_data.to_dict()
 

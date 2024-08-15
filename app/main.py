@@ -19,6 +19,7 @@ from app.db import (
     set_session_to_bot,
     store_bot,
     store_conversation,
+    store_feedback,
 )
 from app.milvusdb import (
     SESSION_DATA,
@@ -37,6 +38,7 @@ from app.models import (
     InitializeSession,
     InitializeSessionChat,
     OpinionSearchRequest,
+    SessionFeedback,
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
@@ -362,6 +364,29 @@ def get_session(
         "bot_id": cr.bot_id,
         "session_id": cr.session_id,
     }
+
+@api.post(path="/session_feedback", tags=["Session Chat"])
+def session_feedback(
+        request: Annotated[
+            SessionFeedback,
+            Body(
+                openapi_examples={
+                    "submit session feedback": {
+                        "summary": "submit session feedback",
+                        "description": "Returns: {message: 'Success'} or {message: 'Failure'}",
+                        "value": {
+                            "feedback_text": "some feedback text",
+                            "session_id": "some session id",
+                        },
+                    },
+                },
+            ),
+        ],
+        api_key: str = Security(api_key_auth))  -> dict:
+    """Submit feedback to a specific session."""
+    request.api_key = api_key
+
+    return {"message": "Success" if store_feedback(request) else "Failure"}
 
 
 @api.post("/create_bot", tags=["Bot"])
