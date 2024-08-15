@@ -32,3 +32,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response_json["session_id"], self.test_session_id)
         self.assertTrue("history" in response_json)
         self.assertTrue(isinstance(response_json["history"], list))
+
+    def test_session_feedback(self):
+        from app.models import InitializeSessionChat, SessionFeedback
+        bot_id = "default_bot"
+        test_initialize_session = InitializeSessionChat(
+            bot_id=bot_id,
+            message="hi",
+        )
+        response = client.post(
+            "/initialize_session_chat", json=test_initialize_session.model_dump(),
+        )
+        response_json = response.json()
+        print(response_json)
+        assert response_json["message"] == "Success"
+        assert "bot_id" in response_json
+        assert isinstance(response_json["bot_id"], str)
+        assert "output" in response_json
+        assert isinstance(response_json["output"], str)
+        assert "session_id" in response_json
+
+        test_submit_feedback = SessionFeedback(feedback_text="test feedback",
+                                session_id=response_json["session_id"])
+        response = client.post(
+            "/session_feedback", json=test_submit_feedback.model_dump(),
+        )
+        response = response.json()
+        assert response_json["message"] == "Success"
+
