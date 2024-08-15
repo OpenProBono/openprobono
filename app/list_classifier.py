@@ -52,8 +52,5 @@ def get_probs(
         response = response.replace("json", "")
     if "`" in response:
         response = response.replace("`", "")
-    try:
-        response_json = json.loads(response)
-        return response_json["categories"]
-    except Exception as e:
-        print(e)
+    response_json: dict = json.loads(response)
+    return response_json.get("categories", [])
