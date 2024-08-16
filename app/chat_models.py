@@ -22,88 +22,7 @@ if TYPE_CHECKING:
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v2/task/sync"
 MAX_TOKENS = 1000
-
-def chat_history(
-    history: list[tuple[str | None, str | None]],
-    engine: EngineEnum,
-) -> list[dict]:
-    """Convert conversation history into the right format for the given engine.
-
-    Parameters
-    ----------
-    history : list[tuple[str  |  None, str  |  None]]
-        The conversation history to convert.
-    engine : EngineEnum
-        The engine to use for the conversation.
-
-    Returns
-    -------
-    list[dict]
-        The converted conversation history.
-
-    Raises
-    ------
-    ValueError
-        If engine is not `openai`, `anthropic`, `hive`, or `langchain`.
-
-    """
-    match engine:
-        case EngineEnum.openai | EngineEnum.anthropic | EngineEnum.hive:
-            return chat_history_dicts(history)
-        case EngineEnum.google:
-            return chat_history_gemini(history)
-    raise ValueError(engine)
-
-
-def chat_history_dicts(
-    history: list[tuple[str | None, str | None]],
-) -> list[dict]:
-    """Convert conversation history into dictionary format.
-
-    Parameters
-    ----------
-    history : list[tuple[str  |  None, str  |  None]]
-        The original conversation history.
-
-    Returns
-    -------
-    list[dict]
-        The converted conversation history.
-
-    """
-    messages = []
-    for tup in history:
-        if tup[0]:
-            messages.append({"role": "user", "content": tup[0]})
-        if tup[1]:
-            messages.append({"role": "assistant", "content": tup[1]})
-    return messages
-
-
-def chat_history_gemini(
-    history: list[tuple[str | None, str | None]],
-) -> list[dict]:
-    """Convert conversation history into Gemini API dictionary format.
-
-    Parameters
-    ----------
-    history : list[tuple[str  |  None, str  |  None]]
-        The original conversation history.
-
-    Returns
-    -------
-    list[dict]
-        The converted conversation history.
-
-    """
-    messages = []
-    for tup in history:
-        if tup[0]:
-            messages.append({"role": "user", "parts": [tup[0]]})
-        if tup[1]:
-            messages.append({"role": "model", "parts": [tup[1]]})
-    return messages
-
+NOT_GIVEN = "NOT_GIVEN"
 
 def chat(
     messages: list[dict],
@@ -197,11 +116,11 @@ def chat_hive(
         message, chunks used for augmentation (empty if no RAG)
 
     """
-    use_embedding = kwargs.pop("use_embedding", False)
-    system = kwargs.pop("system", HIVE_QA_PROMPT)
-    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    temperature = kwargs.pop("temperature", 0.0)
-    top_p = kwargs.pop("top_p", 0.95)
+    use_embedding = kwargs.get("use_embedding", False)
+    system = kwargs.get("system", HIVE_QA_PROMPT)
+    max_tokens = kwargs.get("max_tokens", MAX_TOKENS)
+    temperature = kwargs.get("temperature", 0.0)
+    top_p = kwargs.get("top_p", 0.95)
     if use_embedding:
         key = "HIVE_7B_NORAG" if model == HiveModelEnum.hive_7b else "HIVE_70B_NORAG"
     elif model == HiveModelEnum.hive_7b:
@@ -268,17 +187,20 @@ def chat_openai(
         The response from the LLM.
 
     """
-    client = kwargs.pop("client", OpenAI())
-    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    temperature = kwargs.pop("temperature", 0.0)
-    seed = kwargs.pop("seed", 0)
+    client = kwargs.get("client", OpenAI())
+    max_tokens = kwargs.get("max_tokens", MAX_TOKENS)
+    temperature = kwargs.get("temperature", 0.0)
+    seed = kwargs.get("seed", 0)
+    tools = kwargs.get("tools", NOT_GIVEN)
+    tool_choice = kwargs.get("tool_choice", NOT_GIVEN)
     response = client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
         seed=seed,
-        **kwargs,
+        tools=tools,
+        tool_choice=tool_choice,
     )
     if not isinstance(response, Stream):
         usage = {
@@ -328,15 +250,18 @@ def chat_anthropic(
         The response from the LLM.
 
     """
-    client = kwargs.pop("client", anthropic.Anthropic())
-    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    temperature = kwargs.pop("temperature", 0.0)
+    client = kwargs.get("client", anthropic.Anthropic())
+    max_tokens = kwargs.get("max_tokens", MAX_TOKENS)
+    temperature = kwargs.get("temperature", 0.0)
+    tools = kwargs.get("tools", NOT_GIVEN)
+    system = kwargs.get("system", NOT_GIVEN)
     response: AnthropicMessage | ToolUseBlock = client.messages.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
-        **kwargs,
+        tools=tools,
+        system=system,
     )
     # report input, output, model, usage to langfuse
     usage = {

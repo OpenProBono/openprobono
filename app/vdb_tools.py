@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pymilvus import Collection
 
-from app.milvusdb import SESSION_DATA, query
+from app.milvusdb import SESSION_DATA, check_session_data, query
 from app.models import BotRequest, EngineEnum, VDBTool
 from app.prompts import VDB_PROMPT
 
@@ -143,3 +143,17 @@ def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
         elif bot.chat_model.engine == EngineEnum.anthropic:
             toolset.append(anthropic_tool(t))
     return toolset
+
+
+def session_data_toolset_creator(session_id: str | None) -> VDBTool | None:
+    """Get a vdb tool for user uploaded files."""
+    if(session_id and check_session_data(session_id)):
+        return VDBTool(
+            name="session_data",
+            collection_name=SESSION_DATA,
+            k=5,
+            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
+            session_id=session_id,
+        )
+    else:
+        return None

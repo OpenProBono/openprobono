@@ -3,18 +3,26 @@ import json
 
 import openai
 from anthropic import Anthropic
+from anthropic.types import Message as AnthropicMessage
 from anthropic.types.tool_use_block import ToolUseBlock
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
-from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    ChatCompletionMessageToolCall,
+)
 
 from app.chat_models import chat
-from app.milvusdb import check_session_data
-from app.models import BotRequest, ChatRequest, VDBTool
+from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
-from app.prompts import MAX_NUM_TOOLS, MULTIPLE_TOOLS_PROMPT
+from app.prompts import MAX_NUM_TOOLS
 from app.search_tools import run_search_tool, search_toolset_creator
-from app.vdb_tools import run_vdb_tool, vdb_toolset_creator
+from app.vdb_tools import (
+    run_vdb_tool,
+    session_data_toolset_creator,
+    vdb_toolset_creator,
+)
 
 openai.log = "debug"
 
@@ -61,19 +69,6 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
         else:
             dict1[key] = dict2[key]
 
-def session_data_toolset_creator(r: ChatRequest) -> VDBTool | None:
-    #vdb tool for user uploaded files
-    if(check_session_data(r.session_id)):
-        return VDBTool(
-            name="session_data",
-            collection_name="SessionData",
-            k=5,
-            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
-            session_id=r.session_id,
-        )
-    else:
-        return None
-
 
 def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     """Call bot using openai engine.
@@ -105,7 +100,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         messages.append({"role": "system", "content": bot.system_prompt})
 
         #vdb tool for user uploaded files
-        session_data_toolset = session_data_toolset_creator(r)
+        session_data_toolset = session_data_toolset_creator(r.session_id)
         if session_data_toolset:
             bot.vdb_tools.append(session_data_toolset)
 
@@ -225,10 +220,8 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
 
     client = OpenAI()
     messages = r.history
-    messages.append({"role": "system", "content": bot.system_prompt})
-
     #vdb tool for user uploaded files
-    session_data_toolset = session_data_toolset_creator(r)
+    session_data_toolset = session_data_toolset_creator(r.session_id)
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
@@ -239,10 +232,13 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         "tool_choice": "auto",  # auto is default, but we'll be explicit
         "temperature": 0,
     }
+
     # tracing
-    langfuse_context.update_current_observation(
-        input=messages[-2]["content"], # input is last user message
+    last_user_msg = next(
+        (m for m in messages[::-1] if m["role"] == "user"),
+        None,
     )
+    langfuse_context.update_current_observation(input=last_user_msg)
     langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
@@ -253,27 +249,22 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     # response is a ChatCompletion object
     response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
     response_message = response.choices[0].message
-    tool_calls = response_message.tool_calls
-    # Step 2: check if the model wanted to call a function
-    if tool_calls:
-        messages.append(response_message.model_dump(exclude={"function_call"}))
-        response_message = openai_tools(messages, tool_calls, bot, **kwargs)
-    return response_message.content
+    return openai_tools(messages, response_message, bot, **kwargs)
 
 def openai_tools(
     messages: list[dict],
-    tool_calls: list[ChatCompletionMessageToolCall],
+    response_message: ChatCompletionMessage,
     bot: BotRequest,
     **kwargs: dict,
-):
+) -> str:
     """Handle tool calls in the conversation for OpenAI engine.
 
     Parameters
     ----------
     messages : list[dict]
         The conversation messages
-    tool_calls : list[ChatCompletionMessageToolCall]
-        List of tool calls
+    response_message : ChatCompletionMessage
+        The initial response message
     bot : BotRequest
         BotRequest object
 
@@ -283,8 +274,14 @@ def openai_tools(
         The response message from the bot, should be final response.
 
     """
+    tool_calls = response_message.tool_calls
+    # Step 2: check if the model wanted to call a function
+    if not tool_calls:
+        return response_message.content
+
     tools_used = 0
     while tool_calls and tools_used < MAX_NUM_TOOLS:
+        messages.append(response_message.model_dump())
         # TODO: run tool calls in parallel
         for tool_call in tool_calls:
             print("RUN TOOL")
@@ -307,26 +304,23 @@ def openai_tools(
                 tool_response = run_search_tool(search_tool, function_args)
             else:
                 tool_response = "error: unable to run tool"
-            # Step 4: send the info for each function call and function response to
-            # the model
-            messages.append(
-                {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": tool_response,
-                },
-            )  # extend conversation with function response
+            # extend conversation with function response
+            messages.append({
+                "tool_call_id": tool_call.id,
+                "role": "tool",
+                "name": function_name,
+                "content": tool_response,
+            })
             tools_used += 1
+        # Step 4: send the function responses to the model
+        response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
         # get a new response from the model where it can see the function response
-        response = chat(messages, bot.chat_model, **kwargs)
         response_message = response.choices[0].message
-        messages.append(response_message)
         tool_calls = response_message.tool_calls
-    return response_message
+    return response_message.content
 
 @observe(capture_input=False)
-def anthropic_bot(r: ChatRequest, bot: BotRequest):
+def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
     if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
     if moderate(r.history[-1]["content"].strip(), bot.chat_model):
@@ -335,27 +329,28 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
             "Please modify your message and try again."
         )
     client = Anthropic()
-    messages = r.history
+    # The Messages API accepts a top-level `system` parameter,
+    # not "system" as an input message role
+    messages = [msg for msg in r.history if msg["role"] != "system"]
     #vdb tool for user uploaded files
-    session_data_toolset = session_data_toolset_creator(r)
+    session_data_toolset = session_data_toolset_creator(r.session_id)
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
+
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 
-    # Step 1: send the conversation and available functions to the model
     kwargs = {
         "tools": toolset,
-        "system": MULTIPLE_TOOLS_PROMPT,
+        "system": bot.system_prompt,
         "temperature": 0,
     }
 
-    # Step 1.5: tracing
-    # Anthropic system prompt does not go in messages list, so add it to the input
-    langfuse_prompt_msg = [{"role": "system", "content": kwargs["system"]}]
-    langfuse_context.update_current_observation(input={
-        "input": messages[-1]["content"],
-        "prompt": langfuse_prompt_msg,
-    })
+    # Step 0: tracing
+    last_user_msg = next(
+        (m for m in messages[::-1] if m["role"] == "user"),
+        None,
+    )
+    langfuse_context.update_current_observation(input=last_user_msg)
     langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
@@ -363,22 +358,29 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest):
     # after tracing add client to kwargs
     kwargs["client"] = client
 
+    # Step 1: send the conversation and available functions to the model
     response = chat(messages, bot.chat_model, **kwargs)
-    messages.append({"role": response.role, "content": response.content})
+    return anthropic_tools(messages, response, bot, **kwargs)
+
+def anthropic_tools(
+    messages: list[dict],
+    response: AnthropicMessage,
+    bot: BotRequest,
+    **kwargs: dict,
+) -> str:
     # Step 2: check if the model wanted to call a function
     tool_calls: list[ToolUseBlock] = [
         msg for msg in response.content if msg.type == "tool_use"
     ]
-    return anthropic_tools(messages, tool_calls, bot, **kwargs)
+    if not tool_calls:
+        return "\n".join([
+            block.text for block in response.content if block.type == "text"
+        ])
 
-def anthropic_tools(
-    messages: list[dict],
-    tool_calls: list[ToolUseBlock],
-    bot: BotRequest,
-    **kwargs: dict,
-):
     tools_used = 0
     while tool_calls and tools_used < MAX_NUM_TOOLS:
+        # add message before tool calls so the last message isn't duplicated in db
+        messages.append({"role": response.role, "content": response.content})
         for tool_call in tool_calls:
             function_name = tool_call.name
             vdb_tool = next(
@@ -403,17 +405,15 @@ def anthropic_tools(
                 tool_response_msg["is_error"] = True
             tool_response_msg["content"] = tool_response
             # extend conversation with function response
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [tool_response_msg],
-                },
-            )
+            messages.append({
+                "role": "user",
+                "content": [tool_response_msg],
+            })
             tools_used += 1
         # Step 4: send info for each function call and function response to the model
         # get a new response from the model where it can see the function response
         response = chat(messages, bot.chat_model, **kwargs)
-        messages.append({"role": response.role, "content": response.content})
         tool_calls = [msg for msg in response.content if msg.type == "tool_use"]
-    content: list[ToolUseBlock] = messages[-1]["content"]
-    return content[-1].text
+    return "\n".join([
+        block.text for block in response.content if block.type == "text"
+    ])

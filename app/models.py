@@ -59,7 +59,7 @@ class VDBTool(BaseModel):
         collection_name (str): The collection name for the VDB tool.
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
-
+        session_id (str | None): The session id if querying session data, else None.
     """
 
     name: str
