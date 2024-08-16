@@ -16,7 +16,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 
-from app.bot import anthropic_bot, openai_bot, openai_bot_stream
+from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
 from app.db import (
     admin_check,
     api_key_check,
@@ -94,17 +94,24 @@ async def process_chat_stream(r: ChatRequest, message: str):
     bot = load_bot(r.bot_id)
     if bot is None:
         yield {"message": "Failure: No bot found with bot id: " + r.bot_id}
-    elif(bot.chat_model.engine != EngineEnum.openai):
-        yield Exception("Invalid bot engine for streaming")
     else:
         r.history = [{"role": "system", "content": bot.system_prompt}]
         if message:
             r.history.append({"role": "user", "content": message})
 
-        for chunk in openai_bot_stream(r, bot):
-            yield chunk
-            # Add a small delay to avoid blocking the event loop
-            await asyncio.sleep(0)
+        match bot.chat_model.engine:
+            case EngineEnum.openai:
+                for chunk in openai_bot_stream(r, bot):
+                    yield chunk
+                    # Add a small delay to avoid blocking the event loop
+                    await asyncio.sleep(0)
+            case EngineEnum.anthropic:
+                for chunk in anthropic_bot_stream(r, bot):
+                    yield chunk
+                    # Add a small delay to avoid blocking the event loop
+                    await asyncio.sleep(0)
+            case _:
+                yield Exception("Invalid bot engine for streaming")
 
 def process_chat(r: ChatRequest, message: str) -> dict:
     bot = load_bot(r.bot_id)
