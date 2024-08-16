@@ -16,9 +16,10 @@ from app.prompts import HIVE_QA_PROMPT
 
 if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
-    from anthropic.types.tool_use_block import ToolUseBlock
+    from anthropic.types import RawMessageStreamEvent
     from langchain.llms.base import BaseLanguageModel
     from openai.types.chat import ChatCompletion
+    from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v2/task/sync"
 MAX_TOKENS = 1000
@@ -28,7 +29,8 @@ def chat(
     messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolUseBlock | str:
+) -> tuple[str, list[str]] | ChatCompletion | Stream[ChatCompletionChunk] |\
+    AnthropicMessage | Stream[RawMessageStreamEvent] | str:
     """Chat with an LLM.
 
     Parameters
@@ -42,13 +44,10 @@ def chat(
 
     Returns
     -------
-    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | ToolUseBlock
-        The response from the LLM.
+    tuple[str, list[str]] | ChatCompletion | Stream[ChatCompletionChunk] |
+    AnthropicMessage | Stream[RawMessageStreamEvent] | str
 
-    Raises
-    ------
-    ValueError
-        If the given chat model is not supported.
+        The response from the LLM. Depends on engine and if streaming is enabled.
 
     """
     match chatmodel.engine:
@@ -90,7 +89,7 @@ def chat_str_fn(chatmodel: ChatModelParams) -> Callable:
             return chat_str_hive
         case EngineEnum.google:
             return chat_gemini
-    raise ValueError
+    raise ValueError(chatmodel)
 
 
 @observe(as_type="generation")
@@ -169,7 +168,7 @@ def chat_openai(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> ChatCompletion:
+) -> ChatCompletion | Stream[ChatCompletionChunk]:
     """Chat with an LLM using the openai engine.
 
     Parameters
@@ -193,6 +192,7 @@ def chat_openai(
     seed = kwargs.get("seed", 0)
     tools = kwargs.get("tools", NOT_GIVEN)
     tool_choice = kwargs.get("tool_choice", NOT_GIVEN)
+    stream = kwargs.get("stream", False)
     response = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -201,6 +201,7 @@ def chat_openai(
         seed=seed,
         tools=tools,
         tool_choice=tool_choice,
+        stream=stream,
     )
     if not isinstance(response, Stream):
         usage = {
@@ -232,7 +233,7 @@ def chat_anthropic(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> AnthropicMessage | ToolUseBlock:
+) -> AnthropicMessage | Stream[RawMessageStreamEvent]:
     """Chat with an LLM using the anthropic engine.
 
     Parameters
@@ -246,7 +247,7 @@ def chat_anthropic(
 
     Returns
     -------
-    AnthropicMessage | ToolUseBlock
+    AnthropicMessage | Stream[RawMessageStreamEvent]
         The response from the LLM.
 
     """
@@ -255,26 +256,29 @@ def chat_anthropic(
     temperature = kwargs.get("temperature", 0.0)
     tools = kwargs.get("tools", NOT_GIVEN)
     system = kwargs.get("system", NOT_GIVEN)
-    response: AnthropicMessage | ToolUseBlock = client.messages.create(
+    stream = kwargs.get("stream", False)
+    response = client.messages.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
         tools=tools,
         system=system,
+        stream=stream,
     )
     # report input, output, model, usage to langfuse
-    usage = {
-        "input": response.usage.input_tokens,
-        "output": response.usage.output_tokens,
-        "total": response.usage.input_tokens + response.usage.output_tokens,
-    }
-    langfuse_context.update_current_observation(
-        input=messages,
-        model=model,
-        output=response.content,
-        usage=usage,
-    )
+    if not isinstance(response, Stream):
+        usage = {
+            "input": response.usage.input_tokens,
+            "output": response.usage.output_tokens,
+            "total": response.usage.input_tokens + response.usage.output_tokens,
+        }
+        langfuse_context.update_current_observation(
+            input=messages,
+            model=model,
+            output=response.content,
+            usage=usage,
+        )
     return response
 
 

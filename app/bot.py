@@ -1,8 +1,10 @@
 """Defines the bot engines. The meaty stuff."""
 import json
+from typing import Generator
 
 import openai
 from anthropic import Anthropic
+from anthropic import Stream as AnthropicStream
 from anthropic.types import Message as AnthropicMessage
 from anthropic.types.tool_use_block import ToolUseBlock
 from langfuse.decorators import langfuse_context, observe
@@ -97,7 +99,6 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         client = OpenAI()
         messages = r.history
         yield "  \n"
-        messages.append({"role": "system", "content": bot.system_prompt})
 
         #vdb tool for user uploaded files
         session_data_toolset = session_data_toolset_creator(r.session_id)
@@ -421,3 +422,105 @@ def anthropic_tools(
     return "\n".join([
         block.text for block in response.content if block.type == "text"
     ])
+
+def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
+    if r.history[-1]["content"].strip() == "":
+        return "Hi, how can I assist you today?"
+    elif moderate(r.history[-1]["content"].strip()):
+        return (
+            "I'm sorry, I can't help you with that. "
+            "Please modify your message and try again."
+        )
+    client = Anthropic()
+    messages = r.history
+    yield "  \n"
+    messages = [msg for msg in r.history if msg["role"] != "system"]
+
+    #vdb tool for user uploaded files
+    session_data_toolset = session_data_toolset_creator(r.session_id)
+    if session_data_toolset:
+        bot.vdb_tools.append(session_data_toolset)
+
+    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+
+    kwargs = {
+        "tools": toolset,
+        "system": bot.system_prompt,
+        "temperature": 0,
+    }
+
+    # after tracing add client to kwargs
+    kwargs["client"] = client
+
+    # Step 1: send the conversation and available functions to the model
+    response: AnthropicStream = chat(messages, bot.chat_model, **kwargs)
+    yield from anthropic_tools_stream(messages, response, bot, **kwargs)
+
+def anthropic_tools_stream(
+    messages: list[dict],
+    response: AnthropicStream,
+    bot: BotRequest,
+    **kwargs: dict,
+) -> Generator:
+    tools_used = 0
+    while tools_used < MAX_NUM_TOOLS:
+        current_tool_call = None
+        tool_call_id = None
+
+        for chunk in response:
+            print(chunk)
+            continue
+            if chunk.type == "content_block_start":
+                if chunk.content_block.type == "tool_use":
+                    current_tool_call = {
+                        "name": chunk.content_block.name,
+                        "input": "",
+                    }
+                    tool_call_id = chunk.content_block.id
+            elif chunk.type == "content_block_delta":
+                if chunk.delta.type == "text_delta":
+                    yield chunk.delta.text
+                elif chunk.delta.type == "input_json_delta" and current_tool_call:
+                    current_tool_call["input"] += chunk.delta.partial_json
+            elif chunk.type == "content_block_stop":
+                if current_tool_call:
+                    function_args = json.loads(current_tool_call["input"])
+                    function_name = current_tool_call["name"]
+
+                    yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
+
+                    vdb_tool = next(
+                        (t for t in bot.vdb_tools if function_name == t.name),
+                        None,
+                    )
+                    search_tool = next(
+                        (t for t in bot.search_tools if function_name == t.name),
+                        None,
+                    )
+                    if vdb_tool:
+                        tool_response = run_vdb_tool(vdb_tool, function_args)
+                    elif search_tool:
+                        tool_response = run_search_tool(search_tool, function_args)
+                    else:
+                        tool_response = "error: unable to identify tool"
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "name": current_tool_call["name"],
+                        "content": tool_response,
+                    })
+
+                    tools_used += 1
+                    current_tool_call = None
+                    break
+            elif chunk.type == "message_delta" and \
+            chunk.delta.stop_reason == "end_turn":
+                break
+
+        # get a new response from the model where it can see the function response
+        if tool_call_id:
+            yield "  \nAnalyzing tool results  \n"
+            response = chat(messages, bot.chat_model, **kwargs)
+        else:
+            return
