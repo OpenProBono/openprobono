@@ -289,10 +289,8 @@ def query(
                 key=lambda h: h["distance"],
             )
             # format output for tracing
-            pks = [hit["id"] for hit in hits]
-            langfuse_context.update_current_observation(
-                output=pks,
-            )
+            pks = [str(hit["id"]) for hit in hits]
+            langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
     return {"message": "Failure: unable to complete search"}
@@ -510,9 +508,7 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         hits += res
         res = q_iter.next()
     q_iter.close()
-    langfuse_context.update_current_observation(
-        output=f"{len(hits)} hits",
-    )
+    langfuse_context.update_current_observation(output=f"{len(hits)} hits")
     return {"message": "Success", "result": hits}
 
 

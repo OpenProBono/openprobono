@@ -4,7 +4,15 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Security, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Security,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 
@@ -44,7 +52,6 @@ from app.models import (
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
-from app.prompts import FILTERED_CASELAW_PROMPT  # noqa: TCH001
 
 # this is to ensure tracing with langfuse
 # @asynccontextmanager
@@ -95,11 +102,15 @@ async def process_chat_stream(r: ChatRequest):
             # Add a small delay to avoid blocking the event loop
             await asyncio.sleep(0)
 
-def process_chat(r: ChatRequest) -> dict:
-    # try:
+def process_chat(r: ChatRequest, message: str) -> dict:
     bot = load_bot(r.bot_id)
     if bot is None:
         return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+
+    # set conversation history
+    r.history = [{"role": "system", "content": bot.system_prompt}]
+    if message:
+        r.history.append({"role": "user", "content": message})
 
     match bot.chat_model.engine:
         case EngineEnum.openai:
@@ -111,10 +122,6 @@ def process_chat(r: ChatRequest) -> dict:
 
     # store conversation (and also log the api_key)
     store_conversation(r, output)
-
-    # except Exception as error:
-    #     error.
-    #     return {"message": "Failure: Internal Error: " + str(error)}
     # return the chat and the bot_id
     return {"message": "Success", "output": output, "bot_id": r.bot_id}
 
@@ -150,7 +157,7 @@ def chat(
         api_key: str = Security(api_key_auth)) -> dict:
     """Call a bot with history (only for backwards compat, could be deprecated)."""
     request.api_key = api_key
-    return process_chat(request)
+    return process_chat(request, "")
 
 @api.post("/initialize_session", tags=["Init Session"])
 def init_session(
@@ -207,12 +214,12 @@ def init_session_chat(
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
     cr = ChatRequest(
-        history=[{"role": "user", "content": request.message}],
+        history=[],
         bot_id=request.bot_id,
         session_id=session_id,
         api_key=request.api_key,
     )
-    response = process_chat(cr)
+    response = process_chat(cr, request.message)
     try:
         return {
             "message": "Success",
@@ -291,7 +298,7 @@ def chat_session(
     request.api_key = api_key
 
     cr = load_session(request)
-    response = process_chat(cr)
+    response = process_chat(cr, request.message)
     try:
         return {
             "message": "Success",
@@ -409,18 +416,13 @@ def create_bot(
                                     "prompt": "Use to answer questions or find resources about "
                                               "government and laws.",
                                 },
-                                {
-                                    "name": "case-search",
-                                    "method": "courtlistener",
-                                    "prompt": FILTERED_CASELAW_PROMPT,
-                                },
                             ],
                             "vdb_tools": [
                                 {
-                                    "name": "uscode-query",
-                                    "collection_name": "USCode",
+                                    "name": "session-query",
+                                    "collection_name": "SessionData",
                                     "k": 4,
-                                    "prompt": "Use to find information about federal laws and regulations.",
+                                    "prompt": "Used to search user uploaded data. Only available if a user has uploaded a file.",
                                 },
                             ],
                             "chat_model": {
@@ -449,13 +451,13 @@ def create_bot(
                             "vdb_tools": [
                                 {
                                     "name": "name for tool",
-                                    "collection_name": "name of database to query, must be one of: USCode, NCGeneralStatutes, CAP, courtlistener",  # noqa: E501
+                                    "collection_name": "name of database to query, must be one of: courtlistener",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",
                                     "prompt": "description for agent to know when to use the tool",
                                 },
                             ],
                             "chat_model": {
-                                "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic, huggingface. "  # noqa: E501
+                                "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic. "  # noqa: E501
                                       "Default is openai.",
                                 "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
                             },

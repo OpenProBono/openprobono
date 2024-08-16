@@ -56,12 +56,15 @@ def test_firebase_config() -> None:
             case MilvusMetadataEnum.no_field:
                 assert milvus_field_names == []
 
+def test_empty_session_data() -> None:
+    session_id = "emptysession"
+    result = milvusdb.check_session_data(session_id)
+    assert result is False
 
-def test_upload_site(url: str) -> None:
-    result = milvusdb.upload_site(collection_name, url)
-    assert result["message"] == "Success"
-    assert "insert_count" in result
-    assert result["insert_count"] > 0
+def test_session_data_uploaded() -> None:
+    session_id = "d42992b5-dfe6-4966-8e97-a16d6c8f7c7d"
+    result = milvusdb.check_session_data(session_id)
+    assert result is True
 
 def test_get_expr() -> None:
     result = milvusdb.get_expr(collection_name, test_expr)

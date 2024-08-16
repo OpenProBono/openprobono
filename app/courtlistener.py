@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 
 from app.milvusdb import fuzzy_keyword_query, query
 
@@ -176,4 +176,8 @@ def courtlistener_query(request: OpinionSearchRequest) -> dict:
         keyword_query = fuzzy_keyword_query(request.keyword_query)
         expr += (" and " if expr else "")
         expr += f"text like '% {keyword_query} %'"
-    return query(courtlistener_collection, request.query, request.k, expr)
+    result = query(courtlistener_collection, request.query, request.k, expr)
+    if "result" in result:
+        opinion_ids = [hit["entity"]["opinion_id"] for hit in result["result"]]
+        langfuse_context.update_current_observation(output=opinion_ids)
+    return result

@@ -180,11 +180,7 @@ def load_session(r: ChatBySession) -> ChatRequest:
     )
 
     session_data = session_data.to_dict()
-
-    #add user message to history
     history = session_data.get("history", [])
-
-    history.append({"role": "user", "content": r.message})
 
     return ChatRequest(
         history=history,
