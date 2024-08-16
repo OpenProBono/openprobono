@@ -345,12 +345,6 @@ def chat_session_stream(
 
     cr = load_session(request)
 
-    # async def stream_and_store(r: ChatRequest):
-    #     full_response = ""
-    #     async for chunk in process_chat_stream(r):
-    #         full_response += chunk
-    #         yield chunk
-    #     background_tasks.add_task(store_conversation, r, full_response)
     async def stream_and_store():
         full_response = ""
         async for chunk in process_chat_stream(cr, request.message):
