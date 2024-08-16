@@ -90,13 +90,17 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
 
 
 
-async def process_chat_stream(r: ChatRequest):
+async def process_chat_stream(r: ChatRequest, message: str):
     bot = load_bot(r.bot_id)
     if bot is None:
         yield {"message": "Failure: No bot found with bot id: " + r.bot_id}
     elif(bot.chat_model.engine != EngineEnum.openai):
         yield Exception("Invalid bot engine for streaming")
     else:
+        r.history = [{"role": "system", "content": bot.system_prompt}]
+        if message:
+            r.history.append({"role": "user", "content": message})
+
         for chunk in openai_bot_stream(r, bot):
             yield chunk
             # Add a small delay to avoid blocking the event loop
@@ -263,15 +267,15 @@ def init_session_chat_stream(
         api_key=request.api_key,
     )
 
-    async def stream_and_store(r: ChatRequest):
+    async def stream_and_store():
         full_response = ""
-        yield r.session_id #return the session id first (only in init)
-        async for chunk in process_chat_stream(r):
+        yield cr.session_id #return the session id first (only in init)
+        async for chunk in process_chat_stream(cr, request.message):
             full_response += chunk
             yield chunk
-        background_tasks.add_task(store_conversation, r, full_response)
+        background_tasks.add_task(store_conversation, cr, full_response)
 
-    return StreamingResponse(stream_and_store(cr), media_type="text/event-stream")
+    return StreamingResponse(stream_and_store(), media_type="text/event-stream")
 
 
 
@@ -334,14 +338,21 @@ def chat_session_stream(
 
     cr = load_session(request)
 
-    async def stream_and_store(r: ChatRequest):
+    # async def stream_and_store(r: ChatRequest):
+    #     full_response = ""
+    #     async for chunk in process_chat_stream(r):
+    #         full_response += chunk
+    #         yield chunk
+    #     background_tasks.add_task(store_conversation, r, full_response)
+    async def stream_and_store():
         full_response = ""
-        async for chunk in process_chat_stream(r):
+        async for chunk in process_chat_stream(cr, request.message):
             full_response += chunk
             yield chunk
-        background_tasks.add_task(store_conversation, r, full_response)
+        background_tasks.add_task(store_conversation, cr, full_response)
 
-    return StreamingResponse(stream_and_store(cr), media_type="text/event-stream")
+
+    return StreamingResponse(stream_and_store(), media_type="text/event-stream")
 
 
 

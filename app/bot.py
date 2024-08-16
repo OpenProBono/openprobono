@@ -97,7 +97,6 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         client = OpenAI()
         messages = r.history
         yield "  \n"
-        messages.append({"role": "system", "content": bot.system_prompt})
 
         #vdb tool for user uploaded files
         session_data_toolset = session_data_toolset_creator(r.session_id)
