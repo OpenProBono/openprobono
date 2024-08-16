@@ -19,7 +19,8 @@ from app.db import (
     set_session_to_bot,
     store_bot,
     store_conversation,
-    store_feedback,
+    store_opinion_feedback,
+    store_session_feedback,
 )
 from app.milvusdb import (
     SESSION_DATA,
@@ -37,6 +38,7 @@ from app.models import (
     FetchSession,
     InitializeSession,
     InitializeSessionChat,
+    OpinionFeedback,
     OpinionSearchRequest,
     SessionFeedback,
     get_uuid_id,
@@ -386,7 +388,7 @@ def session_feedback(
     """Submit feedback to a specific session."""
     request.api_key = api_key
 
-    return {"message": "Success" if store_feedback(request) else "Failure"}
+    return {"message": "Success" if store_session_feedback(request) else "Failure"}
 
 
 @api.post("/create_bot", tags=["Bot"])
@@ -657,8 +659,6 @@ def search_opinions(
     req: OpinionSearchRequest,
     api_key: str = Security(api_key_auth),
 ) -> dict:
-    if not api_key_check(api_key):
-        return {"message": "Failure: API key invalid"}
     try:
         results = opinion_search(req)
     except Exception as error:
@@ -672,8 +672,6 @@ def get_opinion_summary(
     opinion_id: int,
     api_key: str = Security(api_key_auth),
 ) -> dict:
-    if not api_key_check(api_key):
-        return {"message": "Failure: API key invalid"}
     try:
         summary = add_opinion_summary(opinion_id)
     except Exception as error:
@@ -683,6 +681,28 @@ def get_opinion_summary(
 
 @api.get("/get_opinion_count", tags=["Opinion Search"])
 def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
-    if not api_key_check(api_key):
-        return {"message": "Failure: API key invalid"}
     return {"message": "Success", "opinion_count": count_opinions()}
+
+
+@api.post(path="/opinion_feedback", tags=["Opinion Search"])
+def opinion_feedback(
+        request: Annotated[
+            OpinionFeedback,
+            Body(
+                openapi_examples={
+                    "submit opinion feedback": {
+                        "summary": "submit opinion feedback",
+                        "description": "Returns: {message: 'Success'} or {message: 'Failure'}",
+                        "value": {
+                            "feedback_text": "some feedback text",
+                            "opinion": "some opinion id",
+                        },
+                    },
+                },
+            ),
+        ],
+        api_key: str = Security(api_key_auth))  -> dict:
+    """Submit feedback to a specific session."""
+    request.api_key = api_key
+
+    return {"message": "Success" if store_opinion_feedback(request) else "Failure"}

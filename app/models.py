@@ -312,3 +312,17 @@ class OpinionSearchRequest(BaseModel):
     keyword_query: str | None = None
     after_date: str | None = None
     before_date: str | None = None
+
+class OpinionFeedback(BaseModel):
+    """Model class representing an opinion feedback request.
+
+    Attributes
+    ----------
+        feedback_text (str): The feedback text
+        opinion_id (int): The opinion ID.
+        api_key (str): The API key.
+
+    """
+    feedback_text: str
+    opinion_id: int
+    api_key: str = ""

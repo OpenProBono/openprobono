@@ -16,6 +16,7 @@ from app.models import (
     EncoderParams,
     FetchSession,
     MilvusMetadataEnum,
+    OpinionFeedback,
     SessionFeedback,
     get_uuid_id,
 )
@@ -32,6 +33,7 @@ MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
+OPINION_FEEDBACK_COLLECTION = "opinion_feedback"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -105,8 +107,8 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
 
     return True
 
-def store_feedback(r: SessionFeedback) -> bool:
-    """Store feedback from consumers.
+def store_session_feedback(r: SessionFeedback) -> bool:
+    """Store session feedback from consumers. Overwrites the current feedback if there is.
 
     Parameters
     ----------
@@ -122,6 +124,25 @@ def store_feedback(r: SessionFeedback) -> bool:
     db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
         {"feedback": r.feedback_text}, merge=True)
     return True
+
+def store_opinion_feedback(r: OpinionFeedback) -> bool:
+    """Store opinion feedback. Adds to list of feedback.
+
+    Parameters
+    ----------
+    r
+        OpinionFeedback obj containing opinion_id and feedback_text
+
+    Returns
+    -------
+    bool
+       True if successful, False otherwise
+
+    """
+    db.collection(OPINION_FEEDBACK_COLLECTION + VERSION).document(str(r.opinion_id)).set(
+        {"feedback_list": firestore.ArrayUnion([r.feedback_text])}, merge=True)
+    return True
+
 
 def set_session_to_bot(session_id: str, bot_id: str) -> bool:
     """Set the session to use the bot.

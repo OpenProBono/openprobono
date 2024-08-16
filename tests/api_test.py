@@ -60,3 +60,18 @@ class ApiTests(unittest.TestCase):
         response = response.json()
         assert response_json["message"] == "Success"
 
+    def test_opinion_feedback(self):
+        from app.models import OpinionFeedback
+
+        test_opinion_feedback = OpinionFeedback(
+            feedback_text="test feedback2",
+            opinion_id=522541,
+        )
+        response = client.post(
+            "/opinion_feedback", json=test_opinion_feedback.model_dump(),
+        )
+        response_json = response.json()
+        print(response_json)
+        assert response_json["message"] == "Success"
+
+

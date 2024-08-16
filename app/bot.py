@@ -181,7 +181,7 @@ def openai_tools_stream(
             # Step 3: call the function
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
-            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
+            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n"
             if vdb_tool:
                 tool_response = run_vdb_tool(
                     vdb_tool,
