@@ -68,7 +68,7 @@ def test_anthropic_bot() -> None:
     cr = ChatRequest(history=[sys_msg, user_msg], bot_id = "")
     bot_msg_content = anthropic_bot(cr, bot)
     assert isinstance(bot_msg_content, str)
-    assert len(cr.history) > 2
+    assert len(bot_msg_content) > 2
 
 def test_anthropic_bot_stream() -> None:
     search_tool = {

@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING, Callable
 import anthropic
 import google.generativeai as genai
 import requests
+from anthropic import Stream as AnthropicStream
 from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
-from openai import OpenAI, Stream
+from openai import OpenAI
+from openai import Stream as OpenAIStream
 
 from app.models import ChatModelParams, EngineEnum, HiveModelEnum
 from app.prompts import HIVE_QA_PROMPT
@@ -29,8 +31,8 @@ def chat(
     messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> tuple[str, list[str]] | ChatCompletion | Stream[ChatCompletionChunk] |\
-    AnthropicMessage | Stream[RawMessageStreamEvent] | str:
+) -> tuple[str, list[str]] | ChatCompletion | OpenAIStream[ChatCompletionChunk] |\
+    AnthropicMessage | AnthropicStream[RawMessageStreamEvent] | str:
     """Chat with an LLM.
 
     Parameters
@@ -168,7 +170,7 @@ def chat_openai(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> ChatCompletion | Stream[ChatCompletionChunk]:
+) -> ChatCompletion | OpenAIStream[ChatCompletionChunk]:
     """Chat with an LLM using the openai engine.
 
     Parameters
@@ -203,7 +205,7 @@ def chat_openai(
         tool_choice=tool_choice,
         stream=stream,
     )
-    if not isinstance(response, Stream):
+    if not isinstance(response, OpenAIStream):
         usage = {
             "input": response.usage.prompt_tokens,
             "output": response.usage.completion_tokens,
@@ -233,7 +235,7 @@ def chat_anthropic(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> AnthropicMessage | Stream[RawMessageStreamEvent]:
+) -> AnthropicMessage | AnthropicStream[RawMessageStreamEvent]:
     """Chat with an LLM using the anthropic engine.
 
     Parameters
@@ -267,7 +269,7 @@ def chat_anthropic(
         stream=stream,
     )
     # report input, output, model, usage to langfuse
-    if not isinstance(response, Stream):
+    if not isinstance(response, AnthropicStream):
         usage = {
             "input": response.usage.input_tokens,
             "output": response.usage.output_tokens,

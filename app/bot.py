@@ -6,7 +6,7 @@ import openai
 from anthropic import Anthropic
 from anthropic import Stream as AnthropicStream
 from anthropic.types import Message as AnthropicMessage
-from anthropic.types.tool_use_block import ToolUseBlock
+from anthropic.types.content_block import ContentBlock
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from openai.types.chat import (
@@ -72,6 +72,7 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
             dict1[key] = dict2[key]
 
 
+@observe(capture_input=False)
 def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     """Call bot using openai engine.
 
@@ -89,44 +90,44 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
 
     """
     if r.history[-1]["content"].strip() == "":
-        yield "Hi, how can I assist you today?"
-    elif moderate(r.history[-1]["content"].strip()):
-        yield (
+        return "Hi, how can I assist you today?"
+
+    client = OpenAI()
+    if moderate(r.history[-1]["content"].strip(), client=client):
+        return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    else:
-        client = OpenAI()
-        messages = r.history
+    messages = r.history
+    yield "  \n"
+
+    #vdb tool for user uploaded files
+    session_data_toolset = session_data_toolset_creator(r.session_id)
+    if session_data_toolset:
+        bot.vdb_tools.append(session_data_toolset)
+
+    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+
+    kwargs = {
+        "client": client,
+        "tools": toolset,
+        "tool_choice": "auto",  # auto is default, but we'll be explicit
+        "temperature": 0,
+        "stream": True,
+    }
+
+    # response is a ChatCompletion object
+    response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
+    tool_calls, current_dict = yield from stream_openai_response(response)
+    # Step 2: check if the model wanted to call a function
+    if tool_calls:
+        #sometimes doesnt capture the role with streaming + multiple tool calls
+        if("role" not in current_dict): current_dict["role"] = "assistant" 
+        if("content" not in current_dict): current_dict["content"] = None
+
+        messages.append(current_dict)
         yield "  \n"
-
-        #vdb tool for user uploaded files
-        session_data_toolset = session_data_toolset_creator(r.session_id)
-        if session_data_toolset:
-            bot.vdb_tools.append(session_data_toolset)
-
-        toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
-
-        kwargs = {
-            "client": client,
-            "tools": toolset,
-            "tool_choice": "auto",  # auto is default, but we'll be explicit
-            "temperature": 0,
-            "stream": True,
-        }
-
-        # response is a ChatCompletion object
-        response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
-        tool_calls, current_dict = yield from stream_openai_response(response)
-        # Step 2: check if the model wanted to call a function
-        if tool_calls:
-            #sometimes doesnt capture the role with streaming + multiple tool calls
-            if("role" not in current_dict): current_dict["role"] = "assistant" 
-            if("content" not in current_dict): current_dict["content"] = None
-
-            messages.append(current_dict)
-            yield "  \n"
-            yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
+        yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
 
 def openai_tools_stream(
     messages: list[dict],
@@ -217,13 +218,14 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     """
     if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
-    if moderate(r.history[-1]["content"].strip()):
+
+    client = OpenAI()
+    if moderate(r.history[-1]["content"].strip(), client=client):
         return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
 
-    client = OpenAI()
     messages = r.history
     #vdb tool for user uploaded files
     session_data_toolset = session_data_toolset_creator(r.session_id)
@@ -328,12 +330,13 @@ def openai_tools(
 def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
     if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
-    if moderate(r.history[-1]["content"].strip(), bot.chat_model):
+
+    client = Anthropic()
+    if moderate(r.history[-1]["content"].strip(), bot.chat_model, client=client):
         return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    client = Anthropic()
     # The Messages API accepts a top-level `system` parameter,
     # not "system" as an input message role
     messages = [msg for msg in r.history if msg["role"] != "system"]
@@ -374,7 +377,7 @@ def anthropic_tools(
     **kwargs: dict,
 ) -> str:
     # Step 2: check if the model wanted to call a function
-    tool_calls: list[ToolUseBlock] = [
+    tool_calls: list[ContentBlock] = [
         msg for msg in response.content if msg.type == "tool_use"
     ]
     if not tool_calls:
@@ -423,15 +426,17 @@ def anthropic_tools(
         block.text for block in response.content if block.type == "text"
     ])
 
+@observe(capture_input=False)
 def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
-    elif moderate(r.history[-1]["content"].strip()):
+
+    client = Anthropic()
+    if moderate(r.history[-1]["content"].strip(), bot.chat_model, client=client):
         return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    client = Anthropic()
     messages = r.history
     yield "  \n"
     messages = [msg for msg in r.history if msg["role"] != "system"]
@@ -447,6 +452,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
         "tools": toolset,
         "system": bot.system_prompt,
         "temperature": 0,
+        "stream": True,
     }
 
     # after tracing add client to kwargs
@@ -465,11 +471,11 @@ def anthropic_tools_stream(
     tools_used = 0
     while tools_used < MAX_NUM_TOOLS:
         current_tool_call = None
+        current_text = None
         tool_call_id = None
+        tool_msg = {"role": "assistant", "content": []}
 
         for chunk in response:
-            print(chunk)
-            continue
             if chunk.type == "content_block_start":
                 if chunk.content_block.type == "tool_use":
                     current_tool_call = {
@@ -477,16 +483,21 @@ def anthropic_tools_stream(
                         "input": "",
                     }
                     tool_call_id = chunk.content_block.id
+                elif chunk.content_block.type == "text":
+                    current_text = {"type": "text", "text": ""}
             elif chunk.type == "content_block_delta":
                 if chunk.delta.type == "text_delta":
+                    current_text["text"] += chunk.delta.text
                     yield chunk.delta.text
                 elif chunk.delta.type == "input_json_delta" and current_tool_call:
                     current_tool_call["input"] += chunk.delta.partial_json
             elif chunk.type == "content_block_stop":
+                if current_text:
+                    tool_msg["content"].append(current_text)
+                    current_text = None
                 if current_tool_call:
                     function_args = json.loads(current_tool_call["input"])
                     function_name = current_tool_call["name"]
-
                     yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
 
                     vdb_tool = next(
@@ -504,15 +515,23 @@ def anthropic_tools_stream(
                     else:
                         tool_response = "error: unable to identify tool"
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": current_tool_call["name"],
+                    # tool use message
+                    current_tool_call["id"] = tool_call_id
+                    current_tool_call["type"] = "tool_use"
+                    current_tool_call["input"] = function_args
+                    tool_msg["content"].append(current_tool_call)
+                    messages.append(tool_msg)
+                    # tool response message
+                    tool_response_msg = {
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
                         "content": tool_response,
-                    })
+                    }
+                    messages.append({"role": "user", "content": [tool_response_msg]})
 
                     tools_used += 1
                     current_tool_call = None
+                    tool_msg = {"role": "assistant", "content": []}
                     break
             elif chunk.type == "message_delta" and \
             chunk.delta.stop_reason == "end_turn":
