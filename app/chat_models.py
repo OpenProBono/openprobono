@@ -195,6 +195,7 @@ def chat_openai(
     tools = kwargs.get("tools", NOT_GIVEN)
     tool_choice = kwargs.get("tool_choice", NOT_GIVEN)
     stream = kwargs.get("stream", False)
+    stream_options = {"include_usage": True} if stream else NOT_GIVEN
     response = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -204,6 +205,7 @@ def chat_openai(
         tools=tools,
         tool_choice=tool_choice,
         stream=stream,
+        stream_options=stream_options,
     )
     if not isinstance(response, OpenAIStream):
         usage = {

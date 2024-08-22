@@ -9,6 +9,7 @@ from anthropic.types import Message as AnthropicMessage
 from anthropic.types.content_block import ContentBlock
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
+from openai import Stream as OpenAIStream
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -31,7 +32,12 @@ openai.log = "debug"
 def stream_openai_response(response: ChatCompletion):
     full_delta_dict_collection = []
     no_yield = False
+    usage = None
     for chunk in response:
+        if chunk.usage is not None:
+            # last chunk contains usage, choices is an empty array
+            usage = chunk.usage
+            continue
         if(chunk.choices[0].delta.tool_calls or no_yield):
             no_yield = True
             full_delta_dict_collection.append(chunk.choices[0].delta.to_dict())
@@ -48,7 +54,7 @@ def stream_openai_response(response: ChatCompletion):
 
         tool_calls = [ChatCompletionMessageToolCall.model_validate(tool_call)
                     for tool_call in current_dict["tool_calls"]]
-    return tool_calls, current_dict
+    return tool_calls, current_dict, usage
 
 
 def merge_dicts_stream_openai_completion(dict1, dict2):
@@ -90,15 +96,17 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
 
     """
     if r.history[-1]["content"].strip() == "":
-        return "Hi, how can I assist you today?"
+        yield "Hi, how can I assist you today?"
+        return
 
     client = OpenAI()
     if moderate(r.history[-1]["content"].strip(), client=client):
-        return (
+        yield (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    messages = r.history
+        return
+
     yield "  \n"
 
     #vdb tool for user uploaded files
@@ -108,53 +116,79 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
 
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 
+    # Step 0: tracing
+    last_user_msg = next(
+        (m for m in r.history[::-1] if m["role"] == "user"),
+        None,
+    )
+    langfuse_context.update_current_observation(input=last_user_msg["content"])
+
     kwargs = {
-        "client": client,
         "tools": toolset,
         "tool_choice": "auto",  # auto is default, but we'll be explicit
         "temperature": 0,
         "stream": True,
     }
 
-    # response is a ChatCompletion object
-    response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
-    tool_calls, current_dict = yield from stream_openai_response(response)
-    # Step 2: check if the model wanted to call a function
-    if tool_calls:
-        #sometimes doesnt capture the role with streaming + multiple tool calls
-        if("role" not in current_dict): current_dict["role"] = "assistant" 
-        if("content" not in current_dict): current_dict["content"] = None
+    langfuse_context.update_current_observation(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id} | kwargs,
+    )
 
-        messages.append(current_dict)
-        yield "  \n"
-        yield from openai_tools_stream(messages, tool_calls, bot, **kwargs)
+    # add client to kwargs after tracing
+    kwargs["client"] = client
 
+    # Step 1: send initial message to the model
+    # response is a Stream object
+    response: OpenAIStream = chat(r.history, bot.chat_model, **kwargs)
+    yield from openai_tools_stream(r.history, response, bot, **kwargs)
+
+@observe(capture_input=False, capture_output=False, as_type="generation")
 def openai_tools_stream(
     messages: list[dict],
-    tool_calls: list[ChatCompletionMessageToolCall],
+    response: OpenAIStream,
     bot: BotRequest,
     **kwargs: dict,
-):
+) -> Generator:
     """Handle tool calls in the conversation for OpenAI engine.
 
     Parameters
     ----------
     messages : list[dict]
         The conversation messages
-    tool_calls : list[ChatCompletionMessageToolCall]
-        List of tool calls
+    response : OpenAIStream
+        The initial response stream
     bot : BotRequest
         BotRequest object
 
     Returns
     -------
-    messages : list[dict]
-        The updated conversation messages with tool responses appended
+    Generator
+        A stream of response chunks from the OpenAI LLM
 
     """
+    yield "  \n"
+
     tools_used = 0
-    while tool_calls and tools_used < MAX_NUM_TOOLS:
-        # TODO: run tool calls in parallel
+    usage_dict = {"input": 0, "output": 0, "total": 0}
+    while tools_used < MAX_NUM_TOOLS:
+        # Step 2: see if the bot wants to call any functions
+        tool_calls, current_dict, usage = yield from stream_openai_response(response)
+        if usage:
+            usage_dict["input"] += usage.prompt_tokens
+            usage_dict["output"] += usage.completion_tokens
+            usage_dict["total"] += usage.total_tokens
+        if tool_calls:
+            #sometimes doesnt capture the role with streaming + multiple tool calls
+            if("role" not in current_dict):
+                current_dict["role"] = "assistant"
+            if("content" not in current_dict):
+                current_dict["content"] = None
+
+            messages.append(current_dict)
+        else:
+            break
+
         for tool_call in tool_calls:
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
@@ -184,19 +218,21 @@ def openai_tools_stream(
                 tool_response = "error: unable to run tool"
             # Step 4: send the info for each function call and function response to
             # the model
-            messages.append(
-                {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": tool_response,
-                },
-            )  # extend conversation with function response
+            messages.append({
+                "tool_call_id": tool_call.id,
+                "role": "tool",
+                "name": function_name,
+                "content": tool_response,
+            })  # extend conversation with function response
             tools_used += 1
         # get a new response from the model where it can see the function response
         yield "  \nAnalyzing tool results  \n"
         response = chat(messages, bot.chat_model, **kwargs)
-        tool_calls, current_dict = yield from stream_openai_response(response)
+    # add usage to tracing after all tools are called
+    langfuse_context.update_current_observation(
+        model=bot.chat_model.model,
+        usage=usage_dict,
+    )
 
 
 @observe(capture_input=False)
@@ -443,6 +479,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 
     # Step 0: tracing
+    # input tracing
     last_user_msg = next(
         (m for m in messages[::-1] if m["role"] == "user"),
         None,
@@ -455,6 +492,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
         "temperature": 0,
         "stream": True,
     }
+    # metadata tracing
     langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
@@ -471,6 +509,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
         return
     yield "  \n"
 
+    # Step 1: send initial message to the model
     response: AnthropicStream = chat(messages, bot.chat_model, **kwargs)
     yield from anthropic_tools_stream(messages, response, bot, **kwargs)
 
@@ -484,6 +523,7 @@ def anthropic_tools_stream(
     tools_used = 0
     usage = {"input": 0, "output": 0}
     while tools_used < MAX_NUM_TOOLS:
+        # Step 2: see if the model wants to call any functions
         current_tool_call = None
         current_text = None
         tool_call_id = None
@@ -510,6 +550,7 @@ def anthropic_tools_stream(
                     tool_msg["content"].append(current_text)
                     current_text = None
                 if current_tool_call:
+                    # Step 3: call the function for the model
                     function_args = json.loads(current_tool_call["input"])
                     function_name = current_tool_call["name"]
                     yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
@@ -555,9 +596,9 @@ def anthropic_tools_stream(
                 usage["input"] += chunk.message.usage.input_tokens
                 usage["output"] += chunk.message.usage.output_tokens
 
-        # get a new response from the model where it can see the function response
         if tool_call_id:
             yield "  \nAnalyzing tool results  \n"
+            # Step 4: Send function results to the model and get a new response
             response = chat(messages, bot.chat_model, **kwargs)
         else:
             usage["total"] = usage["input"] + usage["output"]
