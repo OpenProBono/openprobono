@@ -245,7 +245,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         (m for m in messages[::-1] if m["role"] == "user"),
         None,
     )
-    langfuse_context.update_current_observation(input=last_user_msg)
+    langfuse_context.update_current_observation(input=last_user_msg["content"])
     langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
@@ -337,9 +337,6 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    # The Messages API accepts a top-level `system` parameter,
-    # not "system" as an input message role
-    messages = [msg for msg in r.history if msg["role"] != "system"]
     #vdb tool for user uploaded files
     session_data_toolset = session_data_toolset_creator(r.session_id)
     if session_data_toolset:
@@ -353,12 +350,15 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
         "temperature": 0,
     }
 
+    # The Messages API accepts a top-level `system` parameter,
+    # not "system" as an input message role
+    messages = [msg for msg in r.history if msg["role"] != "system"]
     # Step 0: tracing
     last_user_msg = next(
         (m for m in messages[::-1] if m["role"] == "user"),
         None,
     )
-    langfuse_context.update_current_observation(input=last_user_msg)
+    langfuse_context.update_current_observation(input=last_user_msg["content"])
     langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
@@ -429,16 +429,10 @@ def anthropic_tools(
 @observe(capture_input=False)
 def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     if r.history[-1]["content"].strip() == "":
-        return "Hi, how can I assist you today?"
+        yield "Hi, how can I assist you today?"
+        return
 
     client = Anthropic()
-    if moderate(r.history[-1]["content"].strip(), bot.chat_model, client=client):
-        return (
-            "I'm sorry, I can't help you with that. "
-            "Please modify your message and try again."
-        )
-    messages = r.history
-    yield "  \n"
     messages = [msg for msg in r.history if msg["role"] != "system"]
 
     #vdb tool for user uploaded files
@@ -448,20 +442,39 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
 
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
 
+    # Step 0: tracing
+    last_user_msg = next(
+        (m for m in messages[::-1] if m["role"] == "user"),
+        None,
+    )
+    langfuse_context.update_current_observation(input=last_user_msg["content"])
+
     kwargs = {
         "tools": toolset,
         "system": bot.system_prompt,
         "temperature": 0,
         "stream": True,
     }
-
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id} | kwargs,
+    )
     # after tracing add client to kwargs
     kwargs["client"] = client
 
-    # Step 1: send the conversation and available functions to the model
+    # Step 0.5: moderation
+    if moderate(r.history[-1]["content"].strip(), bot.chat_model, client=client):
+        yield (
+            "I'm sorry, I can't help you with that. "
+            "Please modify your message and try again."
+        )
+        return
+    yield "  \n"
+
     response: AnthropicStream = chat(messages, bot.chat_model, **kwargs)
     yield from anthropic_tools_stream(messages, response, bot, **kwargs)
 
+@observe(capture_input=False, capture_output=False, as_type="generation")
 def anthropic_tools_stream(
     messages: list[dict],
     response: AnthropicStream,
@@ -469,6 +482,7 @@ def anthropic_tools_stream(
     **kwargs: dict,
 ) -> Generator:
     tools_used = 0
+    usage = {"input": 0, "output": 0}
     while tools_used < MAX_NUM_TOOLS:
         current_tool_call = None
         current_text = None
@@ -535,11 +549,20 @@ def anthropic_tools_stream(
                     break
             elif chunk.type == "message_delta" and \
             chunk.delta.stop_reason == "end_turn":
+                usage["output"] += chunk.usage.output_tokens
                 break
+            elif chunk.type == "message_start":
+                usage["input"] += chunk.message.usage.input_tokens
+                usage["output"] += chunk.message.usage.output_tokens
 
         # get a new response from the model where it can see the function response
         if tool_call_id:
             yield "  \nAnalyzing tool results  \n"
             response = chat(messages, bot.chat_model, **kwargs)
         else:
+            usage["total"] = usage["input"] + usage["output"]
+            langfuse_context.update_current_observation(
+                model=bot.chat_model.model,
+                usage=usage,
+            )
             return

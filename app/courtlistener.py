@@ -24,9 +24,7 @@ courtlistener_tool_args = {
     },
     "keyword-qr": {
         "type": "string",
-        "description": (
-            "A keyword query to search for exact names and terms."
-        ),
+        "description": "The keyword query to search for an exact name or term.",
     },
     "after-date": {
         "type": "string",
