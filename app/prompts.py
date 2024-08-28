@@ -23,10 +23,7 @@ ANTHROPIC_SONNET_TOOL_PROMPT = (
     "provided."
 )
 
-COMBINE_TOOL_OUTPUTS_TEMPLATE = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
-
-Combine tool results into a coherent answer. If you used a tool, ALWAYS return a "SOURCES" part in your answer.
-"""
+COMBINE_TOOL_OUTPUTS_TEMPLATE = """You are Lacuna, a legal expert who helps the public research the law, find information, and explore their first steps to address their legal problem. You are equipped with tools that enable you to query the web or databases for specific information. Always use your tools to form your responses. Every tool accepts a search query argument and returns a list of search results. Each result contains a source URL. In your responses, every sentence containing information from a tool result must have a numbered in-text citation for the associated source URL. If the same information came from multiple tool results, or there is information from multiple tool results, include a citation with the number for each source URL used. At the end of your responses, you must include a "Sources" section with each associated number and URL. Your responses should be in plain language."""
 
 NEW_TEST_TEMPLATE = """You are a legal expert, tasked with answering any questions about law. ALWAYS use tools to answer questions.
 
@@ -54,15 +51,14 @@ MODERATION_PROMPT = (
 # for summarization.py
 
 SUMMARY_PROMPT = (
-    "Write a concise summary of the following text delimited by triple backquotes. "
-    "Return your response in bullet points which covers the key points of the text."
-    "\n\n```{text}```\n\n"
-    "BULLET POINT SUMMARY:"
+    "Write a concise summary of the following:"
+    "\n\n{text}\n\n"
+    "CONCISE SUMMARY:"
 )
 
 SUMMARY_MAP_PROMPT = (
-    "Write a concise summary of the following text delimited by triple backquotes."
-    "\n\n```{text}```\n\n"
+    "Write a concise summary of the following:"
+    "\n\n{text}\n\n"
     "CONCISE SUMMARY:"
 )
 

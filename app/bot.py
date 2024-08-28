@@ -3,12 +3,10 @@ import json
 from typing import Generator
 
 import openai
-from anthropic import Anthropic
 from anthropic import Stream as AnthropicStream
 from anthropic.types import Message as AnthropicMessage
 from anthropic.types.content_block import ContentBlock
 from langfuse.decorators import langfuse_context, observe
-from openai import OpenAI
 from openai import Stream as OpenAIStream
 from openai.types.chat import (
     ChatCompletion,
@@ -16,12 +14,13 @@ from openai.types.chat import (
     ChatCompletionMessageToolCall,
 )
 
-from app.chat_models import chat
+from app.chat_models import chat, chat_stream
 from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
 from app.prompts import MAX_NUM_TOOLS
-from app.search_tools import run_search_tool, search_toolset_creator
+from app.search_tools import find_search_tool, run_search_tool, search_toolset_creator
 from app.vdb_tools import (
+    find_vdb_tool,
     run_vdb_tool,
     session_data_toolset_creator,
     vdb_toolset_creator,
@@ -29,7 +28,7 @@ from app.vdb_tools import (
 
 openai.log = "debug"
 
-def stream_openai_response(response: ChatCompletion):
+def stream_openai_response(response: OpenAIStream):
     full_delta_dict_collection = []
     no_yield = False
     usage = None
@@ -98,9 +97,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     if r.history[-1]["content"].strip() == "":
         yield "Hi, how can I assist you today?"
         return
-
-    client = OpenAI()
-    if moderate(r.history[-1]["content"].strip(), client=client):
+    if moderate(r.history[-1]["content"].strip()):
         yield (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
@@ -123,25 +120,17 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     )
     langfuse_context.update_current_observation(input=last_user_msg["content"])
 
-    kwargs = {
-        "tools": toolset,
-        "tool_choice": "auto",  # auto is default, but we'll be explicit
-        "temperature": 0,
-        "stream": True,
-    }
-
+    kwargs = {"tools": toolset}
     langfuse_context.update_current_observation(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
     )
 
-    # add client to kwargs after tracing
-    kwargs["client"] = client
-
     # Step 1: send initial message to the model
     # response is a Stream object
-    response: OpenAIStream = chat(r.history, bot.chat_model, **kwargs)
+    response: OpenAIStream = chat_stream(r.history, bot.chat_model, **kwargs)
     yield from openai_tools_stream(r.history, response, bot, **kwargs)
+
 
 @observe(capture_input=False, capture_output=False, as_type="generation")
 def openai_tools_stream(
@@ -160,6 +149,8 @@ def openai_tools_stream(
         The initial response stream
     bot : BotRequest
         BotRequest object
+    kwargs : dict
+        Keyword arguments for the LLM.
 
     Returns
     -------
@@ -192,14 +183,8 @@ def openai_tools_stream(
         for tool_call in tool_calls:
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = next(
-                (t for t in bot.vdb_tools if function_name == t.name),
-                None,
-            )
-            search_tool = next(
-                (t for t in bot.search_tools if function_name == t.name),
-                None,
-            )
+            vdb_tool = find_vdb_tool(bot, function_name)
+            search_tool = find_search_tool(bot, function_name)
             # Step 3: call the function
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
@@ -227,7 +212,7 @@ def openai_tools_stream(
             tools_used += 1
         # get a new response from the model where it can see the function response
         yield "  \nAnalyzing tool results  \n"
-        response = chat(messages, bot.chat_model, **kwargs)
+        response = chat_stream(messages, bot.chat_model, **kwargs)
     # add usage to tracing after all tools are called
     langfuse_context.update_current_observation(
         model=bot.chat_model.model,
@@ -254,27 +239,20 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     """
     if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
-
-    client = OpenAI()
-    if moderate(r.history[-1]["content"].strip(), client=client):
+    if moderate(r.history[-1]["content"].strip()):
         return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
 
-    messages = r.history
     #vdb tool for user uploaded files
     session_data_toolset = session_data_toolset_creator(r.session_id)
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
-
-    kwargs = {
-        "tools": toolset,
-        "tool_choice": "auto",  # auto is default, but we'll be explicit
-        "temperature": 0,
-    }
+    kwargs = {"tools": toolset}
+    messages = r.history
 
     # tracing
     last_user_msg = next(
@@ -287,12 +265,11 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         metadata={"bot_id": r.bot_id} | kwargs,
     )
 
-    kwargs["client"] = client
-
     # response is a ChatCompletion object
     response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
     response_message = response.choices[0].message
     return openai_tools(messages, response_message, bot, **kwargs)
+
 
 def openai_tools(
     messages: list[dict],
@@ -310,6 +287,8 @@ def openai_tools(
         The initial response message
     bot : BotRequest
         BotRequest object
+    kwargs : dict
+        Keyword arguments for the LLM.
 
     Returns
     -------
@@ -330,14 +309,8 @@ def openai_tools(
             print("RUN TOOL")
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = next(
-                (t for t in bot.vdb_tools if function_name == t.name),
-                None,
-            )
-            search_tool = next(
-                (t for t in bot.search_tools if function_name == t.name),
-                None,
-            )
+            vdb_tool = find_vdb_tool(bot, function_name)
+            search_tool = find_search_tool(bot, function_name)
             # Step 3: call the function
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
@@ -362,13 +335,12 @@ def openai_tools(
         tool_calls = response_message.tool_calls
     return response_message.content
 
+
 @observe(capture_input=False)
 def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
     if r.history[-1]["content"].strip() == "":
         return "Hi, how can I assist you today?"
-
-    client = Anthropic()
-    if moderate(r.history[-1]["content"].strip(), bot.chat_model, client=client):
+    if moderate(r.history[-1]["content"].strip(), bot.chat_model):
         return (
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
@@ -379,12 +351,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
         bot.vdb_tools.append(session_data_toolset)
 
     toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
-
-    kwargs = {
-        "tools": toolset,
-        "system": bot.system_prompt,
-        "temperature": 0,
-    }
+    kwargs = {"tools": toolset, "system": bot.system_prompt}
 
     # The Messages API accepts a top-level `system` parameter,
     # not "system" as an input message role
@@ -399,12 +366,11 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
     )
-    # after tracing add client to kwargs
-    kwargs["client"] = client
 
     # Step 1: send the conversation and available functions to the model
     response = chat(messages, bot.chat_model, **kwargs)
     return anthropic_tools(messages, response, bot, **kwargs)
+
 
 def anthropic_tools(
     messages: list[dict],
@@ -427,14 +393,8 @@ def anthropic_tools(
         messages.append({"role": response.role, "content": response.content})
         for tool_call in tool_calls:
             function_name = tool_call.name
-            vdb_tool = next(
-                (t for t in bot.vdb_tools if function_name == t.name),
-                None,
-            )
-            search_tool = next(
-                (t for t in bot.search_tools if function_name == t.name),
-                None,
-            )
+            vdb_tool = find_vdb_tool(bot, function_name)
+            search_tool = find_search_tool(bot, function_name)
             tool_response_msg = {
                 "type": "tool_result",
                 "tool_use_id": tool_call.id,
@@ -462,14 +422,18 @@ def anthropic_tools(
         block.text for block in response.content if block.type == "text"
     ])
 
+
 @observe(capture_input=False)
 def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     if r.history[-1]["content"].strip() == "":
         yield "Hi, how can I assist you today?"
         return
-
-    client = Anthropic()
-    messages = [msg for msg in r.history if msg["role"] != "system"]
+    if moderate(r.history[-1]["content"].strip(), bot.chat_model):
+        yield (
+            "I'm sorry, I can't help you with that. "
+            "Please modify your message and try again."
+        )
+        return
 
     #vdb tool for user uploaded files
     session_data_toolset = session_data_toolset_creator(r.session_id)
@@ -480,38 +444,25 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
 
     # Step 0: tracing
     # input tracing
+    messages = [msg for msg in r.history if msg["role"] != "system"]
     last_user_msg = next(
         (m for m in messages[::-1] if m["role"] == "user"),
         None,
     )
     langfuse_context.update_current_observation(input=last_user_msg["content"])
 
-    kwargs = {
-        "tools": toolset,
-        "system": bot.system_prompt,
-        "temperature": 0,
-        "stream": True,
-    }
+    kwargs = {"tools": toolset, "system": bot.system_prompt}
     # metadata tracing
     langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
     )
-    # after tracing add client to kwargs
-    kwargs["client"] = client
-
-    # Step 0.5: moderation
-    if moderate(r.history[-1]["content"].strip(), bot.chat_model, client=client):
-        yield (
-            "I'm sorry, I can't help you with that. "
-            "Please modify your message and try again."
-        )
-        return
     yield "  \n"
 
     # Step 1: send initial message to the model
-    response: AnthropicStream = chat(messages, bot.chat_model, **kwargs)
+    response: AnthropicStream = chat_stream(messages, bot.chat_model, **kwargs)
     yield from anthropic_tools_stream(messages, response, bot, **kwargs)
+
 
 @observe(capture_input=False, capture_output=False, as_type="generation")
 def anthropic_tools_stream(
@@ -555,14 +506,8 @@ def anthropic_tools_stream(
                     function_name = current_tool_call["name"]
                     yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
 
-                    vdb_tool = next(
-                        (t for t in bot.vdb_tools if function_name == t.name),
-                        None,
-                    )
-                    search_tool = next(
-                        (t for t in bot.search_tools if function_name == t.name),
-                        None,
-                    )
+                    vdb_tool = find_vdb_tool(bot, function_name)
+                    search_tool = find_search_tool(bot, function_name)
                     if vdb_tool:
                         tool_response = run_vdb_tool(vdb_tool, function_args)
                     elif search_tool:
@@ -599,7 +544,7 @@ def anthropic_tools_stream(
         if tool_call_id:
             yield "  \nAnalyzing tool results  \n"
             # Step 4: Send function results to the model and get a new response
-            response = chat(messages, bot.chat_model, **kwargs)
+            response = chat_stream(messages, bot.chat_model, **kwargs)
         else:
             usage["total"] = usage["input"] + usage["output"]
             langfuse_context.update_current_observation(

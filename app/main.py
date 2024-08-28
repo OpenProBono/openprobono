@@ -93,7 +93,8 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
 async def process_chat_stream(r: ChatRequest, message: str):
     bot = load_bot(r.bot_id)
     if bot is None:
-        yield {"message": "Failure: No bot found with bot id: " + r.bot_id}
+        yield "An error occurred."
+        return
     else:
         r.history = [{"role": "system", "content": bot.system_prompt}]
         if message:
@@ -475,9 +476,9 @@ def create_bot(
                                 },
                             ],
                             "chat_model": {
-                                "engine": "which library to use for model calls, must be one of: langchain, openai, hive, anthropic. "  # noqa: E501
+                                "engine": "which library to use for model calls, must be one of: openai, hive, anthropic. "  # noqa: E501
                                       "Default is openai.",
-                                "model": "model to be used, openai models work on langchain and openai engines, default is gpt-3.5-turbo-0125",  # noqa: E501
+                                "model": "model to be used, default is gpt-3.5-turbo-0125",  # noqa: E501
                             },
                         },
                     },

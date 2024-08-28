@@ -1,7 +1,9 @@
 """Tests for Milvus vector database."""
 import warnings
+from pathlib import Path
 
 import pymilvus
+from fastapi import UploadFile
 
 from app import milvusdb
 
@@ -71,3 +73,11 @@ def test_get_expr() -> None:
     assert result["message"] == "Success"
     assert "result" in result
     assert len(result["result"]) > 0
+
+def test_file_upload() -> None:
+    with Path("test_text.txt").open("w") as f:
+        f.write("test text\n")
+    f = UploadFile(file=Path("test_text.txt").open("rb"))
+    result = milvusdb.file_upload(f, "test_session_id", collection_name=collection_name)
+    assert result["message"] == "Success"
+    assert result["insert_count"] > 0

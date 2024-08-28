@@ -6,7 +6,7 @@ import json
 
 from langfuse.decorators import observe
 
-from app.chat_models import chat_str_fn
+from app.chat_models import chat_str
 from app.models import ChatModelParams, OpenAIModelEnum
 from app.prompts import ISSUE_CLASSIFER_PROMPT
 
@@ -45,9 +45,8 @@ def get_probs(
     """
     if chatmodel is None:
         chatmodel = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
-    chat_fn = chat_str_fn(chatmodel)
     msg = {"role": "user", "content":ISSUE_CLASSIFER_PROMPT.format(message=message)}
-    response: str = chat_fn([msg], chatmodel.model, **kwargs)
+    response: str = chat_str([msg], chatmodel, **kwargs)
     if "json" in response:
         response = response.replace("json", "")
     if "`" in response:

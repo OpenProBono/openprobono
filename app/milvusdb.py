@@ -17,7 +17,6 @@ from pymilvus import (
     connections,
     utility,
 )
-from requests import session
 
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
@@ -27,9 +26,9 @@ from app.loaders import (
     scrape,
     scrape_with_links,
 )
-from app.models import EncoderParams, MilvusMetadataEnum, OpenAIModelEnum
+from app.models import EncoderParams, MilvusMetadataEnum
 from app.splitters import chunk_elements_by_title, chunk_str
-from app.summarization import summarize_langchain
+from app.summarization import summarize
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
@@ -64,7 +63,6 @@ MAX_K = 16384
 
 # core features
 
-@observe()
 def load_vdb_param(
     collection_name: str,
     param_name: str,
@@ -637,7 +635,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
     texts, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
-    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
+    ai_summary = summarize(texts)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
     encoder = load_vdb_param(collection_name, "encoder")
@@ -658,7 +656,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
                 element for element in cur_elements if element not in prev_elements
             ]
             strs, metadatas = chunk_elements_by_title(new_elements, 3000, 1000, 300)
-            ai_summary = summarize_langchain(strs, OpenAIModelEnum.gpt_4o)
+            ai_summary = summarize(strs)
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
             vectors = embed_strs(strs, encoder)
@@ -695,7 +693,7 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
         return {"message": f"Failure: no elements found at {url}"}
     texts, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
-    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
+    ai_summary = summarize(texts)
     for metadata in metadatas:
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
@@ -739,7 +737,7 @@ def session_upload_ocr(
     reader = quickstart_ocr(file)
     texts = chunk_str(reader, max_chunk_size, chunk_overlap)
     vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
-    ai_summary = summarize_langchain(texts, OpenAIModelEnum.gpt_4o)
+    ai_summary = summarize(texts)
     metadata = {
         "session_id": session_id,
         "source": file.filename,
@@ -760,6 +758,7 @@ def file_upload(
     file: UploadFile,
     session_id: str,
     summary: str | None = None,
+    collection_name: str = SESSION_DATA,
 ) -> dict[str, str]:
     """Perform an unstructured partition, chunk_by_title, and upload a file to Milvus.
 
@@ -782,7 +781,7 @@ def file_upload(
     elements = partition_uploadfile(file)
     # chunk text
     texts, metadatas = chunk_elements_by_title(elements)
-    vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
+    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     # add session id to metadata
     for i in range(len(metadatas)):
         metadatas[i]["session_id"] = session_id
@@ -794,7 +793,7 @@ def file_upload(
         "metadata": metadatas[i],
         "text": texts[i],
     } for i in range(len(texts))]
-    return upload_data(SESSION_DATA, data)
+    return upload_data(collection_name, data)
 
 def check_session_data(session_id: str) -> bool:
     """Check if user uploaded a file in a specific session.

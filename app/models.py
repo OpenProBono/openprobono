@@ -240,6 +240,7 @@ class SummaryMethodEnum(str, Enum):
     """Enumeration class representing different ways of summarizing text."""
 
     stuffing = "stuffing"
+    stuff_reduce = "stuff_reduce"
     map_reduce = "map_reduce"
     refine = "refine"
 

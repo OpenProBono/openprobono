@@ -1,14 +1,11 @@
 """Summarization functions."""
 from __future__ import annotations
 
-from langchain.chains.summarize import load_summarize_chain
-from langchain_core.documents import Document as LCDocument
 from langfuse.decorators import langfuse_context, observe
-from unstructured.documents.elements import Element
 
-from app.chat_models import chat_str_fn, get_langchain_chat_model
+from app.chat_models import chat_str
 from app.encoders import max_token_indices
-from app.models import ChatModelParams, SummaryMethodEnum
+from app.models import ChatModelParams, OpenAIModelEnum, SummaryMethodEnum
 from app.prompts import (
     OPINION_SUMMARY_MAP_PROMPT,
     OPINION_SUMMARY_REDUCE_PROMPT,
@@ -36,6 +33,58 @@ def summarize_stuffing_msg(documents: list[str]) -> dict[str, str]:
     prompt = SUMMARY_PROMPT.format(text=text)
     return {"role":"user", "content":prompt}
 
+def summarize_stuff_reduce_msg(
+    documents: list[str],
+    chat_model: ChatModelParams,
+    **kwargs: dict,
+) -> dict[str, str]:
+    """A combination of stuffing and map-reduce.
+
+    Concatenate (stuff) documents to be just within the LLMs context window,
+    summarize the concatenated documents,
+    and then reduce to a single summary.
+
+    Parameters
+    ----------
+    documents : list[str]
+        The documents to summarize.
+    chat_model : ChatModelParams
+        The chat model parameters.
+    kwargs : dict, optional
+        Keyword arguments for the chat function.
+
+    Returns
+    -------
+    dict[str, str]
+        The summary message.
+
+    """
+    # prepare token-maximized document group messages
+    max_indices = max_token_indices(documents, chat_model.model)
+    msgs = []
+    start_idx = 0
+    for max_idx in max_indices:
+        concatted_docs = "\n\n".join(documents[start_idx:max_idx])
+        msgs.append({
+            "role": "user",
+            "content": SUMMARY_PROMPT.format(text=concatted_docs),
+        })
+        start_idx = max_idx
+    if len(msgs) == 1:
+        # the documents fit into a single message, return it
+        return msgs[0]
+    summaries = []
+    # get the document group summaries
+    for msg in msgs:
+        summary = chat_str([msg], chat_model, **kwargs)
+        summaries.append(summary)
+    # return a combined summary
+    concatted_summaries = "\n\n".join(summaries)
+    return {
+        "role": "user",
+        "content": SUMMARY_PROMPT.format(text=concatted_summaries),
+    }
+
 def summarize_map_reduce_msg(
     documents: list[str],
     chat_model: ChatModelParams,
@@ -58,12 +107,11 @@ def summarize_map_reduce_msg(
         The summary message.
 
     """
-    chat_fn = chat_str_fn(chat_model)
     summaries = []
     for doc in documents:
         prompt = SUMMARY_MAP_PROMPT.format(text=doc)
         doc_msg = {"role":"user", "content":prompt}
-        summary = chat_fn([doc_msg], chat_model.model, **kwargs)
+        summary = chat_str([doc_msg], chat_model, **kwargs)
         summaries.append(summary)
     concat_summary = "\n".join(summaries)
     prompt = SUMMARY_PROMPT.format(text=concat_summary)
@@ -91,7 +139,6 @@ def summarize_refine_msg(
         The summary message.
 
     """
-    chat_fn = chat_str_fn(chat_model)
     summaries = []
     for i, doc in enumerate(documents):
         if i == 0:
@@ -102,12 +149,13 @@ def summarize_refine_msg(
                 text=doc,
             )
         doc_msg = {"role":"user", "content":prompt}
-        summary = chat_fn([doc_msg], chat_model.model, **kwargs)
+        summary = chat_str([doc_msg], chat_model, **kwargs)
         summaries.append(summary)
-    concat_summary = "\n".join(summaries)
+    concat_summary = "\n\n".join(summaries)
     prompt = SUMMARY_PROMPT.format(text=concat_summary)
-    return {"role":"user", "content":prompt}
+    return {"role": "user", "content": prompt}
 
+@observe(capture_input=False, capture_output=False)
 def summarize_opinion(
     documents: list[str],
     chat_model: ChatModelParams | None = None,
@@ -130,7 +178,6 @@ def summarize_opinion(
         A summary
 
     """
-    chat_fn = chat_str_fn(chat_model)
     prompt_msg = {"role": "system", "content": OPINION_SUMMARY_MAP_PROMPT}
     # prepare token-maximized document group messages
     max_indices = max_token_indices(documents, chat_model.model)
@@ -145,7 +192,7 @@ def summarize_opinion(
     summaries = []
     # get the document group summaries
     for msg in msgs:
-        summary = chat_fn([prompt_msg, msg], chat_model.model, **kwargs)
+        summary = chat_str([prompt_msg, msg], chat_model, **kwargs)
         summaries.append(summary)
     if len(summaries) == 1:
         # the opinion fit into a single message, return the summary
@@ -153,14 +200,15 @@ def summarize_opinion(
     # return a combined summary
     prompt_msg["content"] = OPINION_SUMMARY_REDUCE_PROMPT
     partial_summaries_msg = {"role":"user", "content": "\n\n".join(summaries)}
-    return chat_fn(
+    return chat_str(
         [prompt_msg, partial_summaries_msg],
-        chat_model.model,
+        chat_model,
         **kwargs,
     )
 
+@observe(capture_input=False)
 def get_summary_message(
-    documents: list[str | Element],
+    documents: list[str],
     method: SummaryMethodEnum,
     chat_model: ChatModelParams,
     **kwargs: dict,
@@ -169,7 +217,7 @@ def get_summary_message(
 
     Parameters
     ----------
-    documents : list[str  |  Element]
+    documents : list[str]
        The list of documents to summarize.
     method : str
         The summarization method, must be `stuffing`, `map_reduce`, or `refine`.
@@ -186,16 +234,13 @@ def get_summary_message(
     Raises
     ------
     ValueError
-        If chat_model.engine is not `openai` or `anthropic`.
-    ValueError
-        if method is not `stuffing`, `map_reduce`, or `refine`.
+        if method is not `stuff_reduce`, `stuffing`, `map_reduce`, or `refine`.
 
     """
-    # convert documents to text if elements were given
-    if isinstance(documents[0], Element):
-        documents = [doc.text for doc in documents]
     # summarize by method
     match method:
+        case SummaryMethodEnum.stuff_reduce:
+            msg = summarize_stuff_reduce_msg(documents, chat_model, **kwargs)
         case SummaryMethodEnum.stuffing:
             msg = summarize_stuffing_msg(documents)
         case SummaryMethodEnum.map_reduce:
@@ -208,8 +253,8 @@ def get_summary_message(
 
 @observe(capture_input=False)
 def summarize(
-    documents: list[str | Element | LCDocument],
-    method: str = SummaryMethodEnum.stuffing,
+    documents: list[str],
+    method: str = SummaryMethodEnum.stuff_reduce,
     chat_model: ChatModelParams | None = None,
     **kwargs: dict,
 ) -> str:
@@ -217,12 +262,12 @@ def summarize(
 
     Parameters
     ----------
-    documents : list[str  |  Element  |  LCDocument]
+    documents : list[str]
         The list of documents to summarize.
     method : str, optional
-        The summarization method, by default `stuffing`.
+        The summarization method, by default `stuff_reduce`.
     chat_model : ChatModelParams, optional
-        The engine and model to use for summarization, by default `langchain` and
+        The engine and model to use for summarization, by default `openai` and
         `gpt-3.5-turbo-0125`.
     kwargs : dict, optional
         For the LLM. By default, temperature = 0 and max_tokens = 1000.
@@ -232,67 +277,12 @@ def summarize(
     str
         The summarized text.
 
-    Raises
-    ------
-    ValueError
-        If chat_model.engine is not `openai`, `anthropic`, or `langchain`.
-
     """
-    chat_model = ChatModelParams() if chat_model is None else chat_model
-    chat_fn = chat_str_fn(chat_model)
+    if chat_model is None:
+        chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
+    langfuse_context.update_current_trace(
+        input={"method": method, "chat_model": chat_model},
+        metadata=kwargs,
+    )
     msg = get_summary_message(documents, method, chat_model, **kwargs)
-    return chat_fn([msg], chat_model.model, **kwargs)
-
-@observe(capture_input=False)
-def summarize_langchain(
-    documents: list[str],
-    model: str,
-    **kwargs: dict,
-) -> str:
-    """Summarize the documents using a chain.
-
-    Parameters
-    ----------
-    documents : list[str]
-        The list of documents to summarize.
-    model : str
-        The model to use for summarization.
-    kwargs : dict, optional
-        For the LLM. By default, temperature = 0 and max_tokens = 1000.
-
-    Returns
-    -------
-    str
-        The summarized text.
-
-    """
-    max_chunk_indexes = max_token_indices(documents, model)
-    # convert to Documents if strs were given
-    documents = [LCDocument(page_content=doc) for doc in documents]
-    chain_type = "stuff"
-    chain = load_summarize_chain(
-        get_langchain_chat_model(model, **kwargs),
-        chain_type=chain_type,
-    )
-    # get the langchain handler for the current trace
-    langfuse_handler = langfuse_context.get_current_langchain_handler()
-    # if we need to summarize groups of documents and then summarize those groups
-    # because context is too long
-    if len(max_chunk_indexes) > 1:
-        # summarize each group of documents
-        last = 0
-        summaries = []
-        for max_chunk_index in max_chunk_indexes:
-            result = chain.invoke(
-                {"input_documents": documents[last: max_chunk_index]},
-                config={"callbacks": [langfuse_handler]},
-            )
-            summaries.append(result["output_text"].strip())
-            last = max_chunk_index
-        # summarize the document group summaries
-        documents = [LCDocument(page_content=doc) for doc in summaries]
-    result = chain.invoke(
-        {"input_documents": documents},
-        config={"callbacks": [langfuse_handler]},
-    )
-    return result["output_text"].strip()
+    return chat_str([msg], chat_model, **kwargs)

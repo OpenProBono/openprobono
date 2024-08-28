@@ -94,6 +94,7 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     return query(search_collection, qr, k=3)
 
 
+@observe()
 def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
     """Query the google search api.
 
@@ -213,6 +214,8 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="") -> dict:
 
     return query(search_collection, qr)
 
+
+@observe()
 def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """Query the serpapi search api.
 
@@ -397,3 +400,25 @@ def search_toolset_creator(bot: BotRequest) -> list:
             case EngineEnum.anthropic:
                 toolset.append(anthropic_tool(t))
     return toolset
+
+
+def find_search_tool(bot: BotRequest, tool_name: str) -> SearchTool | None:
+    """Find the search tool with the given name.
+
+    Parameters
+    ----------
+    bot : BotRequest
+        The bot
+    tool_name : str
+        The tool/function name
+
+    Returns
+    -------
+    SearchTool | None
+        The matching tool or None if not found
+
+    """
+    return next(
+        (t for t in bot.search_tools if tool_name == t.name),
+        None,
+    )
