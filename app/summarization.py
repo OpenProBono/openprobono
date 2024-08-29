@@ -268,7 +268,7 @@ def summarize(
         The summarization method, by default `stuff_reduce`.
     chat_model : ChatModelParams, optional
         The engine and model to use for summarization, by default `openai` and
-        `gpt-3.5-turbo-0125`.
+        `gpt-4o`.
     kwargs : dict, optional
         For the LLM. By default, temperature = 0 and max_tokens = 1000.
 
@@ -280,7 +280,7 @@ def summarize(
     """
     if chat_model is None:
         chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
-    langfuse_context.update_current_trace(
+    langfuse_context.update_current_observation(
         input={"method": method, "chat_model": chat_model},
         metadata=kwargs,
     )

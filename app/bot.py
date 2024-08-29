@@ -121,7 +121,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     langfuse_context.update_current_observation(input=last_user_msg["content"])
 
     kwargs = {"tools": toolset}
-    langfuse_context.update_current_observation(
+    langfuse_context.update_current_trace(
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
     )
