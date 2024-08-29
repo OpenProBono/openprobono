@@ -33,7 +33,6 @@ MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
-OPINION_FEEDBACK_COLLECTION = "opinion_feedback"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -139,8 +138,16 @@ def store_opinion_feedback(r: OpinionFeedback) -> bool:
        True if successful, False otherwise
 
     """
-    db.collection(OPINION_FEEDBACK_COLLECTION + VERSION).document(str(r.opinion_id)).set(
-        {"feedback_list": firestore.ArrayUnion([r.feedback_text])}, merge=True)
+    # TODO: generalize to store_vdb_source_feedback()
+    collection_name = "test_firebase"
+    milvus = db.collection(MILVUS_COLLECTION)
+    milvus_coll = milvus.document(collection_name)
+    coll_sources = milvus_coll.collection(MILVUS_SOURCES)
+    source = coll_sources.document(str(r.opinion_id))
+    source.set(
+        {"feedback_list": firestore.ArrayUnion([r.feedback_text])},
+        merge=True,
+    )
     return True
 
 
