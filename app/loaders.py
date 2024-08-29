@@ -12,7 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from pymilvus import Collection
 from pypandoc import ensure_pandoc_installed
@@ -76,19 +76,23 @@ def scrape(site: str) -> list[Element]:
         The scraped elements.
 
     """
+    elements = []
     try:
         if site.endswith(".pdf"):
             r = requests.get(site, timeout=10)
-            elements = partition_pdf(file=io.BytesIO(r.content))
+            if r.status_code == 200:
+                elements = partition_pdf(file=io.BytesIO(r.content))
         elif site.endswith(".rtf"):
             r = requests.get(site, timeout=10)
-            ensure_pandoc_installed()
-            elements = partition_rtf(file=io.BytesIO(r.content))
+            if r.status_code == 200:
+                ensure_pandoc_installed()
+                elements = partition_rtf(file=io.BytesIO(r.content))
         else:
             elements = partition(url=site)
     except Exception as error:
         print("Error in regular partition: " + str(error))
         elements = partition(url=site, content_type="text/html")
+    langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
 
 

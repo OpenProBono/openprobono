@@ -672,7 +672,13 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
 
 
 @observe(capture_output=False)
-def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_chars=2500, overlap=500) -> dict[str, str]:
+def upload_site(
+    collection_name: str,
+    url: str,
+    max_chars: int = 10000,
+    new_after_n_chars: int = 2500,
+    overlap: int = 500,
+) -> dict[str, str]:
     """Scrape, chunk, summarize, and upload a URLs contents to Milvus.
 
     Parameters
@@ -681,6 +687,12 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
         Where the chunks will be uploaded.
     url : str
         The site to scrape.
+    max_chars : int, optional
+        See `chunk_by_title` for details, by default 10000.
+    new_after_n_chars : int, optional
+        See `chunk_by_title` for details, by default 2500.
+    overlap : int, optional
+        See `chunk_by_title` for details, by default 500.
 
     Returns
     -------
@@ -691,7 +703,12 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
     elements = scrape(url)
     if len(elements) == 0:
         return {"message": f"Failure: no elements found at {url}"}
-    texts, metadatas = chunk_elements_by_title(elements, max_chars, new_after_n_chars, overlap)
+    texts, metadatas = chunk_elements_by_title(
+        elements,
+        max_chars,
+        new_after_n_chars,
+        overlap,
+    )
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     ai_summary = summarize(texts)
     for metadata in metadatas:
