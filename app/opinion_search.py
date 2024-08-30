@@ -9,7 +9,7 @@ from app.models import ChatModelParams, OpinionSearchRequest
 from app.summarization import summarize_opinion
 
 
-@observe(capture_input=False, capture_output=False)
+@observe(capture_output=False)
 def opinion_search(request: OpinionSearchRequest) -> list[dict]:
     """Search CAP and courtlistener collections for relevant opinions.
 
