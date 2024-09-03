@@ -8,6 +8,7 @@ from typing import Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+from langfuse.decorators import observe
 
 from app.models import (
     BotRequest,
@@ -124,6 +125,7 @@ def store_session_feedback(r: SessionFeedback) -> bool:
         {"feedback": r.feedback_text}, merge=True)
     return True
 
+@observe()
 def store_opinion_feedback(r: OpinionFeedback) -> bool:
     """Store opinion feedback. Adds to list of feedback.
 
