@@ -106,7 +106,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
 
     kwargs = {
         "client": client,
@@ -232,7 +232,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
 
     kwargs = {
         "tools": toolset,
@@ -345,7 +345,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
 
     kwargs = {
         "tools": toolset,
@@ -446,7 +446,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
 
     kwargs = {
         "tools": toolset,

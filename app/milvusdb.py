@@ -332,8 +332,8 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
     return fuzzy_keywords_str.replace("'", "\\'")
 
 
-def source_exists(collection_name: str, url: str) -> bool:
-    """Check if a url source exists in a collection.
+def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) -> bool:
+    """Check if a url source exists in a collection, for a specific bot and tool
 
     Parameters
     ----------
@@ -341,15 +341,19 @@ def source_exists(collection_name: str, url: str) -> bool:
         name of collection
     url : str
         source url to check for
+    bot_id : str
+        bot id
+    tool_name : str
+        tool name
 
     Returns
     -------
     bool
-        True if the url is found in the collection, False otherwise
+        True if the url is found, False otherwise
 
     """
     collection = Collection(collection_name)
-    q = collection.query(expr=f"metadata['url']=='{url}'")
+    q = collection.query(expr=f"metadata['url']=='{url}' && metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'")
 
     return len(q) > 0
 
@@ -674,7 +678,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
 
 
 @observe(capture_output=False)
-def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_chars=2500, overlap=500) -> dict[str, str]:
+def upload_site(collection_name: str, url: str, bot_id: str, tool_name: str, max_chars=10000, new_after_n_chars=2500, overlap=500,) -> dict[str, str]:
     """Scrape, chunk, summarize, and upload a URLs contents to Milvus.
 
     Parameters
@@ -683,6 +687,16 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
         Where the chunks will be uploaded.
     url : str
         The site to scrape.
+    max_chars : int, optional
+        Maximum characters per chunk, by default 10000
+    new_after_n_chars : int, optional
+        Start a new chunk after this many characters, by default 2500
+    overlap : int, optional
+        Number of characters to overlap between chunks, by default 500
+    bot_id : str, optional
+        The ID of the bot using this tool, by default ""
+    tool_name : str, optional
+        The name of the search tool, by default ""
 
     Returns
     -------
@@ -700,6 +714,8 @@ def upload_site(collection_name: str, url: str, max_chars=10000, new_after_n_cha
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
+        metadata["bot_id"] = bot_id
+        metadata["tool_name"] = tool_name
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],

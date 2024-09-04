@@ -48,7 +48,7 @@ class SearchTool(BaseModel):
     name: str
     prompt: str
     prefix: str = ""
-
+    bot_id: str = ""
 
 class VDBTool(BaseModel):
     """Model class representing a VDB tool.
@@ -323,6 +323,7 @@ class OpinionFeedback(BaseModel):
         api_key (str): The API key.
 
     """
+
     feedback_text: str
     opinion_id: int
     api_key: str = ""
