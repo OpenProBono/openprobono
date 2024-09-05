@@ -96,7 +96,8 @@ async def process_chat_stream(r: ChatRequest, message: str):
         yield "An error occurred."
         return
     else:
-        r.history = [{"role": "system", "content": bot.system_prompt}]
+        if not r.history:
+            r.history = [{"role": "system", "content": bot.system_prompt}]
         if message:
             r.history.append({"role": "user", "content": message})
 
@@ -120,7 +121,8 @@ def process_chat(r: ChatRequest, message: str) -> dict:
         return {"message": "Failure: No bot found with bot id: " + r.bot_id}
 
     # set conversation history
-    r.history = [{"role": "system", "content": bot.system_prompt}]
+    if not r.history:
+        r.history = [{"role": "system", "content": bot.system_prompt}]
     if message:
         r.history.append({"role": "user", "content": message})
 
