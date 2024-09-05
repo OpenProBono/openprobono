@@ -240,6 +240,7 @@ class SummaryMethodEnum(str, Enum):
     """Enumeration class representing different ways of summarizing text."""
 
     stuffing = "stuffing"
+    stuff_reduce = "stuff_reduce"
     map_reduce = "map_reduce"
     refine = "refine"
 
@@ -323,6 +324,41 @@ class OpinionFeedback(BaseModel):
         api_key (str): The API key.
 
     """
+
     feedback_text: str
     opinion_id: int
     api_key: str = ""
+
+class LISTTerm(BaseModel):
+    """Model class representing a term in the LIST taxonomy.
+
+    Attributes
+    ----------
+        code (str): The term code
+        title (str): The term title
+        definition (str): The term definition
+        parent_codes (list[str]): The parent term codes
+        taxonomies (list[str]): The taxonomies the term belongs to
+        children (list[LISTTerm]): The terms children
+
+    """
+
+    code: str
+    title: str
+    definition: str
+    parent_codes: list[str] = []
+    taxonomies: list[str] = []
+    children: list[LISTTerm] = []
+
+class LISTTermProb(BaseModel):
+    """Model class representing a prediction of a LIST term from an issue classifier.
+
+    Attributes
+    ----------
+        title (str): The term title
+        probability (float): The term probability
+
+    """
+
+    title: str
+    probability: float

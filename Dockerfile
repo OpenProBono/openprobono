@@ -4,13 +4,13 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /api
 
-RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 poppler-utils tesseract-ocr -y
+RUN apt-get update && apt-get install ffmpeg libsm6 libmagic1 libxext6 poppler-utils tesseract-ocr -y
 
 COPY requirements.txt /api/requirements.txt
 
 RUN pip install -r requirements.txt --no-cache-dir
 
-RUN python -c 'import nltk; nltk.download("punkt"); nltk.download("averaged_perceptron_tagger");'
+RUN python -c 'import nltk; nltk.download("punkt"); nltk.download("punkt_tab"); nltk.download("averaged_perceptron_tagger"); nltk.download("averaged_perceptron_tagger_eng");'
 
 COPY app/ /api/app
 

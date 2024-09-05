@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from anthropic import Anthropic
 from langfuse.decorators import observe
-from openai import OpenAI
 
-from app.models import AnthropicModelEnum, ChatModelParams, EngineEnum, OpenAIModelEnum
+from app.chat_models import ANTHROPIC_CLIENT, OPENAI_CLIENT
+from app.models import ChatModelParams, EngineEnum, OpenAIModelEnum
 from app.prompts import MODERATION_PROMPT
 
+DEFAULT_MODERATOR = ChatModelParams(
+    engine=EngineEnum.openai,
+    model=OpenAIModelEnum.mod_latest,
+)
 
-def moderate(
-    message: str,
-    chatmodel: ChatModelParams | None = None,
-    client: OpenAI | Anthropic | None = None,
-) -> bool:
+def moderate(message: str, chatmodel: ChatModelParams = DEFAULT_MODERATOR) -> bool:
     """Moderate a message using the specified engine and model.
 
     Parameters
@@ -24,9 +23,6 @@ def moderate(
     chatmodel : ChatModelParams, optional
         The engine and model to use for moderation, by default
         openai and text-moderation-latest.
-    client : OpenAI | anthropic.Anthropic, optional
-        The client to use for the moderation request. If not specified,
-        one will be created.
 
     Returns
     -------
@@ -39,36 +35,25 @@ def moderate(
         If chatmodel.engine is not `openai` or `anthropic`.
 
     """
-    if chatmodel is None:
-        chatmodel = ChatModelParams(
-            engine=EngineEnum.openai,
-            model=OpenAIModelEnum.mod_latest,
-        )
     match chatmodel.engine:
         case EngineEnum.openai:
-            return moderate_openai(message, chatmodel.model, client)
+            return moderate_openai(message, chatmodel.model)
         case EngineEnum.anthropic:
-            return moderate_anthropic(message, chatmodel.model, client)
+            return moderate_anthropic(message, chatmodel.model)
     msg = f"Unsupported engine: {chatmodel.engine}"
     raise ValueError(msg)
 
 
 @observe()
-def moderate_openai(
-    message: str,
-    model: str = OpenAIModelEnum.mod_latest,
-    client: OpenAI | None = None,
-) -> bool:
+def moderate_openai(message: str, model: str) -> bool:
     """Moderate a message using OpenAI's Moderation API.
 
     Parameters
     ----------
     message : str
         The message to be moderated.
-    model : str, optional
-        The model to use for moderation, by default `text-moderation-latest`.
-    client : OpenAI, optional
-        The client to use, by default None.
+    model : str
+        The model to use for moderation.
 
     Returns
     -------
@@ -76,27 +61,20 @@ def moderate_openai(
         True if flagged; False otherwise.
 
     """
-    client = OpenAI() if client is None else client
-    response = client.moderations.create(model=model, input=message)
+    response = OPENAI_CLIENT.moderations.create(model=model, input=message)
     return response.results[0].flagged
 
 
 @observe()
-def moderate_anthropic(
-    message: str,
-    model: str = AnthropicModelEnum.claude_3_haiku,
-    client: Anthropic | None = None,
-) -> bool:
+def moderate_anthropic(message: str, model: str) -> bool:
     """Moderate a message using an Anthropic model.
 
     Parameters
     ----------
     message : str
         The message to be moderated.
-    model : str, optional
-        The model to use for moderation, by default `claude-3-haiku-20240307`.
-    client : Anthropic, optional
-        The client to use, by default None.
+    model : str
+        The model to use for moderation.
 
     Returns
     -------
@@ -104,12 +82,11 @@ def moderate_anthropic(
         True if flagged; False otherwise.
 
     """
-    client = Anthropic() if client is None else client
     moderation_msg = {
         "role": "user",
         "content": MODERATION_PROMPT.format(user_input=message),
     }
-    response = client.messages.create(
+    response = ANTHROPIC_CLIENT.messages.create(
         model=model,
         max_tokens=10,
         temperature=0,

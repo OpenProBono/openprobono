@@ -24,9 +24,7 @@ courtlistener_tool_args = {
     },
     "keyword-qr": {
         "type": "string",
-        "description": (
-            "A keyword query to search for exact names and terms."
-        ),
+        "description": "The keyword query to search for an exact name or term.",
     },
     "after-date": {
         "type": "string",
@@ -61,7 +59,7 @@ us_federal_dict = {
         "bap1 bap2 bap6 bap8 bap9 bap10 ag afcca asbca armfor acca uscfc tax bia olc "
         "mc mspb nmcca cavc bva fiscr fisc cit usjc jpml cc com ccpa cusc bta eca "
         "tecoa reglrailreorgct kingsbench"
-    )
+    ),
 }
 # https://github.com/freelawproject/courtlistener/discussions/3114
 # manual mapping from two-letter state abbreviations to courtlistener court_id format
@@ -178,6 +176,9 @@ def courtlistener_query(request: OpinionSearchRequest) -> dict:
         expr += f"text like '% {keyword_query} %'"
     result = query(courtlistener_collection, request.query, request.k, expr)
     if "result" in result:
-        opinion_ids = [hit["entity"]["opinion_id"] for hit in result["result"]]
-        langfuse_context.update_current_observation(output=opinion_ids)
+        chunk_ids = [
+            f"{hit['entity']['opinion_id']}-{hit['entity']['chunk_index']}"
+            for hit in result["result"]
+        ]
+        langfuse_context.update_current_observation(output=chunk_ids)
     return result

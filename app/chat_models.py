@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
-import anthropic
 import google.generativeai as genai
 import requests
+from anthropic import Anthropic
 from anthropic import Stream as AnthropicStream
-from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from openai import Stream as OpenAIStream
@@ -19,20 +18,24 @@ from app.prompts import HIVE_QA_PROMPT
 if TYPE_CHECKING:
     from anthropic.types import Message as AnthropicMessage
     from anthropic.types import RawMessageStreamEvent
-    from langchain.llms.base import BaseLanguageModel
     from openai.types.chat import ChatCompletion
     from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v2/task/sync"
 MAX_TOKENS = 1000
+TEMPERATURE = 0
+TOP_P = 0.95
+SEED = 0
+TOOL_CHOICE = "auto"
 NOT_GIVEN = "NOT_GIVEN"
+ANTHROPIC_CLIENT = Anthropic()
+OPENAI_CLIENT = OpenAI()
 
 def chat(
     messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> tuple[str, list[str]] | ChatCompletion | OpenAIStream[ChatCompletionChunk] |\
-    AnthropicMessage | AnthropicStream[RawMessageStreamEvent] | str:
+) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | str:
     """Chat with an LLM.
 
     Parameters
@@ -46,10 +49,8 @@ def chat(
 
     Returns
     -------
-    tuple[str, list[str]] | ChatCompletion | Stream[ChatCompletionChunk] |
-    AnthropicMessage | Stream[RawMessageStreamEvent] | str
-
-        The response from the LLM. Depends on engine and if streaming is enabled.
+    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | str
+        The response from the LLM. Depends on engine.
 
     """
     match chatmodel.engine:
@@ -63,34 +64,62 @@ def chat(
             return chat_gemini(messages, chatmodel.model, **kwargs)
 
 
-def chat_str_fn(chatmodel: ChatModelParams) -> Callable:
-    """Get a chat function that returns strings for the given chat model.
+def chat_stream(
+    messages: list[dict],
+    chatmodel: ChatModelParams,
+    **kwargs: dict,
+) -> OpenAIStream[ChatCompletionChunk] | AnthropicStream[RawMessageStreamEvent]:
+    """Chat with an LLM with streaming enabled.
 
     Parameters
     ----------
+    messages : list[dict]
+        The conversation history formatted for the given chat model.
     chatmodel : ChatModelParams
         The chat model to use for the conversation.
+    kwargs : dict
+        Keyword arguments for the given chat model.
 
     Returns
     -------
-    Callable
-        A function that returns string responses from the chat model.
-
-    Raises
-    ------
-    ValueError
-        If the given chat model is not supported.
+    Stream[ChatCompletionChunk] | Stream[RawMessageStreamEvent]
+        The response from the LLM. Depends on engine.
 
     """
     match chatmodel.engine:
         case EngineEnum.openai:
-            return chat_str_openai
+            return chat_stream_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
-            return chat_str_anthropic
+            return chat_stream_anthropic(messages, chatmodel.model, **kwargs)
+
+
+def chat_str(messages: list[dict], chatmodel: ChatModelParams, **kwargs: dict) -> str:
+    """Chat with an LLM. Returns a string instead of a full response object.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    chatmodel : ChatModelParams
+        The chat model to use for the conversation.
+    kwargs : dict
+        Keyword arguments for the given chat model.
+
+    Returns
+    -------
+    str
+        A string response from the LLM. Depends on engine.
+
+    """
+    match chatmodel.engine:
+        case EngineEnum.openai:
+            return chat_str_openai(messages, chatmodel.model, **kwargs)
+        case EngineEnum.anthropic:
+            return chat_str_anthropic(messages, chatmodel.model, **kwargs)
         case EngineEnum.hive:
-            return chat_str_hive
+            return chat_str_hive(messages, chatmodel.model, **kwargs)
         case EngineEnum.google:
-            return chat_gemini
+            return chat_gemini(messages, chatmodel.model, **kwargs)
     raise ValueError(chatmodel)
 
 
@@ -155,7 +184,6 @@ def chat_hive(
     return message, chunks
 
 
-@observe(as_type="generation")
 def chat_str_hive(
     messages: list[dict],
     model: str,
@@ -163,6 +191,18 @@ def chat_str_hive(
 ) -> str:
     text, _ = chat_hive(messages, model, **kwargs)
     return text
+
+
+def set_kwargs_openai(kwargs: dict) -> None:
+    """Set default values for openai.Completion API call."""
+    if "max_tokens" not in kwargs:
+        kwargs["max_tokens"] = MAX_TOKENS
+    if "temperature" not in kwargs:
+        kwargs["temperature"] = TEMPERATURE
+    if "seed" not in kwargs:
+        kwargs["seed"] = SEED
+    if "tools" in kwargs and "tool_choice" not in kwargs:
+        kwargs["tool_choice"] = TOOL_CHOICE
 
 
 @observe(as_type="generation")
@@ -188,46 +228,70 @@ def chat_openai(
         The response from the LLM.
 
     """
-    client = kwargs.get("client", OpenAI())
-    max_tokens = kwargs.get("max_tokens", MAX_TOKENS)
-    temperature = kwargs.get("temperature", 0.0)
-    seed = kwargs.get("seed", 0)
-    tools = kwargs.get("tools", NOT_GIVEN)
-    tool_choice = kwargs.get("tool_choice", NOT_GIVEN)
-    stream = kwargs.get("stream", False)
-    response = client.chat.completions.create(
+    set_kwargs_openai(kwargs)
+    response: ChatCompletion = OPENAI_CLIENT.chat.completions.create(
         model=model,
         messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        seed=seed,
-        tools=tools,
-        tool_choice=tool_choice,
-        stream=stream,
+        **kwargs,
     )
-    if not isinstance(response, OpenAIStream):
-        usage = {
-            "input": response.usage.prompt_tokens,
-            "output": response.usage.completion_tokens,
-            "total": response.usage.total_tokens,
-        }
-        langfuse_context.update_current_observation(
-            input=messages,
-            output=response.choices[0].message,
-            model=model,
-            usage=usage,
-        )
+    usage = {
+        "input": response.usage.prompt_tokens,
+        "output": response.usage.completion_tokens,
+        "total": response.usage.total_tokens,
+    }
+    langfuse_context.update_current_observation(
+        input=messages,
+        output=response.choices[0].message,
+        metadata=kwargs,
+        model=model,
+        usage=usage,
+    )
     return response
 
 
-@observe(as_type="generation")
-def chat_str_openai(
+def chat_stream_openai(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> str:
+) -> OpenAIStream[ChatCompletionChunk]:
+    """Chat with an LLM using the openai engine with streaming enabled.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the OpenAI LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    Stream[ChatCompletionChunk]
+        The response from the LLM.
+
+    """
+    set_kwargs_openai(kwargs)
+    return OPENAI_CLIENT.chat.completions.create(
+        model=model,
+        messages=messages,
+        stream=True,
+        stream_options={"include_usage": True},
+        **kwargs,
+    )
+
+
+def chat_str_openai(messages: list[dict], model: str, **kwargs: dict) -> str:
     response = chat_openai(messages, model, **kwargs)
     return response.choices[0].message.content.strip()
+
+
+def set_kwargs_anthropic(kwargs: dict) -> None:
+    """Set default values for anthropic.Message API call."""
+    if "max_tokens" not in kwargs:
+        kwargs["max_tokens"] = MAX_TOKENS
+    if "temperature" not in kwargs:
+        kwargs["temperature"] = TEMPERATURE
 
 
 @observe(as_type="generation")
@@ -235,7 +299,7 @@ def chat_anthropic(
     messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> AnthropicMessage | AnthropicStream[RawMessageStreamEvent]:
+) -> AnthropicMessage:
     """Chat with an LLM using the anthropic engine.
 
     Parameters
@@ -249,42 +313,63 @@ def chat_anthropic(
 
     Returns
     -------
-    AnthropicMessage | Stream[RawMessageStreamEvent]
+    Message
         The response from the LLM.
 
     """
-    client = kwargs.get("client", anthropic.Anthropic())
-    max_tokens = kwargs.get("max_tokens", MAX_TOKENS)
-    temperature = kwargs.get("temperature", 0.0)
-    tools = kwargs.get("tools", NOT_GIVEN)
-    system = kwargs.get("system", NOT_GIVEN)
-    stream = kwargs.get("stream", False)
-    response = client.messages.create(
+    set_kwargs_anthropic(kwargs)
+    response: AnthropicMessage = ANTHROPIC_CLIENT.messages.create(
         model=model,
         messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        tools=tools,
-        system=system,
-        stream=stream,
+        **kwargs,
     )
     # report input, output, model, usage to langfuse
-    if not isinstance(response, AnthropicStream):
-        usage = {
-            "input": response.usage.input_tokens,
-            "output": response.usage.output_tokens,
-            "total": response.usage.input_tokens + response.usage.output_tokens,
-        }
-        langfuse_context.update_current_observation(
-            input=messages,
-            model=model,
-            output=response.content,
-            usage=usage,
-        )
+    usage = {
+        "input": response.usage.input_tokens,
+        "output": response.usage.output_tokens,
+        "total": response.usage.input_tokens + response.usage.output_tokens,
+    }
+    langfuse_context.update_current_observation(
+        input=messages,
+        model=model,
+        output=response.content,
+        metadata=kwargs,
+        usage=usage,
+    )
     return response
 
 
-@observe(as_type="generation")
+def chat_stream_anthropic(
+    messages: list[dict],
+    model: str,
+    **kwargs: dict,
+) -> AnthropicStream[RawMessageStreamEvent]:
+    """Chat with an LLM using the anthropic engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history.
+    model : str
+        The name of the anthropic LLM to use for conversation.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    Stream[RawMessageStreamEvent]
+        The response from the LLM.
+
+    """
+    set_kwargs_anthropic(kwargs)
+    return ANTHROPIC_CLIENT.messages.create(
+        model=model,
+        messages=messages,
+        stream=True,
+        **kwargs,
+    )
+
+
 def chat_str_anthropic(
     messages: list[dict],
     model: str,
@@ -323,16 +408,8 @@ def chat_gemini(
 
     # Create the model
     # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
-    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    temperature = kwargs.pop("temperature", 0.0)
-    top_p = kwargs.pop("top_p", 0.95)
-    generation_config = {
-        "temperature": temperature,
-        "top_p": top_p,
-        "top_k": 64,
-        "max_output_tokens": max_tokens,
-        "response_mime_type": "text/plain",
-    }
+    set_kwargs_gemini(kwargs)
+    generation_config = {"response_mime_type": "text/plain"} | kwargs
 
     llm = genai.GenerativeModel(
         model_name=model,
@@ -349,29 +426,11 @@ def chat_gemini(
     return "\n".join(response_text)
 
 
-def get_langchain_chat_model(model: str, **kwargs: dict) -> BaseLanguageModel:
-    """Load a LangChain BaseLanguageModel.
-
-    Currently only supports OpenAI models.
-
-    Parameters
-    ----------
-    model : str
-        The name of the LLM to load.
-    kwargs : dict
-        For the LLM. By default, temperature = 0 and max_tokens = 1000.
-
-    Returns
-    -------
-    BaseLanguageModel
-        The loaded LLM.
-
-    """
-    temperature = kwargs.pop("temperature", 0.0)
-    max_tokens = kwargs.pop("max_tokens", MAX_TOKENS)
-    return ChatOpenAI(
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        **kwargs,
-    )
+def set_kwargs_gemini(kwargs: dict) -> None:
+    """Set default values for genai.ChatSession API call."""
+    if "max_output_tokens" not in kwargs:
+        kwargs["max_output_tokens"] = MAX_TOKENS
+    if "temperature" not in kwargs:
+        kwargs["temperature"] = TEMPERATURE
+    if "top_p" not in kwargs:
+        kwargs["top_p"] = TOP_P

@@ -157,3 +157,25 @@ def session_data_toolset_creator(session_id: str | None) -> VDBTool | None:
         )
     else:
         return None
+
+
+def find_vdb_tool(bot: BotRequest, tool_name: str) -> VDBTool | None:
+    """Find the vdb tool with the given name.
+
+    Parameters
+    ----------
+    bot : BotRequest
+        The bot
+    tool_name : str
+        The tool/function name
+
+    Returns
+    -------
+    VDBTool | None
+        The matching tool or None if not found
+
+    """
+    return next(
+        (t for t in bot.vdb_tools if tool_name == t.name),
+        None,
+    )
