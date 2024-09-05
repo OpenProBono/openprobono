@@ -10,7 +10,7 @@ COPY requirements.txt /api/requirements.txt
 
 RUN pip install -r requirements.txt --no-cache-dir
 
-RUN python -c 'import nltk; nltk.download("punkt"); nltk.download("punkt_tab"); nltk.download("averaged_perceptron_tagger"); nltk.download("averaged_perceptron_tagger_eng");'
+RUN python -m nltk.downloader -d /usr/local/share/nltk_data punkt punkt_tab averaged_perceptron_tagger averaged_perceptron_tagger_eng
 
 COPY app/ /api/app
 
