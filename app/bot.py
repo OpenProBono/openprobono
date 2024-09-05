@@ -111,7 +111,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
 
     # Step 0: tracing
     last_user_msg = next(
@@ -250,7 +250,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
     kwargs = {"tools": toolset}
     messages = r.history
 
@@ -350,7 +350,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
     kwargs = {"tools": toolset, "system": bot.system_prompt}
 
     # The Messages API accepts a top-level `system` parameter,
@@ -440,7 +440,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     if session_data_toolset:
         bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
 
     # Step 0: tracing
     # input tracing

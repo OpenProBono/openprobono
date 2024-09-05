@@ -1,4 +1,5 @@
 """The search api functions and search toolset creation. Written by Arman Aydemir."""
+from json import tool
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -47,7 +48,7 @@ def filtered_search(results: dict) -> dict:
 
 
 @observe()
-def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
+def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bot_id: str = "", tool_name: str = "") -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters
@@ -58,6 +59,12 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
         the prefix given by tool (used for whitelists)
     num_results : int, optional
         number of results to return, by default 5
+    k : int, optional
+        number of chunks to return from milvus, by default 3
+    bot_id : str, optional
+        the ID of the bot using this tool, by default ""
+    tool_name : str, optional
+        the name of the search tool, by default ""
 
     Returns
     -------
@@ -73,9 +80,9 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
 
     def process_site(result: dict) -> None:
         try:
-            if(not source_exists(search_collection, result["link"])):
+            if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
                 print("Uploading site: " + result["link"])
-                upload_site(search_collection, result["link"])
+                upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
         except Exception as error:
             print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
             print("The error was: " + str(error))
@@ -90,8 +97,8 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
 
         for future in as_completed(futures):
             _ = future.result()
-
-    return query(search_collection, qr, k=3)
+    filter_expr = f"metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'"
+    return query(search_collection, qr, k=k, expr=filter_expr)
 
 
 @observe()
@@ -166,7 +173,7 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
 
 # Implement this for regular programatic google search as well.
 @observe()
-def dynamic_courtroom5_search_tool(qr: str, prf: str="") -> dict:
+def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_name: str = "") -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
     Whitelisted sites defined by search cx key.
@@ -202,17 +209,17 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="") -> dict:
 
     def process_site(result: dict) -> None:
         try:
-            if(not source_exists(search_collection, result["link"])):
+            if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
                 print("Uploading site: " + result["link"])
-                upload_site(search_collection, result["link"])
+                upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
         except Exception as error:
             print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
             print("The error was: " + str(error))
 
     for result in response["items"]:
         process_site(result)
-
-    return query(search_collection, qr)
+    filter_expr = f"metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'"
+    return query(search_collection, qr, expr=filter_expr)
 
 
 @observe()
@@ -347,7 +354,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
-            function_response = dynamic_serpapi_tool(qr, prf)
+            function_response = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
@@ -374,17 +381,18 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.courtroom5:
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
-            function_response = dynamic_courtroom5_search_tool(qr, prf)
+            function_response = dynamic_courtroom5_search_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
     return str(function_response)
 
-
-def search_toolset_creator(bot: BotRequest) -> list:
+def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
     """Create a search toolset for the bot from all the search tools.
 
     Parameters
     ----------
     bot : BotRequest
         Bot object
+    bot_id: str
+        the bot id string
 
     Returns
     -------
@@ -394,6 +402,7 @@ def search_toolset_creator(bot: BotRequest) -> list:
     """
     toolset = []
     for t in bot.search_tools:
+        t.bot_id = bot_id
         match bot.chat_model.engine:
             case EngineEnum.openai:
                 toolset.append(openai_tool(t))

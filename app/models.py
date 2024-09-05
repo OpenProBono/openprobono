@@ -48,7 +48,7 @@ class SearchTool(BaseModel):
     name: str
     prompt: str
     prefix: str = ""
-
+    bot_id: str = ""
 
 class VDBTool(BaseModel):
     """Model class representing a VDB tool.
