@@ -89,7 +89,7 @@ def scrape(site: str) -> list[Element]:
                 ensure_pandoc_installed()
                 elements = partition_rtf(file=io.BytesIO(r.content))
         else:
-            elements = partition(url=site)
+            elements = partition(url=site, request_timeout=10)
     except (
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,
@@ -98,8 +98,8 @@ def scrape(site: str) -> list[Element]:
     except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
         print("SSL error, skipping", ssl_err)
     except Exception as error:
-        print("Error in regular partition: " + str(error))
-        elements = partition(url=site, content_type="text/html")
+        print("Partition error, trying backup method: " + str(error))
+        elements = partition(url=site, content_type="text/html", request_timeout=10)
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
 

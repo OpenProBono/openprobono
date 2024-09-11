@@ -38,7 +38,7 @@ def summarize_stuff_reduce_msg(
     chat_model: ChatModelParams,
     **kwargs: dict,
 ) -> dict[str, str]:
-    """A combination of stuffing and map-reduce.
+    """Combine stuffing and map-reduce.
 
     Concatenate (stuff) documents to be just within the LLMs context window,
     summarize the concatenated documents,
@@ -220,7 +220,8 @@ def get_summary_message(
     documents : list[str]
        The list of documents to summarize.
     method : str
-        The summarization method, must be `stuffing`, `map_reduce`, or `refine`.
+        The summarization method, must be `stuff_reduce`, `stuffing`, `map_reduce`,
+        or `refine`.
     chat_model : ChatModelParams
         The engine and model to use for summarization.
     kwargs : dict, optional

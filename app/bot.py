@@ -211,7 +211,6 @@ def openai_tools_stream(
             })  # extend conversation with function response
             tools_used += 1
         # get a new response from the model where it can see the function response
-        yield "  \nAnalyzing tool results  \n"
         response = chat_stream(messages, bot.chat_model, **kwargs)
     # add usage to tracing after all tools are called
     langfuse_context.update_current_observation(
@@ -542,7 +541,6 @@ def anthropic_tools_stream(
                 usage["output"] += chunk.message.usage.output_tokens
 
         if tool_call_id:
-            yield "  \nAnalyzing tool results  \n"
             # Step 4: Send function results to the model and get a new response
             response = chat_stream(messages, bot.chat_model, **kwargs)
         else:
