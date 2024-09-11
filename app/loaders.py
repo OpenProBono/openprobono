@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
 from google.api_core.client_options import ClientOptions
 from google.cloud import documentai
@@ -89,6 +90,13 @@ def scrape(site: str) -> list[Element]:
                 elements = partition_rtf(file=io.BytesIO(r.content))
         else:
             elements = partition(url=site)
+    except (
+        requests.exceptions.Timeout,
+        urllib3.exceptions.ConnectTimeoutError,
+    ) as timeout_err:
+        print("Timeout error, skipping", timeout_err)
+    except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
+        print("SSL error, skipping", ssl_err)
     except Exception as error:
         print("Error in regular partition: " + str(error))
         elements = partition(url=site, content_type="text/html")
