@@ -184,11 +184,8 @@ def chat_hive(
     return message, chunks
 
 
-def chat_str_hive(
-    messages: list[dict],
-    model: str,
-    **kwargs: dict,
-) -> str:
+def chat_str_hive(messages: list[dict], model: str, **kwargs: dict) -> str:
+    """Chat with an LLM using the hive engine and get a string response."""
     text, _ = chat_hive(messages, model, **kwargs)
     return text
 
@@ -206,11 +203,7 @@ def set_kwargs_openai(kwargs: dict) -> None:
 
 
 @observe(as_type="generation")
-def chat_openai(
-    messages: list[dict],
-    model: str,
-    **kwargs: dict,
-) -> ChatCompletion | OpenAIStream[ChatCompletionChunk]:
+def chat_openai(messages: list[dict], model: str, **kwargs: dict) -> ChatCompletion:
     """Chat with an LLM using the openai engine.
 
     Parameters
@@ -282,6 +275,7 @@ def chat_stream_openai(
 
 
 def chat_str_openai(messages: list[dict], model: str, **kwargs: dict) -> str:
+    """Chat with an LLM using the anthropic engine and get a string response."""
     response = chat_openai(messages, model, **kwargs)
     return response.choices[0].message.content.strip()
 
@@ -370,11 +364,8 @@ def chat_stream_anthropic(
     )
 
 
-def chat_str_anthropic(
-    messages: list[dict],
-    model: str,
-    **kwargs: dict,
-) -> str:
+def chat_str_anthropic(messages: list[dict], model: str, **kwargs: dict) -> str:
+    """Chat with an LLM using the openai engine and get a string response."""
     response = chat_anthropic(messages, model, **kwargs)
     return "\n".join([
         block.text for block in response.content if block.type == "text"
@@ -382,11 +373,7 @@ def chat_str_anthropic(
 
 
 @observe(as_type="generation")
-def chat_gemini(
-    messages: list[dict],
-    model: str,
-    **kwargs: dict,
-) -> str:
+def chat_gemini(messages: list[dict], model: str, **kwargs: dict) -> str:
     """Chat with a Gemini LLM.
 
     Parameters

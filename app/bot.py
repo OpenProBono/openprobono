@@ -190,15 +190,9 @@ def openai_tools_stream(
             # be sure to handle errors
             yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n"
             if vdb_tool:
-                tool_response = run_vdb_tool(
-                    vdb_tool,
-                    function_args,
-                )
+                tool_response = run_vdb_tool(vdb_tool, function_args)
             elif search_tool:
-                tool_response = run_search_tool(
-                    search_tool,
-                    function_args,
-                )
+                tool_response = run_search_tool(search_tool, function_args)
             else:
                 tool_response = "error: unable to run tool"
             # Step 4: send the info for each function call and function response to
