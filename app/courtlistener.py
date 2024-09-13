@@ -30,7 +30,7 @@ courtlistener_tool_args = {
         "type": "string",
         "description": (
             "The exclusive after date for the query date range in YYYY-MM-DD "
-            "format."
+            "format. For example, if asked for cases since 2000, enter 1999-12-31."
         ),
     },
     "before-date": {
@@ -64,7 +64,8 @@ us_federal_dict = {
 # https://github.com/freelawproject/courtlistener/discussions/3114
 # manual mapping from two-letter state abbreviations to courtlistener court_id format
 jurisdiction_codes = us_federal_dict | {
-    "us": " ".join(us_federal_dict.values()), #gather all federal courts to a general us key
+    # gather all federal courts to a general us key
+    "us": " ".join(us_federal_dict.values()),
     "al": "almd alnd alsd almb alnb alsb ala alactapp alacrimapp alacivapp",
     "ak": "akd akb alaska alaskactapp",
     "az": "azd arb ariz arizctapp ariztaxct",
@@ -139,7 +140,7 @@ jurisdiction_codes = us_federal_dict | {
 }
 
 @observe(capture_output=False)
-def courtlistener_query(request: OpinionSearchRequest) -> dict:
+def courtlistener_query(request: OpinionSearchRequest) -> tuple[dict, list[str]]:
     """Query Courtlistener data.
 
     Parameters
@@ -149,8 +150,8 @@ def courtlistener_query(request: OpinionSearchRequest) -> dict:
 
     Returns
     -------
-    dict
-        Contains `message`, `result` list if successful
+    tuple[dict, list[str]]
+        result (Contains `message`, `result` list if successful), sources
 
     """
     expr = ""
@@ -175,10 +176,16 @@ def courtlistener_query(request: OpinionSearchRequest) -> dict:
         expr += (" and " if expr else "")
         expr += f"text like '% {keyword_query} %'"
     result = query(courtlistener_collection, request.query, request.k, expr)
+    sources = []
     if "result" in result:
+        sources = [
+            f"https://www.courtlistener.com/opinion/{hit['entity']['metadata']['cluster_id']}/{hit['entity']['metadata']['slug']}"
+            for hit in result["result"]
+        ]
+        # tracing
         chunk_ids = [
             f"{hit['entity']['opinion_id']}-{hit['entity']['chunk_index']}"
             for hit in result["result"]
         ]
         langfuse_context.update_current_observation(output=chunk_ids)
-    return result
+    return result, sources

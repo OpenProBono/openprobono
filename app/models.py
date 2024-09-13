@@ -201,13 +201,14 @@ class OpenAIModelEnum(str, Enum):
 
     gpt_3_5 = "gpt-3.5-turbo-0125"
     gpt_3_5_1106 = "gpt-3.5-turbo-1106"
-    gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
     gpt_4 = "gpt-4"
     gpt_4o = "gpt-4o"
     gpt_4o_240806 = "gpt-4o-2024-08-06"
     gpt_4o_mini = "gpt-4o-mini"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
+    o1_preview = "o1-preview"
+    o1_mini = "o1-mini"
     mod_stable = "text-moderation-stable"
     mod_latest = "text-moderation-latest"
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down
@@ -294,7 +295,7 @@ class OpinionSearchRequest(BaseModel):
     query : str
         The query
     k : int, optional
-        The number of results to return, by default 10
+        The number of results to return, by default 5
     jurisdictions : list[str] | None, optional
         The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'us-app' for federal appellate,
@@ -310,7 +311,7 @@ class OpinionSearchRequest(BaseModel):
     """
 
     query: str
-    k: int = 10
+    k: int = 5
     jurisdictions: list[str] | None = None
     keyword_query: str | None = None
     after_date: str | None = None

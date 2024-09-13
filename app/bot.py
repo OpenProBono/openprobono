@@ -162,6 +162,7 @@ def openai_tools_stream(
 
     tools_used = 0
     usage_dict = {"input": 0, "output": 0, "total": 0}
+    all_sources = []
     while tools_used < MAX_NUM_TOOLS:
         # Step 2: see if the bot wants to call any functions
         tool_calls, current_dict, usage = yield from stream_openai_response(response)
@@ -188,20 +189,28 @@ def openai_tools_stream(
             # Step 3: call the function
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
-            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n"
+            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n\n"
             if vdb_tool:
-                tool_response = run_vdb_tool(vdb_tool, function_args)
+                tool_response, sources = run_vdb_tool(vdb_tool, function_args)
             elif search_tool:
-                tool_response = run_search_tool(search_tool, function_args)
+                tool_response, sources = run_search_tool(search_tool, function_args)
             else:
                 tool_response = "error: unable to run tool"
+                sources = []
+            # add sources from this tool call to the overall source list
+            if sources:
+                yield "Sources found: \n"
+                for i, src in enumerate(sources, start=len(all_sources) + 1):
+                    yield f"{i}. {src} \n"
+                yield "\n\n"
+                all_sources += sources
             # Step 4: send the info for each function call and function response to
             # the model
             messages.append({
                 "tool_call_id": tool_call.id,
                 "role": "tool",
                 "name": function_name,
-                "content": tool_response,
+                "content": str(tool_response),
             })  # extend conversation with function response
             tools_used += 1
         # get a new response from the model where it can see the function response

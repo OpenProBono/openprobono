@@ -25,7 +25,7 @@ def opinion_search(request: OpinionSearchRequest) -> list[dict]:
 
     """
     # get courtlistener results
-    cl_result = courtlistener_query(request)
+    cl_result, _ = courtlistener_query(request)
     return cl_result["result"]
 
 

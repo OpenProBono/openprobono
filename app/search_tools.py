@@ -1,5 +1,4 @@
 """The search api functions and search toolset creation. Written by Arman Aydemir."""
-from json import tool
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -25,7 +24,7 @@ COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
 search_collection = "search_collection_vj1"
 
-def filtered_search(results: dict) -> dict:
+def filtered_search(results: dict) -> tuple[dict, list[str]]:
     """Filter search results returned by serpapi to only include relevant results.
 
     Parameters
@@ -35,20 +34,30 @@ def filtered_search(results: dict) -> dict:
 
     Returns
     -------
-    dict
-        filtered results
+    tuple[dict, list[str]]
+        filtered results, sources
 
     """
     new_dict = {}
+    sources = []
     if "sports_results" in results:
         new_dict["sports_results"] = results["sports_results"]
+        sources += [result["link"] for result in results["sports_results"]]
     if "organic_results" in results:
         new_dict["organic_results"] = results["organic_results"]
-    return new_dict
+        sources += [result["link"] for result in results["organic_results"]]
+    return new_dict, sources
 
 
 @observe()
-def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bot_id: str = "", tool_name: str = "") -> dict:
+def dynamic_serpapi_tool(
+    qr: str,
+    prf: str,
+    num_results: int = 5,
+    k: int = 3,
+    bot_id: str = "",
+    tool_name: str = "",
+) -> tuple[dict, list[str]]:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters
@@ -68,11 +77,13 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
 
     Returns
     -------
-    dict
-        result of the query on the embeddings uploaded to the search collection
+    tuple[dict, list[str]]
+        results
+        (the result of the query on the embeddings uploaded to the search collection),
+        sources
 
     """
-    response = filtered_search(
+    response, _ = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
             "num": num_results,
@@ -98,11 +109,13 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
         for future in as_completed(futures):
             _ = future.result()
     filter_expr = f"metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'"
-    return query(search_collection, qr, k=k, expr=filter_expr)
-
+    res = query(search_collection, qr, k=k, expr=filter_expr)
+    # get the list of sources from the query results
+    urls = [item["entity"]["metadata"]["url"] for item in res["result"]]
+    return res, urls
 
 @observe()
-def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
+def google_search_tool(qr: str, prf: str, k: int = 4) -> tuple[dict, list[str]]:
     """Query the google search api.
 
     Parameters
@@ -111,13 +124,13 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
         the query itself
     prf : str
         the prefix given by the tool (used for whitelists)
-    max_len : int, optional
-        maximum length of response text, by default 6400
+    k : int, optional
+        maximum number of results, by default 4
 
     Returns
     -------
-    str
-        the search results
+    tuple[dict, list[str]]
+        search results, sources
 
     """
     headers = {
@@ -129,14 +142,14 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
         "cx": os.environ["GOOGLE_SEARCH_API_CX"],
         "q": prf + " " + qr,
     }
-    return str(
-        requests.get("https://www.googleapis.com/customsearch/v1",
-                     params=params,
-                     headers=headers, timeout=30).json())[0:max_len]
+    site = "https://www.googleapis.com/customsearch/v1"
+    res = requests.get(site, params=params, headers=headers, timeout=30).json()
+    urls = [item["link"] for item in res["items"][:k]]
+    return {"items": res["items"][:k]}, urls
 
 
 @observe()
-def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
+def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> tuple[dict, list[str]]:
     """Query the custom courtroom5 google search api.
 
     Whitelisted sites defined by search cx key.
@@ -147,13 +160,13 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
         the query itself
     prf : str
         the prefix given by the tool (whitelisted sites defined by search cx key)
-    max_len : int, optional
-        maximum length of response text, by default 6400
+    k : int, optional
+        maximum number of results, by default 4
 
     Returns
     -------
-    str
-        the search results
+    tuple[dict, list[str]]
+        search results, sources
 
     """
     headers = {
@@ -165,15 +178,14 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
         "cx": COURTROOM5_SEARCH_CX_KEY,
         "q": prf + " " + qr,
     }
-    return str(
-        requests.get("https://www.googleapis.com/customsearch/v1",
-                     params=params,
-                     headers=headers, timeout=30).json())[0:max_len]
-
+    site = "https://www.googleapis.com/customsearch/v1"
+    res = requests.get(site, params=params, headers=headers, timeout=30).json()
+    urls = [item["link"] for item in res["items"][:k]]
+    return {"items": res["items"][:k]}, urls
 
 # Implement this for regular programatic google search as well.
 @observe()
-def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_name: str = "") -> dict:
+def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_name: str = "") -> tuple[dict, list[str]]:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
     Whitelisted sites defined by search cx key.
@@ -187,8 +199,8 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
 
     Returns
     -------
-    str
-        the search results
+    tuple[dict, list[str]]
+        search results, sources
 
     """
     headers = {
@@ -219,11 +231,14 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
     for result in response["items"]:
         process_site(result)
     filter_expr = f"metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'"
-    return query(search_collection, qr, expr=filter_expr)
+    res = query(search_collection, qr, expr=filter_expr)
+    # get the list of sources from the query results
+    urls = [item["entity"]["metadata"]["url"] for item in res["result"]]
+    return res, urls
 
 
 @observe()
-def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
+def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> tuple[dict, list[str]]:
     """Query the serpapi search api.
 
     Parameters
@@ -237,8 +252,8 @@ def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
 
     Returns
     -------
-    dict
-        the dict of results
+    tuple[dict, list[str]]
+        results, sources
 
     """
     return filtered_search(
@@ -331,7 +346,7 @@ def anthropic_tool(t: SearchTool) -> dict:
     return body
 
 
-def run_search_tool(tool: SearchTool, function_args: dict) -> str:
+def run_search_tool(tool: SearchTool, function_args: dict) -> tuple[dict, list[str]]:
     """Create a search tool for an openai agent.
 
     Parameters
@@ -343,20 +358,20 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
 
     Returns
     -------
-    str
-        The response from the search tool
+    tuple[dict, list[str]]
+        response, sources
 
     """
-    function_response = None
+    function_response, sources = None, []
     prf = tool.prefix
     qr = function_args["qr"]
     match tool.method:
         case SearchMethodEnum.serpapi:
-            function_response = serpapi_tool(qr, prf)
+            function_response, sources = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
-            function_response = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
+            function_response, sources = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
         case SearchMethodEnum.google:
-            function_response = google_search_tool(qr, prf)
+            function_response, sources = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
             tool_jurisdictions = None
             tool_kw_query = None
@@ -377,12 +392,12 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
                 after_date=tool_after_date,
                 before_date=tool_before_date,
             )
-            function_response = courtlistener_query(request)
+            function_response, sources = courtlistener_query(request)
         case SearchMethodEnum.courtroom5:
-            function_response = courtroom5_search_tool(qr, prf)
+            function_response, sources = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
-            function_response = dynamic_courtroom5_search_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
-    return str(function_response)
+            function_response, sources = dynamic_courtroom5_search_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
+    return function_response, sources
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
     """Create a search toolset for the bot from all the search tools.

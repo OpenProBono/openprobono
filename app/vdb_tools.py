@@ -95,7 +95,7 @@ def anthropic_tool(tool: VDBTool) -> dict:
     }
 
 
-def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
+def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
     """Run a tool on a vector database.
 
     Parameters
@@ -107,8 +107,8 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
 
     Returns
     -------
-    str
-        The response from the tool function
+    tuple[dict, list[str]]
+        response, sources
 
     """
     function_response = None
@@ -117,9 +117,19 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> str:
     tool_query = function_args["query"]
     if collection_name == SESSION_DATA:
         function_response = query(collection_name, tool_query, k, session_id=t.session_id)
+        # session data uses filenames
+        sources = [
+            hit["entity"]["metadata"]["filename"]
+            for hit in function_response["result"]
+        ] if "result" in function_response else []
     else:
         function_response = query(collection_name, tool_query, k)
-    return str(function_response)
+        # other collections use urls
+        sources = [
+            hit["entity"]["metadata"]["url"]
+            for hit in function_response["result"]
+        ] if "result" in function_response else []
+    return function_response, sources
 
 
 def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
