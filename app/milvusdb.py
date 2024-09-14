@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from json import loads
+from json import loads, tool
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
@@ -331,7 +331,7 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
 
 
 def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) -> bool:
-    """Check if a url source exists in a collection, for a specific bot and tool
+    """Check if a url source exists in a collection, for a specific bot and tool.
 
     Parameters
     ----------
@@ -350,8 +350,32 @@ def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) ->
         True if the url is found, False otherwise
 
     """
-    collection = Collection(collection_name)
-    q = collection.query(expr=f"metadata['url']=='{url}' && metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'")
+    res = get_expr(collection_name, f"metadata['url']=='{url}'")
+    hits = res["result"]
+    q = sorted(hits, key=lambda x: x["pk"])
+    for doc in q:
+        doc_id = doc["pk"]
+        metadata = doc["metadata"]
+        if("bot_and_tool_id" not in metadata):
+            metadata["bot_and_tool_id"] = [bot_id + tool_name]
+        elif( (bot_id + tool_name) not in metadata["bot_and_tool_id"]):
+            metadata["bot_and_tool_id"].append(bot_id + tool_name)
+
+        md = metadata
+
+        # delete fields which are empty or over 1000 characters
+        maxlen = 1000
+        keys_to_remove = [
+            key for key in md
+            if not md[key] or (isinstance(md[key], str) and len(md[key])) > maxlen
+        ]
+        for key in keys_to_remove:
+            del md[key]
+
+        del doc["pk"]
+
+        doc["metadata"] = md
+        result = upsert_expr(collection_name, expr=f"pk=={doc_id}", upsert_data=[doc])
 
     return len(q) > 0
 
@@ -725,8 +749,7 @@ def upload_site(
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
-        metadata["bot_id"] = bot_id
-        metadata["tool_name"] = tool_name
+        metadata["bot_and_tool_id"] = [bot_id + tool_name]
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],
