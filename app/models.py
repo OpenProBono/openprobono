@@ -185,6 +185,7 @@ class GoogleModelEnum(str, Enum):
     """Enumeration class representing different Google models."""
 
     gemini_1_5_flash = "gemini-1.5-flash"
+    gemini_1_5_pro = "gemini-1.5-pro"
 
 
 @unique
@@ -245,6 +246,7 @@ class SummaryMethodEnum(str, Enum):
     stuff_reduce = "stuff_reduce"
     map_reduce = "map_reduce"
     refine = "refine"
+    gemini_full = "gemini_full"
 
 
 class ChatModelParams(BaseModel):

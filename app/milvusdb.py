@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from json import loads, tool
+from json import loads
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 

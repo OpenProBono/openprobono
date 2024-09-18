@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from langfuse.decorators import langfuse_context, observe
 
-from app.chat_models import chat_str
+from app.chat_models import chat_single_gemini, chat_str
 from app.encoders import max_token_indices
-from app.models import ChatModelParams, OpenAIModelEnum, SummaryMethodEnum
+from app.models import ChatModelParams, EngineEnum, GoogleModelEnum, OpenAIModelEnum, SummaryMethodEnum
 from app.prompts import (
     OPINION_SUMMARY_MAP_PROMPT,
     OPINION_SUMMARY_REDUCE_PROMPT,
@@ -252,10 +252,44 @@ def get_summary_message(
             raise ValueError(method)
     return msg
 
+@observe()
+def summarize_gemini_full(docs: list[str]) -> str:
+    """Summarize text using Google's Gemini model without chunking.
+
+    Parameters
+    ----------
+    docs: list[str]
+        list of strings that is the documents
+
+    Returns
+    -------
+    str
+        The summarized text
+
+    """
+    fulltext = ""
+    for text in docs:
+        fulltext += text
+        fulltext += "\n"
+    prompt = f"""Please provide a concise summary of the following text:
+
+    {fulltext}
+
+    Your summary should:
+    1. Capture the main ideas and key points
+    2. Be no more than 10% of the original text length
+    3. Be written in clear, coherent language
+    """
+
+    chat_model = ChatModelParams(EngineEnum.google, GoogleModelEnum.gemini_1_5_flash)
+    summary = chat_single_gemini(prompt, chat_model.model)
+    return summary
+
+
 @observe(capture_input=False)
 def summarize(
     documents: list[str],
-    method: str = SummaryMethodEnum.stuff_reduce,
+    method: str = SummaryMethodEnum.gemini_full,
     chat_model: ChatModelParams | None = None,
     **kwargs: dict,
 ) -> str:
@@ -279,11 +313,14 @@ def summarize(
         The summarized text.
 
     """
-    if chat_model is None:
-        chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
-    langfuse_context.update_current_observation(
-        input={"method": method, "chat_model": chat_model},
-        metadata=kwargs,
-    )
-    msg = get_summary_message(documents, method, chat_model, **kwargs)
-    return chat_str([msg], chat_model, **kwargs)
+    if(method != SummaryMethodEnum.gemini_full):
+        if chat_model is None:
+            chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
+        langfuse_context.update_current_observation(
+            input={"method": method, "chat_model": chat_model},
+            metadata=kwargs,
+        )
+        msg = get_summary_message(documents, method, chat_model, **kwargs)
+        return chat_str([msg], chat_model, **kwargs)
+    else:
+        return summarize_gemini_full(documents)

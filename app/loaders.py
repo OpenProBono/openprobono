@@ -171,14 +171,14 @@ def quickstart_ocr(file: UploadFile) -> str:
     if not file.filename.endswith(".pdf"):
         process_options = documentai.ProcessOptions(
             ocr_config=documentai.OcrConfig(
-                language_code="en",
+                # language_code="en",
                 enable_native_pdf_parsing=True,
             ),
         )
     else:
         process_options = documentai.ProcessOptions(
             ocr_config=documentai.OcrConfig(
-                language_code="en",
+                # language_code="en",
             ),
         )
 
