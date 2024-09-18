@@ -32,6 +32,14 @@ class SearchMethodEnum(str, Enum):
     dynamic_courtroom5 = "dynamic_courtroom5"
 
 
+@unique
+class VDBMethodEnum(str, Enum):
+    """Enumeration class representing different VDB methods."""
+
+    query = "query"
+    get_source = "get_source"
+
+
 class SearchTool(BaseModel):
     """Model class representing a search tool.
 
@@ -64,9 +72,11 @@ class VDBTool(BaseModel):
 
     name: str
     collection_name: str
-    k: int
+    k: int = 4
     prompt: str = ""
     session_id: str | None = None
+    method: VDBMethodEnum = VDBMethodEnum.query
+    bot_id: str = ""
 
 
 class ChatRequest(BaseModel):

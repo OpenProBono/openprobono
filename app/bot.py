@@ -104,8 +104,6 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         )
         return
 
-    yield "  \n"
-
     #vdb tool for user uploaded files
     session_data_toolset = session_data_toolset_creator(r.session_id)
     if session_data_toolset:
@@ -158,8 +156,6 @@ def openai_tools_stream(
         A stream of response chunks from the OpenAI LLM
 
     """
-    yield "  \n"
-
     tools_used = 0
     usage_dict = {"input": 0, "output": 0, "total": 0}
     all_sources = []
@@ -197,13 +193,8 @@ def openai_tools_stream(
             else:
                 tool_response = "error: unable to run tool"
                 sources = []
-            # add sources from this tool call to the overall source list
-            if sources:
-                yield "Sources found: \n"
-                for i, src in enumerate(sources, start=len(all_sources) + 1):
-                    yield f"{i}. {src} \n"
-                yield "\n\n"
-                all_sources += sources
+            yield f"Tool response:\n{tool_response}\n\n"
+            all_sources += sources
             # Step 4: send the info for each function call and function response to
             # the model
             messages.append({
@@ -213,6 +204,12 @@ def openai_tools_stream(
                 "content": str(tool_response),
             })  # extend conversation with function response
             tools_used += 1
+        # remove duplicate sources while maintaining original order
+        srcset = set()
+        all_sources = [src for src in all_sources if not (src in srcset or srcset.add(src))]
+        source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
+        # append the source list as a system message
+        messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
         # get a new response from the model where it can see the function response
         response = chat_stream(messages, bot.chat_model, **kwargs)
     # add usage to tracing after all tools are called
@@ -304,6 +301,7 @@ def openai_tools(
         return response_message.content
 
     tools_used = 0
+    all_sources = []
     while tool_calls and tools_used < MAX_NUM_TOOLS:
         messages.append(response_message.model_dump())
         # TODO: run tool calls in parallel
@@ -317,11 +315,18 @@ def openai_tools(
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
             if vdb_tool:
-                tool_response = run_vdb_tool(vdb_tool, function_args)
+                tool_response, sources = run_vdb_tool(vdb_tool, function_args)
             elif search_tool:
-                tool_response = run_search_tool(search_tool, function_args)
+                tool_response, sources = run_search_tool(search_tool, function_args)
             else:
                 tool_response = "error: unable to run tool"
+            # add sources from this tool call to the overall source list
+            if sources:
+                yield "Sources found: \n"
+                for i, src in enumerate(sources, start=len(all_sources) + 1):
+                    yield f"{i}. {src} \n"
+                yield "\n\n"
+                all_sources += sources
             # extend conversation with function response
             messages.append({
                 "tool_call_id": tool_call.id,
@@ -330,6 +335,9 @@ def openai_tools(
                 "content": tool_response,
             })
             tools_used += 1
+        # append the source list as a system message
+        source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
+        messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
         # Step 4: send the function responses to the model
         response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
         # get a new response from the model where it can see the function response
@@ -390,6 +398,7 @@ def anthropic_tools(
         ])
 
     tools_used = 0
+    all_sources = []
     while tool_calls and tools_used < MAX_NUM_TOOLS:
         # add message before tool calls so the last message isn't duplicated in db
         messages.append({"role": response.role, "content": response.content})
@@ -403,12 +412,19 @@ def anthropic_tools(
             }
             # Step 3: call the function
             if vdb_tool:
-                tool_response = run_vdb_tool(vdb_tool, tool_call.input)
+                tool_response, sources = run_vdb_tool(vdb_tool, tool_call.input)
             elif search_tool:
-                tool_response = run_search_tool(search_tool, tool_call.input)
+                tool_response, sources = run_search_tool(search_tool, tool_call.input)
             else:
                 tool_response = "error: unable to identify tool"
                 tool_response_msg["is_error"] = True
+            # add sources from this tool call to the overall source list
+            if sources:
+                yield "Sources found: \n"
+                for i, src in enumerate(sources, start=len(all_sources) + 1):
+                    yield f"{i}. {src} \n"
+                yield "\n\n"
+                all_sources += sources
             tool_response_msg["content"] = tool_response
             # extend conversation with function response
             messages.append({
@@ -416,6 +432,9 @@ def anthropic_tools(
                 "content": [tool_response_msg],
             })
             tools_used += 1
+        # append the source list as a system message
+        source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
+        messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
         # Step 4: send info for each function call and function response to the model
         # get a new response from the model where it can see the function response
         response = chat(messages, bot.chat_model, **kwargs)
@@ -475,6 +494,7 @@ def anthropic_tools_stream(
 ) -> Generator:
     tools_used = 0
     usage = {"input": 0, "output": 0}
+    all_sources = []
     while tools_used < MAX_NUM_TOOLS:
         # Step 2: see if the model wants to call any functions
         current_tool_call = None
@@ -511,12 +531,18 @@ def anthropic_tools_stream(
                     vdb_tool = find_vdb_tool(bot, function_name)
                     search_tool = find_search_tool(bot, function_name)
                     if vdb_tool:
-                        tool_response = run_vdb_tool(vdb_tool, function_args)
+                        tool_response, sources = run_vdb_tool(vdb_tool, function_args)
                     elif search_tool:
-                        tool_response = run_search_tool(search_tool, function_args)
+                        tool_response, sources = run_search_tool(search_tool, function_args)
                     else:
                         tool_response = "error: unable to identify tool"
-
+                    # add sources from this tool call to the overall source list
+                    if sources:
+                        yield "Sources found: \n"
+                        for i, src in enumerate(sources, start=len(all_sources) + 1):
+                            yield f"{i}. {src} \n"
+                        yield "\n\n"
+                        all_sources += sources
                     # tool use message
                     current_tool_call["id"] = tool_call_id
                     current_tool_call["type"] = "tool_use"
@@ -544,6 +570,9 @@ def anthropic_tools_stream(
                 usage["output"] += chunk.message.usage.output_tokens
 
         if tool_call_id:
+            # append the source list as a system message
+            source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
+            messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
             # Step 4: Send function results to the model and get a new response
             response = chat_stream(messages, bot.chat_model, **kwargs)
         else:

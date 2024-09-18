@@ -1,15 +1,22 @@
 """A module for interacting with the CourtListener API. Written by Arman Aydemir."""
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
+import requests
+import urllib3
 from langfuse.decorators import langfuse_context, observe
 
-from app.milvusdb import fuzzy_keyword_query, query
+from app.milvusdb import fuzzy_keyword_query, get_expr, query
 
 if TYPE_CHECKING:
     from app.models import OpinionSearchRequest
 
+courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
+courtlistener_header = {"Authorization": "Token " + courtlistener_token}
+base_url = "https://www.courtlistener.com/api/rest/v3"
+courtlistener_timeout = 10
 courtlistener_collection = "courtlistener_bulk"
 courtlistener_tool_args = {
     "jurisdictions": {
@@ -24,7 +31,10 @@ courtlistener_tool_args = {
     },
     "keyword-qr": {
         "type": "string",
-        "description": "The keyword query to search for an exact name or term.",
+        "description": (
+            "The keyword query to search for an exact name or term within the opinion "
+            "text."
+        ),
     },
     "after-date": {
         "type": "string",
@@ -139,6 +149,60 @@ jurisdiction_codes = us_federal_dict | {
     "wy": "wyd wyb wyo",
 }
 
+
+@observe(capture_output=False)
+def search(q: str) -> dict:
+    """Call the general search api from courtlistener.
+
+    Parameters
+    ----------
+    q : str
+        the query
+
+    Returns
+    -------
+    dict
+        dict containing the results
+
+    """
+    http_code_ok = 200
+    search_url = base_url + "/search/?q="
+    try:
+        response = requests.get(
+            search_url + q,
+            headers=courtlistener_header,
+            timeout=courtlistener_timeout,
+        )
+        if response.status_code == http_code_ok:
+            return response.json()
+    except (
+        requests.exceptions.Timeout,
+        urllib3.exceptions.ConnectTimeoutError,
+    ) as timeout_err:
+        print("Timeout error, skipping", timeout_err)
+    return {}
+
+@observe()
+def get_opinion_ids(search_result: dict, num_cases: int = 5) -> list[int]:
+    """Get opinion ids from search results."""
+    return [
+        result["id"]
+        for result in search_result["results"]
+        if "id" in result
+    ][:num_cases]
+
+@observe()
+def courtlistener_get_opinion(opinion_id: int) -> dict:
+    """Get the chunks in Milvus for a given opinion, if it's available."""
+    expr = f"opinion_id=={opinion_id}"
+    result = get_expr(courtlistener_collection, expr)
+    if "result" in result and len(result["result"]) > 0:
+        # the opinion is in the database
+        metadata = result["result"][0]["metadata"]
+        text = "\n\n".join([hit["text"] for hit in result["result"]])
+        return {"text": text, "metadata": metadata}
+    return {}
+
 @observe(capture_output=False)
 def courtlistener_query(request: OpinionSearchRequest) -> tuple[dict, list[str]]:
     """Query Courtlistener data.
@@ -178,10 +242,7 @@ def courtlistener_query(request: OpinionSearchRequest) -> tuple[dict, list[str]]
     result = query(courtlistener_collection, request.query, request.k, expr)
     sources = []
     if "result" in result:
-        sources = [
-            f"https://www.courtlistener.com/opinion/{hit['entity']['metadata']['cluster_id']}/{hit['entity']['metadata']['slug']}"
-            for hit in result["result"]
-        ]
+        sources = [hit["entity"]["opinion_id"] for hit in result["result"]]
         # tracing
         chunk_ids = [
             f"{hit['entity']['opinion_id']}-{hit['entity']['chunk_index']}"

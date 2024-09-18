@@ -94,11 +94,11 @@ def scrape(site: str) -> list[Element]:
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,
     ) as timeout_err:
-        print("Timeout error, skipping", timeout_err)
+        print(f"Timeout error, {site}, skipping", timeout_err)
     except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
-        print("SSL error, skipping", ssl_err)
+        print(f"SSL error, {site}, skipping", ssl_err)
     except Exception as error:
-        print("Partition error, trying backup method: " + str(error))
+        print(f"Partition error, {site}, trying backup method: " + str(error))
         elements = partition(url=site, content_type="text/html", request_timeout=10)
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
