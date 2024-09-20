@@ -23,7 +23,7 @@ GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
 COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
-search_collection = "search_collection_vj1"
+search_collection = "search_collection_gemini"
 
 def filtered_search(results: dict) -> dict:
     """Filter search results returned by serpapi to only include relevant results.
