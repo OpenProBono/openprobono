@@ -18,11 +18,16 @@ from app.chat_models import chat, chat_stream
 from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
 from app.prompts import MAX_NUM_TOOLS
-from app.search_tools import find_search_tool, run_search_tool, search_toolset_creator
+from app.search_tools import (
+    find_search_tool,
+    format_search_tool_results,
+    run_search_tool,
+    search_toolset_creator,
+)
 from app.vdb_tools import (
     find_vdb_tool,
+    format_vdb_tool_results,
     run_vdb_tool,
-    session_data_toolset_creator,
     vdb_toolset_creator,
 )
 
@@ -104,12 +109,7 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         )
         return
 
-    #vdb tool for user uploaded files
-    session_data_toolset = session_data_toolset_creator(r.session_id)
-    if session_data_toolset:
-        bot.vdb_tools.append(session_data_toolset)
-
-    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot, r.bot_id, r.session_id)
 
     # Step 0: tracing
     last_user_msg = next(
@@ -188,12 +188,17 @@ def openai_tools_stream(
             yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n\n"
             if vdb_tool:
                 tool_response, sources = run_vdb_tool(vdb_tool, function_args)
+                formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
             elif search_tool:
                 tool_response, sources = run_search_tool(search_tool, function_args)
+                formatted_results = format_search_tool_results(tool_response, search_tool)
             else:
                 tool_response = "error: unable to run tool"
                 sources = []
-            yield f"Tool response:\n{tool_response}\n\n"
+                formatted_results = []
+
+            sources_found = "\n\n".join(formatted_results)
+            yield f"Sources Found:\n\n{sources_found}\n\n"
             all_sources += sources
             # Step 4: send the info for each function call and function response to
             # the model
@@ -244,12 +249,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
             "Please modify your message and try again."
         )
 
-    #vdb tool for user uploaded files
-    session_data_toolset = session_data_toolset_creator(r.session_id)
-    if session_data_toolset:
-        bot.vdb_tools.append(session_data_toolset)
-
-    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot, r.bot_id, r.session_id)
     kwargs = {"tools": toolset}
     messages = r.history
 
@@ -322,17 +322,17 @@ def openai_tools(
                 tool_response = "error: unable to run tool"
             # add sources from this tool call to the overall source list
             if sources:
-                yield "Sources found: \n"
-                for i, src in enumerate(sources, start=len(all_sources) + 1):
-                    yield f"{i}. {src} \n"
-                yield "\n\n"
+                # yield "Sources found: \n"
+                # for i, src in enumerate(sources, start=len(all_sources) + 1):
+                #     yield f"{i}. {src} \n"
+                # yield "\n\n"
                 all_sources += sources
             # extend conversation with function response
             messages.append({
                 "tool_call_id": tool_call.id,
                 "role": "tool",
                 "name": function_name,
-                "content": tool_response,
+                "content": str(tool_response),
             })
             tools_used += 1
         # append the source list as a system message
@@ -355,12 +355,8 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
             "I'm sorry, I can't help you with that. "
             "Please modify your message and try again."
         )
-    #vdb tool for user uploaded files
-    session_data_toolset = session_data_toolset_creator(r.session_id)
-    if session_data_toolset:
-        bot.vdb_tools.append(session_data_toolset)
 
-    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot, r.bot_id, r.session_id)
     kwargs = {"tools": toolset, "system": bot.system_prompt}
 
     # The Messages API accepts a top-level `system` parameter,
@@ -420,12 +416,12 @@ def anthropic_tools(
                 tool_response_msg["is_error"] = True
             # add sources from this tool call to the overall source list
             if sources:
-                yield "Sources found: \n"
-                for i, src in enumerate(sources, start=len(all_sources) + 1):
-                    yield f"{i}. {src} \n"
-                yield "\n\n"
+                # yield "Sources found: \n"
+                # for i, src in enumerate(sources, start=len(all_sources) + 1):
+                #     yield f"{i}. {src} \n"
+                # yield "\n\n"
                 all_sources += sources
-            tool_response_msg["content"] = tool_response
+            tool_response_msg["content"] = str(tool_response)
             # extend conversation with function response
             messages.append({
                 "role": "user",
@@ -456,12 +452,7 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
         )
         return
 
-    #vdb tool for user uploaded files
-    session_data_toolset = session_data_toolset_creator(r.session_id)
-    if session_data_toolset:
-        bot.vdb_tools.append(session_data_toolset)
-
-    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot)
+    toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot, r.bot_id, r.session_id)
 
     # Step 0: tracing
     # input tracing

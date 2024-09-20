@@ -49,6 +49,7 @@ class SearchTool(BaseModel):
         name (str): The name of the search tool.
         prompt (str): The prompt for the search tool.
         prefix (str): The prefix for the search tool.
+        bot_id (str): The bot associated with this tool.
 
     """
 
@@ -68,6 +69,9 @@ class VDBTool(BaseModel):
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
         session_id (str | None): The session id if querying session data, else None.
+        method (VDBMethodEnum): The vector database method to be used.
+        bot_id (str): The bot associated with this tool.
+
     """
 
     name: str
@@ -262,7 +266,7 @@ class ChatModelParams(BaseModel):
     """Define a chat model for RAG."""
 
     engine: EngineEnum = EngineEnum.openai
-    model: str = OpenAIModelEnum.gpt_3_5.value
+    model: str = OpenAIModelEnum.gpt_4o_mini.value
     seed: int = 0
     temperature: float = 0.0
 

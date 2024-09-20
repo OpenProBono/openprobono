@@ -330,8 +330,9 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
     return fuzzy_keywords_str.replace("'", "\\'")
 
 
+@observe()
 def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) -> bool:
-    """Check if a url source exists in a collection, for a specific bot and tool
+    """Check if a url source exists in a collection, for a specific bot and tool.
 
     Parameters
     ----------
@@ -510,7 +511,8 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         hits += res
         res = q_iter.next()
     q_iter.close()
-    langfuse_context.update_current_observation(output=f"{len(hits)} hits")
+    pks = [str(hit["pk"]) for hit in hits]
+    langfuse_context.update_current_observation(output=pks)
     return {"message": "Success", "result": hits}
 
 

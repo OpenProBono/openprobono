@@ -179,7 +179,7 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
                 expr = f"metadata['url']=='{tool_source}'"
             res = get_expr(collection_name, expr)
             function_response = {
-                "text": ["\n".join([hit["text"] for hit in res["result"]])],
+                "text": "\n".join([hit["text"] for hit in res["result"]]),
                 # we're not currently doing anything that requires every chunks metadata
                 # so just return the first instance
                 "metadata": res["result"][0]["metadata"],
@@ -188,13 +188,17 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
     return function_response, sources
 
 
-def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
-    """Create a list of VDBTools from the current chat model.
+def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[VDBTool]:
+    """Create a list of VDBTools from the current bot and session.
 
     Parameters
     ----------
     bot : BotRequest
         The bot definition
+    bot_id: str
+        The bot ID
+    session_id : str
+        The session ID to look for session files
 
     Returns
     -------
@@ -214,38 +218,34 @@ def vdb_toolset_creator(bot: BotRequest) -> list[VDBTool]:
             name=t.name + "-get-source",
             collection_name=coll_name,
             method=VDBMethodEnum.get_source,
-            bot_id=t.bot_id,
+            bot_id=bot_id,
         )
         search_src_tools.append(vdb_tool)
     # create source lookup tools for each query tool
     query_src_tools = []
     for t in bot.vdb_tools:
+        t.bot_id = bot_id
         src_tool = t
         src_tool.method = VDBMethodEnum.get_source
-        src_tool.prompt = ""
+        src_tool.prompt = VDB_SOURCE_PROMPT
         query_src_tools.append(src_tool)
     # add the source lookup tools to vdb tool list so we can call them for LLM
     bot.vdb_tools += search_src_tools + query_src_tools
+    # add the session query tool, if necessary
+    if session_id and check_session_data(session_id):
+        bot.vdb_tools.append(VDBTool(
+            name="session_data",
+            collection_name=SESSION_DATA,
+            k=5,
+            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
+            session_id=session_id,
+        ))
     match bot.chat_model.engine:
         case EngineEnum.openai:
             toolset += [openai_tool(t) for t in bot.vdb_tools]
         case EngineEnum.anthropic:
             toolset += [anthropic_tool(t) for t in bot.vdb_tools]
     return toolset
-
-
-def session_data_toolset_creator(session_id: str | None) -> VDBTool | None:
-    """Get a vdb tool for user uploaded files."""
-    if(session_id and check_session_data(session_id)):
-        return VDBTool(
-            name="session_data",
-            collection_name=SESSION_DATA,
-            k=5,
-            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
-            session_id=session_id,
-        )
-    else:
-        return None
 
 
 def find_vdb_tool(bot: BotRequest, tool_name: str) -> VDBTool | None:
@@ -268,3 +268,57 @@ def find_vdb_tool(bot: BotRequest, tool_name: str) -> VDBTool | None:
         (t for t in bot.vdb_tools if tool_name == t.name),
         None,
     )
+
+
+def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[str]:
+    formatted_results = []
+
+    if tool_output["message"] != "Success" or "result" not in tool_output:
+        return formatted_results
+
+    for i, result in enumerate(tool_output["result"], start=1):
+        entity = result["entity"]
+        metadata = entity["metadata"]
+
+        # Format the text, truncating if necessary
+        text = entity["text"][:500] + "..." if len(entity["text"]) > 500 else entity["text"]
+
+        # Select important metadata based on tool type
+        if tool.collection_name == courtlistener_collection:
+            important_metadata = {
+                "Case Name": metadata.get("case_name", "N/A"),
+                "Date Filed": metadata.get("date_filed", "N/A"),
+                "Court": metadata.get("court_name", "N/A"),
+                "Author": metadata.get("author_name", "N/A"),
+                "Precedential Status": metadata.get("precedential_status", "N/A"),
+            }
+            title = metadata.get("case_name", "Unknown Opinion")
+        elif tool.collection_name == search_collection:
+            important_metadata = {
+                "URL": metadata.get("url", "N/A"),
+                "AI Summary": metadata.get("ai_summary", "N/A"),
+                "Page Number": metadata.get("page_number", "N/A"),
+            }
+            title = metadata.get("url", "Unknown URL")
+        elif tool.collection_name == SESSION_DATA:
+            important_metadata = {
+                "Filename": metadata.get("filename", "N/A"),
+                "Page Number": metadata.get("page_number", "N/A"),
+            }
+            title = metadata.get("filename", "Unknown File")
+        else:
+            important_metadata = {k: v for k, v in metadata.items() if v is not None}
+            title = "Unknown Source"
+
+        # Format the knowledge card
+        card = f"{i}. {title} (Distance: {result['distance']:.4f})\n"
+        card += "-" * 40 + "\n"
+        for key, value in important_metadata.items():
+            card += f"{key}: {value}\n"
+        card += "-" * 40 + "\n"
+        card += f"Text:\n{text}\n"
+        card += "=" * 40 + "\n"
+
+        formatted_results.append(card)
+
+    return formatted_results

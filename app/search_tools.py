@@ -49,11 +49,21 @@ def filtered_search(results: dict) -> tuple[dict, list[str]]:
     return new_dict, sources
 
 
+@observe(capture_output=False)
+def process_site(result: dict, bot_id: str, tool_name: str) -> None:
+    try:
+        if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
+            print("Uploading site: " + result["link"])
+            upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
+    except Exception as error:
+        print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
+        print("The error was: " + str(error))
+
 @observe()
 def dynamic_serpapi_tool(
     qr: str,
     prf: str,
-    num_results: int = 5,
+    num_results: int = 3,
     k: int = 3,
     bot_id: str = "",
     tool_name: str = "",
@@ -67,7 +77,7 @@ def dynamic_serpapi_tool(
     prf : str
         the prefix given by tool (used for whitelists)
     num_results : int, optional
-        number of results to return, by default 5
+        number of results to return, by default 3
     k : int, optional
         number of chunks to return from milvus, by default 3
     bot_id : str, optional
@@ -89,21 +99,12 @@ def dynamic_serpapi_tool(
             "num": num_results,
         }).get_dict())
 
-    def process_site(result: dict) -> None:
-        try:
-            if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                print("Uploading site: " + result["link"])
-                upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
-        except Exception as error:
-            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-            print("The error was: " + str(error))
-
     with ThreadPoolExecutor() as executor:
         futures = []
         for result in response["organic_results"]:
             ctx = copy_context()
             def task(r=result, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(process_site, r)
+                return context.run(process_site, r, bot_id, tool_name)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
@@ -446,3 +447,51 @@ def find_search_tool(bot: BotRequest, tool_name: str) -> SearchTool | None:
         (t for t in bot.search_tools if tool_name == t.name),
         None,
     )
+
+
+def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[str]:
+    formatted_results = []
+
+    if tool_output["message"] != "Success" or "result" not in tool_output:
+        return formatted_results
+
+    for i, result in enumerate(tool_output["result"], start=1):
+        entity = result["entity"]
+        metadata = entity["metadata"]
+
+        # Format the text, truncating if necessary
+        text = entity["text"][:500] + "..." if len(entity["text"]) > 500 else entity["text"]
+
+        # Select important metadata based on tool type
+        if tool.method == SearchMethodEnum.courtlistener:
+            important_metadata = {
+                "Case Name": metadata.get("case_name", "N/A"),
+                "Date Filed": metadata.get("date_filed", "N/A"),
+                "Court": metadata.get("court_name", "N/A"),
+                "Author": metadata.get("author_name", "N/A"),
+                "Precedential Status": metadata.get("precedential_status", "N/A"),
+            }
+            title = metadata.get("case_name", "Unknown Opinion")
+        elif tool.method == SearchMethodEnum.dynamic_serpapi:
+            important_metadata = {
+                "URL": metadata.get("url", "N/A"),
+                "AI Summary": metadata.get("ai_summary", "N/A"),
+                "Page Number": metadata.get("page_number", "N/A"),
+            }
+            title = metadata.get("url", "Unknown URL")
+        else:
+            important_metadata = {k: v for k, v in metadata.items() if v is not None}
+            title = "Unknown Source"
+
+        # Format the knowledge card
+        card = f"{i}. {title} (Distance: {result['distance']:.4f})\n"
+        card += "-" * 40 + "\n"
+        for key, value in important_metadata.items():
+            card += f"{key}: {value}\n"
+        card += "-" * 40 + "\n"
+        card += f"Text:\n{text}\n"
+        card += "=" * 40 + "\n"
+
+        formatted_results.append(card)
+
+    return formatted_results

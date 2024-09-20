@@ -242,6 +242,7 @@ def chat_openai(messages: list[dict], model: str, **kwargs: dict) -> ChatComplet
     return response
 
 
+@observe(capture_input=False, capture_output=False)
 def chat_stream_openai(
     messages: list[dict],
     model: str,
@@ -333,6 +334,7 @@ def chat_anthropic(
     return response
 
 
+@observe(capture_input=False, capture_output=False)
 def chat_stream_anthropic(
     messages: list[dict],
     model: str,
