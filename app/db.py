@@ -414,3 +414,41 @@ def get_batch() -> firestore.firestore.WriteBatch:
 
     """
     return db.batch()
+
+
+def get_cached_response(bot_id: str, api_key: str, message: str) -> str | None:
+    """If a conversation is already in the database, return the LLM response.
+
+    Parameters
+    ----------
+    bot_id : str
+        The bot id for the cached response
+    api_key : str
+        The API key for the cached response
+    message : str
+        The message for the cached response
+
+    Returns
+    -------
+    str | None
+        A cached LLM response, if it exists
+
+    """
+    sessions = db.collection(CONVERSATION_COLLECTION + VERSION)
+    matched_sessions = (
+        sessions
+        .where(filter=FieldFilter("api_key", "==", api_key))
+        .where(filter=FieldFilter("bot_id", "==", bot_id))
+        .get()
+    )
+    for session in matched_sessions:
+        d = session.to_dict()
+        if "history" not in d or not d["history"]:
+            continue
+        user_messages = [
+            msg for msg in d["history"]
+            if "role" in msg and msg["role"] == "user"
+        ]
+        if len(user_messages) == 1 and user_messages[0]["content"] == message:
+            return d["history"][-1]["content"]
+    return None

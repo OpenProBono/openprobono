@@ -15,6 +15,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
+from langfuse.decorators import observe
 
 from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
 from app.db import (
@@ -22,6 +23,7 @@ from app.db import (
     api_key_check,
     browse_bots,
     fetch_session,
+    get_cached_response,
     load_bot,
     load_session,
     set_session_to_bot,
@@ -115,6 +117,7 @@ async def process_chat_stream(r: ChatRequest, message: str):
             case _:
                 yield Exception("Invalid bot engine for streaming")
 
+@observe()
 def process_chat(r: ChatRequest, message: str) -> dict:
     bot = load_bot(r.bot_id)
     if bot is None:
@@ -125,6 +128,22 @@ def process_chat(r: ChatRequest, message: str) -> dict:
         r.history = [{"role": "system", "content": bot.system_prompt}]
     if message:
         r.history.append({"role": "user", "content": message})
+    else:
+        # invoke bot does not pass a new message, so get it from history
+        user_messages = [
+            msg for msg in r.history
+            if "role" in msg and msg["role"] == "user"
+        ]
+        message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
+
+    # see if the response is cached
+    # requirements:
+    #  - the same bot id
+    #  - the same API key
+    #  - only 1 user message with the same content as the message here
+    cached_response = get_cached_response(r.bot_id, r.api_key, message)
+    if cached_response is not None:
+        return {"message": "Success", "output": cached_response, "bot_id": r.bot_id}
 
     match bot.chat_model.engine:
         case EngineEnum.openai:

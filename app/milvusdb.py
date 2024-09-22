@@ -353,15 +353,15 @@ def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) ->
     res = get_expr(collection_name, f"metadata['url']=='{url}'")
     hits = res["result"]
     q = sorted(hits, key=lambda x: x["pk"])
+    pks, docs = [], []
     for doc in q:
-        doc_id = doc["pk"]
-        metadata = doc["metadata"]
-        if("bot_and_tool_id" not in metadata):
-            metadata["bot_and_tool_id"] = [bot_id + tool_name]
-        elif( (bot_id + tool_name) not in metadata["bot_and_tool_id"]):
-            metadata["bot_and_tool_id"].append(bot_id + tool_name)
-
-        md = metadata
+        md = doc["metadata"]
+        if("bot_and_tool_id" not in md):
+            md["bot_and_tool_id"] = [bot_id + tool_name]
+        elif( (bot_id + tool_name) not in md["bot_and_tool_id"]):
+            md["bot_and_tool_id"].append(bot_id + tool_name)
+        else:
+            continue
 
         # delete fields which are empty or over 1000 characters
         maxlen = 1000
@@ -372,11 +372,11 @@ def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) ->
         for key in keys_to_remove:
             del md[key]
 
+        pks.append(doc["pk"])
         del doc["pk"]
-
-        doc["metadata"] = md
-        result = upsert_expr(collection_name, expr=f"pk=={doc_id}", upsert_data=[doc])
-
+        docs.append(doc)
+    if pks:
+        _ = upsert_expr(collection_name, expr=f"pk in {pks}", upsert_data=docs)
     return len(q) > 0
 
 
