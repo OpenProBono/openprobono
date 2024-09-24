@@ -5,6 +5,7 @@ import time
 
 import tiktoken
 import voyageai
+from langfuse.decorators import observe
 from openai import APITimeoutError, OpenAI
 
 from app.models import (
@@ -86,6 +87,8 @@ def embed_strs(text: list[str], encoder: EncoderParams) -> list:
         return embed_strs_openai(text, encoder)
     return embed_strs_voyage(text, encoder)
 
+
+@observe(capture_output=False)
 def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
     """Embed a list of strings using an OpenAI client.
 

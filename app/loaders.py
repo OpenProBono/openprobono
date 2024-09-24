@@ -17,32 +17,15 @@ from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from pymilvus import Collection
 from pypandoc import ensure_pandoc_installed
+from PyPDF2 import PdfReader
+from unstructured.documents.elements import Element, ElementMetadata
 from unstructured.partition.auto import partition
-from unstructured.partition.html import partition_html
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.rtf import partition_rtf
 
 if TYPE_CHECKING:
     from fastapi import UploadFile
     from openai.types import Batch
-    from unstructured.documents.elements import Element
-
-
-def partition_html_str(html: str) -> list[Element]:
-    """Partition an HTML string into elements.
-
-    Parameters
-    ----------
-    html : str
-        The HTML string.
-
-    Returns
-    -------
-    list[Element]
-        The extracted elements.
-
-    """
-    return partition_html(text=html)
 
 
 def partition_uploadfile(file: UploadFile) -> list[Element]:
@@ -79,27 +62,53 @@ def scrape(site: str) -> list[Element]:
     """
     elements = []
     try:
+        r = requests.get(site, timeout=10)
+        r.raise_for_status()
+
         if site.endswith(".pdf"):
-            r = requests.get(site, timeout=10)
-            if r.status_code == 200:
+            # try PyPDF first
+            reader = PdfReader(io.BytesIO(r.content))
+            for i, page in enumerate(reader.pages, start=1):
+                e = Element(metadata=ElementMetadata(url=site, page_number=i))
+                e.text = page.extract_text()
+                elements.append(e)
+            # PyPDF can't do OCR. If the elements are all blank,
+            # we probably need OCR (unstructured).
+            if not any(e.text for e in elements):
                 elements = partition_pdf(file=io.BytesIO(r.content))
         elif site.endswith(".rtf"):
-            r = requests.get(site, timeout=10)
-            if r.status_code == 200:
-                ensure_pandoc_installed()
-                elements = partition_rtf(file=io.BytesIO(r.content))
+            ensure_pandoc_installed()
+            elements = partition_rtf(file=io.BytesIO(r.content))
         else:
-            elements = partition(url=site, request_timeout=10)
+            # try beautiful soup first
+            soup = BeautifulSoup(r.content, "html.parser")
+            e = Element(metadata=ElementMetadata(url=site))
+            e.text = soup.get_text()
+            if not e.text:
+                # fall back to unstructured
+                elements = partition(file=io.BytesIO(r.content), content_type="text/html")
+            else:
+                elements.append(e)
+
     except (
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,
     ) as timeout_err:
-        print("Timeout error, skipping", timeout_err)
+        print(f"Timeout error, {site}, ", timeout_err)
+        langfuse_context.update_current_observation(error=timeout_err)
     except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
-        print("SSL error, skipping", ssl_err)
+        print(f"SSL error, {site}, ", ssl_err)
+        langfuse_context.update_current_observation(error=ssl_err)
+    except (
+        requests.exceptions.ConnectionError,
+        urllib3.exceptions.ProtocolError,
+    ) as conn_err:
+        print(f"Connection error, {site}, ", conn_err)
+        langfuse_context.update_current_observation(error=conn_err)
     except Exception as error:
-        print("Partition error, trying backup method: " + str(error))
-        elements = partition(url=site, content_type="text/html", request_timeout=10)
+        print(f"Unexpected error, {site}, ", error)
+        langfuse_context.update_current_observation(error=error)
+
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
 

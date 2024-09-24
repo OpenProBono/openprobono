@@ -416,6 +416,7 @@ def get_batch() -> firestore.firestore.WriteBatch:
     return db.batch()
 
 
+@observe()
 def get_cached_response(bot_id: str, api_key: str, message: str) -> str | None:
     """If a conversation is already in the database, return the LLM response.
 

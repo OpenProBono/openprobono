@@ -13,6 +13,7 @@ openai==1.40.6
 pandoc==2.4
 poppler-utils==0.1.0
 pymilvus==2.4.5
+PyPDF2==3.0.1
 serpapi==0.1.5
 tiktoken==0.7.0
 unstructured[all-docs]==0.15.1
