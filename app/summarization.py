@@ -280,7 +280,7 @@ def summarize(
 
     """
     if chat_model is None:
-        chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
+        chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o_mini)
     langfuse_context.update_current_observation(
         input={"method": method, "chat_model": chat_model},
         metadata=kwargs,

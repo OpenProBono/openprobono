@@ -351,9 +351,33 @@ def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) ->
         True if the url is found, False otherwise
 
     """
-    collection = Collection(collection_name)
-    q = collection.query(expr=f"metadata['url']=='{url}' && metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'")
+    res = get_expr(collection_name, f"metadata['url']=='{url}'")
+    hits = res["result"]
+    q = sorted(hits, key=lambda x: x["pk"])
+    pks, docs = [], []
+    for doc in q:
+        md = doc["metadata"]
+        if("bot_and_tool_id" not in md):
+            md["bot_and_tool_id"] = [bot_id + tool_name]
+        elif( (bot_id + tool_name) not in md["bot_and_tool_id"]):
+            md["bot_and_tool_id"].append(bot_id + tool_name)
+        else:
+            continue
 
+        # delete fields which are empty or over 1000 characters
+        maxlen = 1000
+        keys_to_remove = [
+            key for key in md
+            if not md[key] or (isinstance(md[key], str) and len(md[key])) > maxlen
+        ]
+        for key in keys_to_remove:
+            del md[key]
+
+        pks.append(doc["pk"])
+        del doc["pk"]
+        docs.append(doc)
+    if pks:
+        _ = upsert_expr(collection_name, expr=f"pk in {pks}", upsert_data=docs)
     return len(q) > 0
 
 
@@ -727,8 +751,7 @@ def upload_site(
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
-        metadata["bot_id"] = bot_id
-        metadata["tool_name"] = tool_name
+        metadata["bot_and_tool_id"] = [bot_id + tool_name]
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],

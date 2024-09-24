@@ -2,6 +2,7 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
+from json import tool
 
 import requests
 from langfuse.decorators import observe
@@ -109,7 +110,7 @@ def dynamic_serpapi_tool(
 
         for future in as_completed(futures):
             _ = future.result()
-    filter_expr = f"metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'"
+    filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     # get the list of sources from the query results
     urls = [item["entity"]["metadata"]["url"] for item in res["result"]]
@@ -231,7 +232,7 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
 
     for result in response["items"]:
         process_site(result)
-    filter_expr = f"metadata['bot_id'] == '{bot_id}' && metadata['tool_name'] == '{tool_name}'"
+    filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
     res = query(search_collection, qr, expr=filter_expr)
     # get the list of sources from the query results
     urls = [item["entity"]["metadata"]["url"] for item in res["result"]]
