@@ -86,7 +86,7 @@ def scrape(site: str) -> list[Element]:
             e.text = soup.get_text()
             if not e.text:
                 # fall back to unstructured
-                elements = partition(file=io.BytesIO(r.content), content_type="text/html")
+                elements = partition(file=io.BytesIO(r.content))
             else:
                 elements.append(e)
 
