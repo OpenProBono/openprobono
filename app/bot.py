@@ -37,6 +37,8 @@ def stream_openai_response(response: OpenAIStream):
     full_delta_dict_collection = []
     no_yield = False
     usage = None
+    is_new = True
+    content = ""
     for chunk in response:
         if chunk.usage is not None:
             # last chunk contains usage, choices is an empty array
@@ -48,7 +50,22 @@ def stream_openai_response(response: OpenAIStream):
         else:
             chunk_content = chunk.choices[0].delta.content
             if(chunk_content):
-                yield chunk.choices[0].delta.content
+                content += chunk_content
+                if content.endswith("\n"):
+                    yield json.dumps({
+                        "type": "response",
+                        "content": content,
+                        "is_new": is_new,
+                    }) + "\n"
+                    content = ""
+                is_new = False
+
+    if content:
+        yield json.dumps({
+            "type": "response",
+            "content": content,
+            "is_new": is_new,
+        }) + "\n"
 
     tool_calls, current_dict = [], {}
     if(no_yield):
@@ -185,7 +202,11 @@ def openai_tools_stream(
             # Step 3: call the function
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
-            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n\n"
+            yield json.dumps({
+                "type":"tool_call",
+                "name":function_name,
+                "args":tool_call.function.arguments,
+            }) + "\n"
             if vdb_tool:
                 tool_response, sources = run_vdb_tool(vdb_tool, function_args)
                 formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
@@ -197,8 +218,12 @@ def openai_tools_stream(
                 sources = []
                 formatted_results = []
 
-            sources_found = "\n\n".join(formatted_results)
-            yield f"Sources Found:\n\n{sources_found}\n\n"
+            yield json.dumps({
+                "type": "tool_result",
+                "name": function_name,
+                "results": formatted_results,
+                "sources": sources,
+            }) + "\n"
             all_sources += sources
             # Step 4: send the info for each function call and function response to
             # the model
