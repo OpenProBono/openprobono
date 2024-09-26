@@ -204,7 +204,7 @@ def courtlistener_get_opinion(opinion_id: int) -> dict:
     return {}
 
 @observe(capture_output=False)
-def courtlistener_query(request: OpinionSearchRequest) -> tuple[dict, list[str]]:
+def courtlistener_query(request: OpinionSearchRequest) -> dict:
     """Query Courtlistener data.
 
     Parameters
@@ -214,8 +214,8 @@ def courtlistener_query(request: OpinionSearchRequest) -> tuple[dict, list[str]]
 
     Returns
     -------
-    tuple[dict, list[str]]
-        result (Contains `message`, `result` list if successful), sources
+    dict
+        result (Contains `message`, `result` list if successful)
 
     """
     expr = ""
@@ -240,13 +240,11 @@ def courtlistener_query(request: OpinionSearchRequest) -> tuple[dict, list[str]]
         expr += (" and " if expr else "")
         expr += f"text like '% {keyword_query} %'"
     result = query(courtlistener_collection, request.query, request.k, expr)
-    sources = []
     if "result" in result:
-        sources = [hit["entity"]["opinion_id"] for hit in result["result"]]
         # tracing
         chunk_ids = [
             f"{hit['entity']['opinion_id']}-{hit['entity']['chunk_index']}"
             for hit in result["result"]
         ]
         langfuse_context.update_current_observation(output=chunk_ids)
-    return result, sources
+    return result

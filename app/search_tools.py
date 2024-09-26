@@ -2,7 +2,6 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from json import tool
 
 import requests
 from langfuse.decorators import observe
@@ -25,7 +24,7 @@ COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
 search_collection = "search_collection_vj1"
 
-def filtered_search(results: dict) -> tuple[dict, list[str]]:
+def filtered_search(results: dict) -> dict:
     """Filter search results returned by serpapi to only include relevant results.
 
     Parameters
@@ -35,19 +34,16 @@ def filtered_search(results: dict) -> tuple[dict, list[str]]:
 
     Returns
     -------
-    tuple[dict, list[str]]
-        filtered results, sources
+    dict
+        filtered results
 
     """
     new_dict = {}
-    sources = []
     if "sports_results" in results:
         new_dict["sports_results"] = results["sports_results"]
-        sources += [result["link"] for result in results["sports_results"]]
     if "organic_results" in results:
         new_dict["organic_results"] = results["organic_results"]
-        sources += [result["link"] for result in results["organic_results"]]
-    return new_dict, sources
+    return new_dict
 
 
 @observe(capture_output=False)
@@ -60,6 +56,7 @@ def process_site(result: dict, bot_id: str, tool_name: str) -> None:
         print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
         print("The error was: " + str(error))
 
+
 @observe()
 def dynamic_serpapi_tool(
     qr: str,
@@ -68,7 +65,7 @@ def dynamic_serpapi_tool(
     k: int = 3,
     bot_id: str = "",
     tool_name: str = "",
-) -> tuple[dict, list[str]]:
+) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters
@@ -88,13 +85,11 @@ def dynamic_serpapi_tool(
 
     Returns
     -------
-    tuple[dict, list[str]]
-        results
-        (the result of the query on the embeddings uploaded to the search collection),
-        sources
+    dict
+        result of the query on the embeddings uploaded to the search collection
 
     """
-    response, _ = filtered_search(
+    response = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
             "num": num_results,
@@ -111,13 +106,11 @@ def dynamic_serpapi_tool(
         for future in as_completed(futures):
             _ = future.result()
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
-    res = query(search_collection, qr, k=k, expr=filter_expr)
-    # get the list of sources from the query results
-    urls = [item["entity"]["metadata"]["url"] for item in res["result"]]
-    return res, urls
+    return query(search_collection, qr, k=k, expr=filter_expr)
+
 
 @observe()
-def google_search_tool(qr: str, prf: str, k: int = 4) -> tuple[dict, list[str]]:
+def google_search_tool(qr: str, prf: str, k: int = 4) -> dict:
     """Query the google search api.
 
     Parameters
@@ -131,7 +124,7 @@ def google_search_tool(qr: str, prf: str, k: int = 4) -> tuple[dict, list[str]]:
 
     Returns
     -------
-    tuple[dict, list[str]]
+    dict
         search results, sources
 
     """
@@ -145,13 +138,12 @@ def google_search_tool(qr: str, prf: str, k: int = 4) -> tuple[dict, list[str]]:
         "q": prf + " " + qr,
     }
     site = "https://www.googleapis.com/customsearch/v1"
-    res = requests.get(site, params=params, headers=headers, timeout=30).json()
-    urls = [item["link"] for item in res["items"][:k]]
-    return {"items": res["items"][:k]}, urls
+    res = requests.get(site, params=params, headers=headers, timeout=15).json()
+    return res["items"][:k]
 
 
 @observe()
-def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> tuple[dict, list[str]]:
+def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> dict:
     """Query the custom courtroom5 google search api.
 
     Whitelisted sites defined by search cx key.
@@ -167,7 +159,7 @@ def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> tuple[dict, li
 
     Returns
     -------
-    tuple[dict, list[str]]
+    dict
         search results, sources
 
     """
@@ -181,13 +173,18 @@ def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> tuple[dict, li
         "q": prf + " " + qr,
     }
     site = "https://www.googleapis.com/customsearch/v1"
-    res = requests.get(site, params=params, headers=headers, timeout=30).json()
-    urls = [item["link"] for item in res["items"][:k]]
-    return {"items": res["items"][:k]}, urls
+    res = requests.get(site, params=params, headers=headers, timeout=15).json()
+    return res["items"][:k]
+
 
 # Implement this for regular programatic google search as well.
 @observe()
-def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_name: str = "") -> tuple[dict, list[str]]:
+def dynamic_courtroom5_search_tool(
+    qr: str,
+    prf: str = "",
+    bot_id: str = "",
+    tool_name: str = "",
+) -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
     Whitelisted sites defined by search cx key.
@@ -197,12 +194,16 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
     qr : str
         the query itself
     prf : str
-        the prefix given by the tool
+        the prefix given by the tool, by default empty string
+    bot_id : str
+        the id of the bot using this tool for caching results, by default empty string
+    tool_name : str
+        the name of the tool for caching results, by default empty string
 
     Returns
     -------
-    tuple[dict, list[str]]
-        search results, sources
+    dict
+        search results
 
     """
     headers = {
@@ -233,14 +234,11 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
     for result in response["items"]:
         process_site(result)
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
-    res = query(search_collection, qr, expr=filter_expr)
-    # get the list of sources from the query results
-    urls = [item["entity"]["metadata"]["url"] for item in res["result"]]
-    return res, urls
+    return query(search_collection, qr, expr=filter_expr)
 
 
 @observe()
-def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> tuple[dict, list[str]]:
+def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """Query the serpapi search api.
 
     Parameters
@@ -254,8 +252,8 @@ def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> tuple[dict, list[st
 
     Returns
     -------
-    tuple[dict, list[str]]
-        results, sources
+    dict
+        results
 
     """
     return filtered_search(
@@ -348,7 +346,7 @@ def anthropic_tool(t: SearchTool) -> dict:
     return body
 
 
-def run_search_tool(tool: SearchTool, function_args: dict) -> tuple[dict, list[str]]:
+def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
     """Create a search tool for an openai agent.
 
     Parameters
@@ -360,20 +358,20 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> tuple[dict, list[s
 
     Returns
     -------
-    tuple[dict, list[str]]
-        response, sources
+    dict
+        The response from the search tool
 
     """
-    function_response, sources = None, []
+    function_response = None
     prf = tool.prefix
     qr = function_args["qr"]
     match tool.method:
         case SearchMethodEnum.serpapi:
-            function_response, sources = serpapi_tool(qr, prf)
+            function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
-            function_response, sources = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
+            function_response = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
         case SearchMethodEnum.google:
-            function_response, sources = google_search_tool(qr, prf)
+            function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
             tool_jurisdictions = None
             tool_kw_query = None
@@ -394,12 +392,17 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> tuple[dict, list[s
                 after_date=tool_after_date,
                 before_date=tool_before_date,
             )
-            function_response, sources = courtlistener_query(request)
+            function_response = courtlistener_query(request)
         case SearchMethodEnum.courtroom5:
-            function_response, sources = courtroom5_search_tool(qr, prf)
+            function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
-            function_response, sources = dynamic_courtroom5_search_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
-    return function_response, sources
+            function_response = dynamic_courtroom5_search_tool(
+                qr,
+                prf,
+                bot_id=tool.bot_id,
+                tool_name=tool.name,
+            )
+    return function_response
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
     """Create a search toolset for the bot from all the search tools.
@@ -450,49 +453,38 @@ def find_search_tool(bot: BotRequest, tool_name: str) -> SearchTool | None:
     )
 
 
-def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[str]:
+def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict]:
     formatted_results = []
 
     if tool_output["message"] != "Success" or "result" not in tool_output:
         return formatted_results
 
-    for i, result in enumerate(tool_output["result"], start=1):
-        entity = result["entity"]
-        metadata = entity["metadata"]
-
-        # Format the text, truncating if necessary
-        text = entity["text"][:500] + "..." if len(entity["text"]) > 500 else entity["text"]
-
-        # Select important metadata based on tool type
+    for result in tool_output["result"]:
+        entity = result.get("entity", result)
         if tool.method == SearchMethodEnum.courtlistener:
-            important_metadata = {
-                "Case Name": metadata.get("case_name", "N/A"),
-                "Date Filed": metadata.get("date_filed", "N/A"),
-                "Court": metadata.get("court_name", "N/A"),
-                "Author": metadata.get("author_name", "N/A"),
-                "Precedential Status": metadata.get("precedential_status", "N/A"),
-            }
-            title = metadata.get("case_name", "Unknown Opinion")
-        elif tool.method == SearchMethodEnum.dynamic_serpapi:
-            important_metadata = {
-                "URL": metadata.get("url", "N/A"),
-                "AI Summary": metadata.get("ai_summary", "N/A"),
-                "Page Number": metadata.get("page_number", "N/A"),
-            }
-            title = metadata.get("url", "Unknown URL")
+            entity_type = "opinion"
+            entity_id = str(entity["opinion_id"]) + "-" + str(entity["chunk_index"])
+        elif tool.method in (
+            SearchMethodEnum.dynamic_serpapi,
+            SearchMethodEnum.dynamic_courtroom5,
+        ):
+            entity_type = "url"
+            entity_id = entity["metadata"]["url"]
+        elif tool.method in (
+            SearchMethodEnum.courtroom5,
+            SearchMethodEnum.google,
+            SearchMethodEnum.serpapi,
+        ):
+            entity_type = "url"
+            entity_id = entity["link"]
         else:
-            important_metadata = {k: v for k, v in metadata.items() if v is not None}
-            title = "Unknown Source"
+            entity_type = "unknown"
+            entity_id = "unknown"
 
-        # Format the knowledge card
-        card = f"{i}. {title} (Distance: {result['distance']:.4f})\n"
-        card += "-" * 40 + "\n"
-        for key, value in important_metadata.items():
-            card += f"{key}: {value}\n"
-        card += "-" * 40 + "\n"
-        card += f"Text:\n{text}\n"
-        card += "=" * 40 + "\n"
-
-        formatted_results.append(card)
+        formatted_results.append({
+            "type": entity_type,
+            "entity": entity,
+            "id": entity_id,
+        })
 
     return formatted_results

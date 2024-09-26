@@ -122,7 +122,7 @@ def anthropic_tool(tool: VDBTool) -> dict:
     }
 
 
-def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
+def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
     """Run a tool on a vector database.
 
     Parameters
@@ -134,8 +134,8 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
 
     Returns
     -------
-    tuple[dict, list[str]]
-        response, sources
+    dict
+        The response from the tool
 
     """
     function_response = None
@@ -151,18 +151,8 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
                     k,
                     session_id=t.session_id,
                 )
-                # session data uses filenames
-                sources = [
-                    hit["entity"]["metadata"]["filename"]
-                    for hit in function_response["result"]
-                ] if "result" in function_response else []
             else:
                 function_response = query(collection_name, tool_query, k)
-                # other collections use urls
-                sources = [
-                    hit["entity"]["metadata"]["url"]
-                    for hit in function_response["result"]
-                ] if "result" in function_response else []
         case VDBMethodEnum.get_source:
             tool_source = function_args["source_id"]
             if collection_name == SESSION_DATA:
@@ -184,8 +174,7 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> tuple[dict, list[str]]:
                 # so just return the first instance
                 "metadata": res["result"][0]["metadata"],
             }
-            sources = [tool_source]
-    return function_response, sources
+    return function_response
 
 
 def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[VDBTool]:
@@ -270,55 +259,31 @@ def find_vdb_tool(bot: BotRequest, tool_name: str) -> VDBTool | None:
     )
 
 
-def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[str]:
+def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
     formatted_results = []
 
     if tool_output["message"] != "Success" or "result" not in tool_output:
         return formatted_results
 
-    for i, result in enumerate(tool_output["result"], start=1):
-        entity = result["entity"]
-        metadata = entity["metadata"]
-
-        # Format the text, truncating if necessary
-        text = entity["text"][:500] + "..." if len(entity["text"]) > 500 else entity["text"]
-
-        # Select important metadata based on tool type
+    for result in tool_output["result"]:
+        entity = result["entity"] if tool.method == VDBMethodEnum.query else result
         if tool.collection_name == courtlistener_collection:
-            important_metadata = {
-                "Case Name": metadata.get("case_name", "N/A"),
-                "Date Filed": metadata.get("date_filed", "N/A"),
-                "Court": metadata.get("court_name", "N/A"),
-                "Author": metadata.get("author_name", "N/A"),
-                "Precedential Status": metadata.get("precedential_status", "N/A"),
-            }
-            title = metadata.get("case_name", "Unknown Opinion")
+            entity_type = "opinion"
+            entity_id = result["opinion_id"] + "-" + result["chunk_index"]
         elif tool.collection_name == search_collection:
-            important_metadata = {
-                "URL": metadata.get("url", "N/A"),
-                "AI Summary": metadata.get("ai_summary", "N/A"),
-                "Page Number": metadata.get("page_number", "N/A"),
-            }
-            title = metadata.get("url", "Unknown URL")
+            entity_type = "url"
+            entity_id = result["metadata"]["url"]
         elif tool.collection_name == SESSION_DATA:
-            important_metadata = {
-                "Filename": metadata.get("filename", "N/A"),
-                "Page Number": metadata.get("page_number", "N/A"),
-            }
-            title = metadata.get("filename", "Unknown File")
+            entity_type = "file"
+            entity_id = result["metadata"]["filename"]
         else:
-            important_metadata = {k: v for k, v in metadata.items() if v is not None}
-            title = "Unknown Source"
+            entity_type = "unknown"
+            entity_id = "unknown"
 
-        # Format the knowledge card
-        card = f"{i}. {title} (Distance: {result['distance']:.4f})\n"
-        card += "-" * 40 + "\n"
-        for key, value in important_metadata.items():
-            card += f"{key}: {value}\n"
-        card += "-" * 40 + "\n"
-        card += f"Text:\n{text}\n"
-        card += "=" * 40 + "\n"
-
-        formatted_results.append(card)
+        formatted_results.append({
+            "type": entity_type,
+            "entity": entity,
+            "id": entity_id,
+        })
 
     return formatted_results

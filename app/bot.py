@@ -208,23 +208,24 @@ def openai_tools_stream(
                 "args":tool_call.function.arguments,
             }) + "\n"
             if vdb_tool:
-                tool_response, sources = run_vdb_tool(vdb_tool, function_args)
+                tool_response = run_vdb_tool(vdb_tool, function_args)
                 formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
             elif search_tool:
-                tool_response, sources = run_search_tool(search_tool, function_args)
-                formatted_results = format_search_tool_results(tool_response, search_tool)
+                tool_response = run_search_tool(search_tool, function_args)
+                formatted_results = format_search_tool_results(
+                    tool_response,
+                    search_tool,
+                )
             else:
                 tool_response = "error: unable to run tool"
-                sources = []
                 formatted_results = []
 
             yield json.dumps({
                 "type": "tool_result",
                 "name": function_name,
                 "results": formatted_results,
-                "sources": sources,
             }) + "\n"
-            all_sources += sources
+            all_sources += [res["id"] for res in formatted_results]
             # Step 4: send the info for each function call and function response to
             # the model
             messages.append({
