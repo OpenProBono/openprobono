@@ -48,7 +48,7 @@ def filtered_search(results: dict) -> dict:
 
 
 @observe()
-def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bot_id: str = "", tool_name: str = "") -> dict:
+def dynamic_serpapi_tool(qr: str, prf: str, tool: SearchTool, num_results: int = 5, k: int = 3) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters
@@ -72,6 +72,8 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
         result of the query on the embeddings uploaded to the search collection
 
     """
+    bot_id = tool.bot_id
+    tool_name = tool.name
     response = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
@@ -82,7 +84,7 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
                 print("Uploading site: " + result["link"])
-                upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
+                upload_site(search_collection, result["link"], tool)
         except Exception as error:
             print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
             print("The error was: " + str(error))
@@ -354,7 +356,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
-            function_response = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
+            function_response = dynamic_serpapi_tool(qr, prf, tool)
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:

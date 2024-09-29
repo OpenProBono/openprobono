@@ -271,25 +271,16 @@ def summarize_gemini_full(docs: list[str]) -> str:
     for text in docs:
         fulltext += text
         fulltext += "\n"
-    prompt = f"""Please provide a concise summary of the following text:
-
-    {fulltext}
-
-    Your summary should:
-    1. Capture the main ideas and key points
-    2. Be no more than 10% of the original text length
-    3. Be written in clear, coherent language
-    """
-
-    chat_model = ChatModelParams(EngineEnum.google, GoogleModelEnum.gemini_1_5_flash)
-    summary = chat_single_gemini(prompt, chat_model.model)
-    return summary
+    print("make chat model")
+    chat_model = ChatModelParams(engine=EngineEnum.google, model=GoogleModelEnum.gemini_1_5_flash)
+    print("after chat model")
+    return chat_single_gemini(SUMMARY_PROMPT.format(text=fulltext), chat_model.model)
 
 
 @observe(capture_input=False)
 def summarize(
     documents: list[str],
-    method: str = SummaryMethodEnum.gemini_full,
+    method: str = SummaryMethodEnum.stuff_reduce,
     chat_model: ChatModelParams | None = None,
     **kwargs: dict,
 ) -> str:
@@ -313,14 +304,13 @@ def summarize(
         The summarized text.
 
     """
-    if(method != SummaryMethodEnum.gemini_full):
-        if chat_model is None:
-            chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
-        langfuse_context.update_current_observation(
-            input={"method": method, "chat_model": chat_model},
-            metadata=kwargs,
-        )
-        msg = get_summary_message(documents, method, chat_model, **kwargs)
-        return chat_str([msg], chat_model, **kwargs)
-    else:
-        return summarize_gemini_full(documents)
+    # if(method != SummaryMethodEnum.gemini_full):
+    #     print("in method not gemini")
+    if chat_model is None:
+        chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
+    langfuse_context.update_current_observation(
+        input={"method": method, "chat_model": chat_model},
+        metadata=kwargs,
+    )
+    msg = get_summary_message(documents, method, chat_model, **kwargs)
+    return chat_str([msg], chat_model, **kwargs)
