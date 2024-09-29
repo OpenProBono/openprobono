@@ -21,11 +21,9 @@ from pymilvus import (
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
-    chunk_with_gemini,
     partition_uploadfile,
     quickstart_ocr,
     scrape,
-    scrape_with_gemini,
     scrape_with_links,
 )
 from app.models import EncoderParams, MilvusMetadataEnum, SearchTool
