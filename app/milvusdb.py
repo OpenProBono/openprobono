@@ -54,6 +54,9 @@ vdb_log.setLevel(logging.ERROR)
 vdb_log.addHandler(my_handler)
 
 
+# test env vars
+print(os.environ)
+
 # used to cache collection params from firebase
 COLLECTION_PARAMS = {}
 # for storing session data
