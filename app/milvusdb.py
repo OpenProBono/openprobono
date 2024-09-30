@@ -55,7 +55,7 @@ vdb_log.addHandler(my_handler)
 
 
 # test env vars
-print(os.environ["COMMIT_SHA"])
+print(os.environ)
 
 # used to cache collection params from firebase
 COLLECTION_PARAMS = {}
