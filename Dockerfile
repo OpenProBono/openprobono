@@ -2,6 +2,14 @@ FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1
 
+ARG COMMIT_SHA
+
+ENV COMMIT_SHA=$COMMIT_SHA
+
+ARG TAG_NAME
+
+ENV TAG_NAME=$TAG_NAME
+
 WORKDIR /api
 
 RUN apt-get update && apt-get install ffmpeg libsm6 libmagic1 libxext6 poppler-utils tesseract-ocr -y
