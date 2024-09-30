@@ -14,4 +14,6 @@ RUN python -m nltk.downloader -d /usr/local/share/nltk_data punkt punkt_tab aver
 
 COPY app/ /api/app
 
+COPY .git /api/app/.git
+
 CMD uvicorn app.main:api --port=8080 --host=0.0.0.0
