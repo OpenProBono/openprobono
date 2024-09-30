@@ -30,6 +30,7 @@ from app.db import (
     store_opinion_feedback,
     store_session_feedback,
 )
+from app.logger import setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
@@ -52,7 +53,6 @@ from app.models import (
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
-from app.logger import setup_logger
 
 logger = setup_logger()
 
