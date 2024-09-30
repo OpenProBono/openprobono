@@ -266,16 +266,16 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
         return formatted_results
 
     for result in tool_output["result"]:
-        entity = result["entity"] if tool.method == VDBMethodEnum.query else result
+        entity = result.get("entity", result)
         if tool.collection_name == courtlistener_collection:
             entity_type = "opinion"
-            entity_id = result["opinion_id"] + "-" + result["chunk_index"]
+            entity_id = entity["opinion_id"] + "-" + entity["chunk_index"]
         elif tool.collection_name == search_collection:
             entity_type = "url"
-            entity_id = result["metadata"]["url"]
+            entity_id = entity["metadata"]["url"]
         elif tool.collection_name == SESSION_DATA:
             entity_type = "file"
-            entity_id = result["metadata"]["filename"]
+            entity_id = entity["metadata"]["filename"]
         else:
             entity_type = "unknown"
             entity_id = "unknown"

@@ -37,7 +37,6 @@ def stream_openai_response(response: OpenAIStream):
     full_delta_dict_collection = []
     no_yield = False
     usage = None
-    is_new = True
     content = ""
     for chunk in response:
         if chunk.usage is not None:
@@ -55,16 +54,13 @@ def stream_openai_response(response: OpenAIStream):
                     yield json.dumps({
                         "type": "response",
                         "content": content,
-                        "is_new": is_new,
                     }) + "\n"
                     content = ""
-                is_new = False
 
     if content:
         yield json.dumps({
             "type": "response",
             "content": content,
-            "is_new": is_new,
         }) + "\n"
 
     tool_calls, current_dict = [], {}

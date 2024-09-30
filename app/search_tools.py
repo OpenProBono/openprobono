@@ -46,18 +46,18 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
-@observe(capture_output=False)
+@observe()
 def process_site(result: dict, bot_id: str, tool_name: str) -> None:
     try:
         if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
             print("Uploading site: " + result["link"])
-            upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
+            upload_site(search_collection, result, bot_id=bot_id, tool_name=tool_name)
     except Exception as error:
         print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
         print("The error was: " + str(error))
 
 
-@observe()
+@observe(capture_output=False)
 def dynamic_serpapi_tool(
     qr: str,
     prf: str,

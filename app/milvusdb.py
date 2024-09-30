@@ -704,7 +704,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
 @observe(capture_output=False)
 def upload_site(
     collection_name: str,
-    url: str,
+    search_result: dict,
     bot_id: str,
     tool_name: str,
     max_chars: int = 10000,
@@ -717,8 +717,8 @@ def upload_site(
     ----------
     collection_name : str
         Where the chunks will be uploaded.
-    url : str
-        The site to scrape.
+    search_result : dict
+        The search result of the site to scrape and upload.
     bot_id : str
         The ID of the bot using this tool
     tool_name : str
@@ -736,6 +736,7 @@ def upload_site(
         With a `message` indicating success or failure
 
     """
+    url = search_result["link"]
     elements = scrape(url)
     if len(elements) == 0:
         return {"message": f"Failure: no elements found at {url}"}
@@ -752,6 +753,9 @@ def upload_site(
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
         metadata["bot_and_tool_id"] = [bot_id + tool_name]
+        metadata["title"] = search_result["title"]
+        metadata["source"] = search_result["source"]
+        metadata["favicon"] = search_result["favicon"]
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],
@@ -808,6 +812,7 @@ def session_upload_ocr(
     return upload_data(SESSION_DATA, data)
 
 
+@observe(capture_input=False)
 def file_upload(
     file: UploadFile,
     session_id: str,
@@ -824,6 +829,8 @@ def file_upload(
         The session associated with the file.
     summary: str, optional
         A summary of the file written by the user, by default None.
+    collection_name : str, optional
+        The collection where the file will be stored, by default SessionData.
 
     Returns
     -------
@@ -831,6 +838,8 @@ def file_upload(
         With a `message` indicating success or failure
 
     """
+    # tracing
+    langfuse_context.update_current_trace(session_id=session_id)
     # extract text
     elements = partition_uploadfile(file)
     # chunk text

@@ -543,9 +543,12 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
 
 
 @api.post("/upload_files", tags=["User Upload"])
-def upload_files(files: list[UploadFile],
-    session_id: str, summaries: list[str] | None = None,
-    api_key: str = Security(api_key_auth)) -> dict:
+def upload_files(
+    files: list[UploadFile],
+    session_id: str,
+    summaries: list[str] | None = None,
+    api_key: str = Security(api_key_auth),
+) -> dict:
     """Upload multiple files by user.
 
     Parameters
