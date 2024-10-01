@@ -271,9 +271,7 @@ def summarize_gemini_full(docs: list[str]) -> str:
     for text in docs:
         fulltext += text
         fulltext += "\n"
-    print("make chat model")
     chat_model = ChatModelParams(engine=EngineEnum.google, model=GoogleModelEnum.gemini_1_5_flash)
-    print("after chat model")
     return chat_single_gemini(SUMMARY_PROMPT.format(text=fulltext), chat_model.model)
 
 

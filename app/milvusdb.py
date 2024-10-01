@@ -26,6 +26,7 @@ from app.loaders import (
     scrape,
     scrape_with_links,
 )
+from app.logger import setup_logger
 from app.models import EncoderParams, MilvusMetadataEnum, SearchTool
 from app.splitters import chunk_elements_by_title, chunk_str
 from app.summarization import summarize
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from fastapi import UploadFile
     from pymilvus.orm.iterator import QueryIterator
 
+logger = setup_logger()
 
 connection_args = loads(os.environ["Milvus"])  # noqa: SIM112
 # test connection to db, also needed to use utility functions
@@ -674,7 +676,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str, search_t
         "text": texts[i],
     } for i in range(len(texts))]
     upload_data(collection_name, data)
-    print("new_urls: ", new_urls)
+    logger.info("new_urls: ", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
         if url == cur_url[:len(url)]:
@@ -695,7 +697,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str, search_t
             } for i in range(len(texts))]
             upload_data(collection_name, data)
             prev_elements = cur_elements
-    print(urls)
+    logger.info(urls)
     return urls
 
 
@@ -741,11 +743,7 @@ def upload_site(
         overlap,
     )
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
-    print("here is summary start")
     ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
-    print("summary")
-    print(ai_summary)
-    print("here is summary done")
     bot_id = search_tool.bot_id
     tool_name = search_tool.name
     for metadata in metadatas:

@@ -15,6 +15,7 @@ from openai.types.chat import (
 )
 
 from app.chat_models import chat, chat_stream
+from app.logger import setup_logger
 from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
 from app.prompts import MAX_NUM_TOOLS
@@ -27,6 +28,8 @@ from app.vdb_tools import (
 )
 
 openai.log = "debug"
+
+logger = setup_logger()
 
 def stream_openai_response(response: OpenAIStream):
     full_delta_dict_collection = []
@@ -305,7 +308,7 @@ def openai_tools(
         messages.append(response_message.model_dump())
         # TODO: run tool calls in parallel
         for tool_call in tool_calls:
-            print("RUN TOOL")
+            logger.info("RUN TOOL")
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
             vdb_tool = find_vdb_tool(bot, function_name)

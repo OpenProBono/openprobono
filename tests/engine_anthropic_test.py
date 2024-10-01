@@ -3,6 +3,7 @@ import os
 from fastapi.testclient import TestClient
 
 from app import main
+from app.logger import setup_logger
 from app.models import (
     AnthropicModelEnum,
     BotRequest,
@@ -11,6 +12,8 @@ from app.models import (
     InitializeSessionChat,
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
+
+logger = setup_logger()
 
 client = TestClient(main.api, headers={"X-API-KEY": os.environ["OPB_TEST_API_KEY"]})
 
@@ -54,7 +57,7 @@ def test_courtroom5_anthropic_bot() -> None:
     assert "output" in response_json
     assert isinstance(response_json["output"], str)
     assert "session_id" in response_json
-    print(response_json["session_id"])
+    logger.info(response_json["session_id"])
     assert isinstance(response_json["session_id"], str)
     assert len(response_json["session_id"]) == 36
 
@@ -96,6 +99,6 @@ def test_courtlistener_anthropic_bot() -> None:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
+        logger.info(response_json["session_id"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36

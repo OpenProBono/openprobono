@@ -3,7 +3,10 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from app.logger import setup_logger
 import app.main as main
+
+logger = setup_logger()
 
 client = TestClient(main.api, headers={"X-API-KEY": os.environ["OPB_TEST_API_KEY"]})
 
@@ -44,7 +47,7 @@ class ApiTests(unittest.TestCase):
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
         response_json = response.json()
-        print(response_json)
+        logger.info(response_json)
         assert response_json["message"] == "Success"
         assert "bot_id" in response_json
         assert isinstance(response_json["bot_id"], str)
@@ -71,7 +74,7 @@ class ApiTests(unittest.TestCase):
             "/opinion_feedback", json=test_opinion_feedback.model_dump(),
         )
         response_json = response.json()
-        print(response_json)
+        logger.info(response_json)
         assert response_json["message"] == "Success"
 
 

@@ -8,6 +8,7 @@ from langfuse.decorators import observe
 from serpapi.google_search import GoogleSearch
 
 from app.courtlistener import courtlistener_query, courtlistener_tool_args
+from app.logger import setup_logger
 from app.milvusdb import query, source_exists, upload_site
 from app.models import (
     BotRequest,
@@ -17,6 +18,8 @@ from app.models import (
     SearchTool,
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
+
+logger = setup_logger()
 
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
@@ -82,11 +85,10 @@ def dynamic_serpapi_tool(qr: str, prf: str, tool: SearchTool, num_results: int =
     def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                print("Uploading site: " + result["link"])
+                logger.info("Uploading site: " + result["link"])
                 upload_site(search_collection, result["link"], tool)
         except Exception as error:
-            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-            print("The error was: " + str(error))
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
 
     with ThreadPoolExecutor() as executor:
         futures = []
@@ -211,11 +213,10 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
     def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                print("Uploading site: " + result["link"])
+                logger.info("Uploading site: " + result["link"])
                 upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
         except Exception as error:
-            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-            print("The error was: " + str(error))
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
 
     for result in response["items"]:
         process_site(result)

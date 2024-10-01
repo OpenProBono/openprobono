@@ -405,8 +405,6 @@ def chat_gemini(
 
     """
     messages = [{"role":msg["role"], "parts":[msg["content"]]} for msg in messages]
-    print(os.environ["GEMINI_API_KEY"])
-    print("api key")
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
     # Create the model
@@ -452,8 +450,6 @@ def chat_single_gemini(
         The response from the LLM
 
     """
-    print(os.environ["GEMINI_API_KEY"])
-    print("api key")
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
     # Create the model
