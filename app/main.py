@@ -15,6 +15,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
+from langfuse.decorators import langfuse_context
 
 from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
 from app.db import (
@@ -30,7 +31,7 @@ from app.db import (
     store_opinion_feedback,
     store_session_feedback,
 )
-from app.logger import setup_logger
+from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
@@ -54,6 +55,7 @@ from app.models import (
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 
+langfuse_context.configure(release=get_git_hash())
 logger = setup_logger()
 
 X_API_KEY = APIKeyHeader(name="X-API-Key")
