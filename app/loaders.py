@@ -95,19 +95,28 @@ def scrape(site: str) -> list[Element]:
         urllib3.exceptions.ConnectTimeoutError,
     ) as timeout_err:
         print(f"Timeout error, {site}, ", timeout_err)
-        langfuse_context.update_current_observation(error=timeout_err)
+        langfuse_context.update_current_observation(
+            level="ERROR",
+            status_message=timeout_err,
+        )
     except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
         print(f"SSL error, {site}, ", ssl_err)
-        langfuse_context.update_current_observation(error=ssl_err)
+        langfuse_context.update_current_observation(
+            level="ERROR",
+            status_message=ssl_err,
+        )
     except (
         requests.exceptions.ConnectionError,
         urllib3.exceptions.ProtocolError,
     ) as conn_err:
         print(f"Connection error, {site}, ", conn_err)
-        langfuse_context.update_current_observation(error=conn_err)
+        langfuse_context.update_current_observation(
+            level="ERROR",
+            status_message=conn_err,
+        )
     except Exception as error:
         print(f"Unexpected error, {site}, ", error)
-        langfuse_context.update_current_observation(error=error)
+        langfuse_context.update_current_observation(level="ERROR", status_message=error)
 
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
