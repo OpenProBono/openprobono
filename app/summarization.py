@@ -1,6 +1,9 @@
 """Summarization functions."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
+
 from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import chat_str
@@ -73,11 +76,22 @@ def summarize_stuff_reduce_msg(
     if len(msgs) == 1:
         # the documents fit into a single message, return it
         return msgs[0]
-    summaries = []
-    # get the document group summaries
-    for msg in msgs:
-        summary = chat_str([msg], chat_model, **kwargs)
-        summaries.append(summary)
+
+    # get the document group summaries concurrently
+    with ThreadPoolExecutor() as executor:
+        futures = {}
+        for i, msg in enumerate(msgs):
+            ctx = copy_context()
+            def task(m=msg, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(chat_str, [m], chat_model, **kwargs)
+            futures[executor.submit(task)] = i
+
+        summaries = [None] * len(msgs)
+        for future in as_completed(futures):
+            index = futures[future]
+            summary = future.result()
+            summaries[index] = summary
+
     # return a combined summary
     concatted_summaries = "\n\n".join(summaries)
     return {

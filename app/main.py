@@ -15,7 +15,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 
 from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
 from app.db import (
@@ -117,11 +117,20 @@ async def process_chat_stream(r: ChatRequest, message: str):
             case _:
                 yield Exception("Invalid bot engine for streaming")
 
-@observe()
+@observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
+    # tracing
+    langfuse_context.update_current_trace(
+        input=message,
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
+    # check if bot exists
     bot = load_bot(r.bot_id)
     if bot is None:
-        return {"message": "Failure: No bot found with bot id: " + r.bot_id}
+        error = "Failure: No bot found with bot id: " + r.bot_id
+        langfuse_context.update_current_observation(level="ERROR", status_message=error)
+        return {"message": error}
 
     # set conversation history
     if not r.history:
@@ -143,18 +152,25 @@ def process_chat(r: ChatRequest, message: str) -> dict:
     #  - only 1 user message with the same content as the message here
     cached_response = get_cached_response(r.bot_id, r.api_key, message)
     if cached_response is not None:
-        return {"message": "Success", "output": cached_response, "bot_id": r.bot_id}
-
-    match bot.chat_model.engine:
-        case EngineEnum.openai:
-            output = openai_bot(r, bot)
-        case EngineEnum.anthropic:
-            output = anthropic_bot(r, bot)
-        case _:
-            return {"message": f"Failure: invalid bot engine {bot.chat_model.engine}"}
+        output = cached_response
+    else:
+        match bot.chat_model.engine:
+            case EngineEnum.openai:
+                output = openai_bot(r, bot)
+            case EngineEnum.anthropic:
+                output = anthropic_bot(r, bot)
+            case _:
+                error = f"Failure: invalid bot engine {bot.chat_model.engine}"
+                langfuse_context.update_current_observation(
+                    level="ERROR",
+                    status_message=error,
+                )
+                return {"message": error}
 
     # store conversation (and also log the api_key)
     store_conversation(r, output)
+    # tracing
+    langfuse_context.update_current_trace(output=output)
     # return the chat and the bot_id
     return {"message": "Success", "output": output, "bot_id": r.bot_id}
 

@@ -281,10 +281,7 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
         None,
     )
     langfuse_context.update_current_observation(input=last_user_msg["content"])
-    langfuse_context.update_current_trace(
-        session_id=r.session_id,
-        metadata={"bot_id": r.bot_id} | kwargs,
-    )
+    langfuse_context.update_current_trace(metadata={"bot_id": r.bot_id} | kwargs)
 
     # response is a ChatCompletion object
     response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
@@ -390,10 +387,7 @@ def anthropic_bot(r: ChatRequest, bot: BotRequest) -> str:
         None,
     )
     langfuse_context.update_current_observation(input=last_user_msg["content"])
-    langfuse_context.update_current_trace(
-        session_id=r.session_id,
-        metadata={"bot_id": r.bot_id} | kwargs,
-    )
+    langfuse_context.update_current_trace(metadata={"bot_id": r.bot_id} | kwargs)
 
     # Step 1: send the conversation and available functions to the model
     response = chat(messages, bot.chat_model, **kwargs)
