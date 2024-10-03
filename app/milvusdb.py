@@ -330,7 +330,8 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
     return fuzzy_keywords_str.replace("'", "\\'")
 
 
-def source_exists(collection_name: str, url: str, bot_id: str, tool_name:str) -> bool:
+@observe()
+def source_exists(collection_name: str, url: str, bot_id: str, tool_name: str) -> bool:
     """Check if a url source exists in a collection, for a specific bot and tool.
 
     Parameters

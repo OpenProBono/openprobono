@@ -5,7 +5,7 @@ from contextvars import copy_context
 from json import tool
 
 import requests
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 from serpapi.google_search import GoogleSearch
 
 from app.courtlistener import courtlistener_query, courtlistener_tool_args
@@ -47,7 +47,7 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
-@observe()
+@observe(capture_output=False)
 def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bot_id: str = "", tool_name: str = "") -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
@@ -98,7 +98,11 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
         for future in as_completed(futures):
             _ = future.result()
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
-    return query(search_collection, qr, k=k, expr=filter_expr)
+    res = query(search_collection, qr, k=k, expr=filter_expr)
+    if "result" in res:
+        pks = [str(hit["id"]) for hit in res["result"]]
+        langfuse_context.update_current_observation(output=pks)
+    return res
 
 
 @observe()

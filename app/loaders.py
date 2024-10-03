@@ -79,16 +79,16 @@ def scrape(site: str) -> list[Element]:
         elif site.endswith(".rtf"):
             ensure_pandoc_installed()
             elements = partition_rtf(file=io.BytesIO(r.content))
-        else:
-            # try beautiful soup first
+        elif b"<!DOCTYPE" in r.content[:100] or b"<html" in r.content[:100]:
+            # it's HTML, use BeautifulSoup
             soup = BeautifulSoup(r.content, "html.parser")
             e = Element(metadata=ElementMetadata(url=site))
             e.text = soup.get_text()
-            if not e.text:
-                # fall back to unstructured
-                elements = partition(file=io.BytesIO(r.content))
-            else:
-                elements.append(e)
+            elements.append(e)
+        else:
+            # fall back to unstructured
+            elements = partition(file=io.BytesIO(r.content))
+
 
     except (
         requests.exceptions.Timeout,
