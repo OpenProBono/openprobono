@@ -129,13 +129,9 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
         (m for m in r.history[::-1] if m["role"] == "user"),
         None,
     )
-    langfuse_context.update_current_observation(input=last_user_msg["content"])
-
     kwargs = {"tools": toolset}
-    langfuse_context.update_current_trace(
-        session_id=r.session_id,
-        metadata={"bot_id": r.bot_id} | kwargs,
-    )
+    langfuse_context.update_current_observation(input=last_user_msg["content"])
+    langfuse_context.update_current_trace(metadata={"bot_id": r.bot_id} | kwargs)
 
     # Step 1: send initial message to the model
     # response is a Stream object
@@ -199,9 +195,10 @@ def openai_tools_stream(
             # Note: the JSON response may not always be valid;
             # be sure to handle errors
             yield json.dumps({
-                "type":"tool_call",
-                "name":function_name,
-                "args":tool_call.function.arguments,
+                "type": "tool_call",
+                "index": tools_used,
+                "name": function_name,
+                "args": tool_call.function.arguments,
             }) + "\n"
             if vdb_tool:
                 tool_response = run_vdb_tool(vdb_tool, function_args)
@@ -218,6 +215,7 @@ def openai_tools_stream(
 
             yield json.dumps({
                 "type": "tool_result",
+                "index": tools_used,
                 "name": function_name,
                 "results": formatted_results,
             }) + "\n"

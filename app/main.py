@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Annotated
 
 from fastapi import (
@@ -91,31 +92,49 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
     return x_api_key
 
 
-
+@observe(capture_input=False)
 async def process_chat_stream(r: ChatRequest, message: str):
+    # tracing
+    langfuse_context.update_current_trace(
+        input=message,
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
     bot = load_bot(r.bot_id)
     if bot is None:
-        yield "An error occurred."
-        return
+        error = "Failure: No bot found with bot id: " + r.bot_id
+        langfuse_context.update_current_observation(level="ERROR", status_message=error)
+        yield json.dumps({
+            "type": "response",
+            "content": error,
+        }) + "\n"
     else:
         if not r.history:
             r.history = [{"role": "system", "content": bot.system_prompt}]
         if message:
             r.history.append({"role": "user", "content": message})
 
-        match bot.chat_model.engine:
-            case EngineEnum.openai:
-                for chunk in openai_bot_stream(r, bot):
-                    yield chunk
-                    # Add a small delay to avoid blocking the event loop
-                    await asyncio.sleep(0)
-            case EngineEnum.anthropic:
-                for chunk in anthropic_bot_stream(r, bot):
-                    yield chunk
-                    # Add a small delay to avoid blocking the event loop
-                    await asyncio.sleep(0)
-            case _:
-                yield Exception("Invalid bot engine for streaming")
+            match bot.chat_model.engine:
+                case EngineEnum.openai:
+                    for chunk in openai_bot_stream(r, bot):
+                        yield chunk
+                        # Add a small delay to avoid blocking the event loop
+                        await asyncio.sleep(0)
+                case EngineEnum.anthropic:
+                    for chunk in anthropic_bot_stream(r, bot):
+                        yield chunk
+                        # Add a small delay to avoid blocking the event loop
+                        await asyncio.sleep(0)
+                case _:
+                    error = "Failure: Invalid bot engine for streaming"
+                    langfuse_context.update_current_observation(
+                        level="ERROR",
+                        status_message=error,
+                    )
+                    yield json.dumps({
+                        "type": "response",
+                        "content": error,
+                    }) + "\n"
 
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
