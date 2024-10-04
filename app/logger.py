@@ -1,3 +1,4 @@
+"""Set up logging formatter and functions for returns git commit hash and tags."""
 import logging
 import subprocess
 
