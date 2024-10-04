@@ -2,13 +2,13 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from json import tool
 
 import requests
 from langfuse.decorators import langfuse_context, observe
 from serpapi.google_search import GoogleSearch
 
 from app.courtlistener import courtlistener_query, courtlistener_tool_args
+from app.logger import setup_logger
 from app.milvusdb import query, source_exists, upload_site
 from app.models import (
     BotRequest,
@@ -19,11 +19,13 @@ from app.models import (
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
 
+logger = setup_logger()
+
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
 COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
-search_collection = "search_collection_vj1"
+search_collection = "search_collection_gemini"
 
 def filtered_search(results: dict) -> dict:
     """Filter search results returned by serpapi to only include relevant results.
@@ -46,9 +48,8 @@ def filtered_search(results: dict) -> dict:
         new_dict["organic_results"] = results["organic_results"]
     return new_dict
 
-
 @observe(capture_output=False)
-def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bot_id: str = "", tool_name: str = "") -> dict:
+def dynamic_serpapi_tool(qr: str, prf: str, tool: SearchTool, num_results: int = 5, k: int = 3) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
     Parameters
@@ -72,6 +73,8 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
         result of the query on the embeddings uploaded to the search collection
 
     """
+    bot_id = tool.bot_id
+    tool_name = tool.name
     response = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
@@ -81,11 +84,10 @@ def dynamic_serpapi_tool(qr: str, prf: str, num_results: int = 5, k: int = 3, bo
     def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                print("Uploading site: " + result["link"])
-                upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
+                logger.info("Uploading site: " + result["link"])
+                upload_site(search_collection, result["link"], tool)
         except Exception as error:
-            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-            print("The error was: " + str(error))
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
 
     with ThreadPoolExecutor() as executor:
         futures = []
@@ -214,11 +216,10 @@ def dynamic_courtroom5_search_tool(qr: str, prf: str="", bot_id: str = "", tool_
     def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                print("Uploading site: " + result["link"])
+                logger.info("Uploading site: " + result["link"])
                 upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
         except Exception as error:
-            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-            print("The error was: " + str(error))
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
 
     for result in response["items"]:
         process_site(result)
@@ -358,7 +359,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
-            function_response = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
+            function_response = dynamic_serpapi_tool(qr, prf, tool)
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:

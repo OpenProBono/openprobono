@@ -28,7 +28,7 @@ from app.models import (
 # 1076cca8-a1fa-415a-b5f8-c11da178d224
 
 # which version of db we are using
-VERSION = "_vj1"
+DB_VERSION = "_vj1"
 BOT_COLLECTION = "bots"
 MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
@@ -100,9 +100,9 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
     t = firestore.SERVER_TIMESTAMP
     data["timestamp"] = t
 
-    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(data)
+    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(data)
 
-    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
+    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(
         {"last_message_timestamp": t}, merge=True)
 
     return True
@@ -121,7 +121,7 @@ def store_session_feedback(r: SessionFeedback) -> bool:
        True if successful, False otherwise
 
     """
-    db.collection(CONVERSATION_COLLECTION + VERSION).document(r.session_id).set(
+    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(
         {"feedback": r.feedback_text}, merge=True)
     return True
 
@@ -166,7 +166,7 @@ def set_session_to_bot(session_id: str, bot_id: str) -> bool:
         bool: True if successful, False otherwise
 
     """
-    db.collection(CONVERSATION_COLLECTION + VERSION).document(session_id).set(
+    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(session_id).set(
         {"bot_id": bot_id}, merge=True)
     return True
 
@@ -184,7 +184,7 @@ def load_session(r: ChatBySession) -> ChatRequest:
 
     """
     session_data = (
-        db.collection(CONVERSATION_COLLECTION + VERSION)
+        db.collection(CONVERSATION_COLLECTION + DB_VERSION)
         .document(r.session_id).get()
     )
 
@@ -212,7 +212,7 @@ def fetch_session(r: FetchSession) -> ChatRequest:
 
     """
     session_data = (
-        db.collection(CONVERSATION_COLLECTION + VERSION)
+        db.collection(CONVERSATION_COLLECTION + DB_VERSION)
         .document(r.session_id).get()
     ) #loading session data from db
 
@@ -243,7 +243,7 @@ def store_bot(r: BotRequest, bot_id: str) -> bool:
     """
     data = r.model_dump()
     data["timestamp"] = firestore.SERVER_TIMESTAMP
-    db.collection(BOT_COLLECTION + VERSION).document(bot_id).set(data)
+    db.collection(BOT_COLLECTION + DB_VERSION).document(bot_id).set(data)
 
 
 def load_bot(bot_id: str) -> BotRequest:
@@ -260,7 +260,7 @@ def load_bot(bot_id: str) -> BotRequest:
         The bot object.
 
     """
-    bot = db.collection(BOT_COLLECTION + VERSION).document(bot_id).get()
+    bot = db.collection(BOT_COLLECTION + DB_VERSION).document(bot_id).get()
     if bot.exists:
         return BotRequest(**bot.to_dict())
 
@@ -280,7 +280,7 @@ def browse_bots(api_key: str) -> dict:
         the bots, indexed by bot id
 
     """
-    bot_ref = db.collection(BOT_COLLECTION + VERSION)
+    bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
     query = bot_ref.where(filter=FieldFilter("public", "==", True))
     data = query.get()
     data_dict = {}

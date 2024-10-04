@@ -26,7 +26,8 @@ from app.loaders import (
     scrape,
     scrape_with_links,
 )
-from app.models import EncoderParams, MilvusMetadataEnum
+from app.logger import setup_logger
+from app.models import EncoderParams, MilvusMetadataEnum, SearchTool
 from app.splitters import chunk_elements_by_title, chunk_str
 from app.summarization import summarize
 
@@ -34,8 +35,9 @@ if TYPE_CHECKING:
     from fastapi import UploadFile
     from pymilvus.orm.iterator import QueryIterator
 
+logger = setup_logger()
 
-connection_args = loads(os.environ["Milvus"])
+connection_args = loads(os.environ["Milvus"])  # noqa: SIM112
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 
@@ -659,12 +661,12 @@ def query_iterator(
 
 # application level features
 
-def crawl_upload_site(collection_name: str, description: str, url: str) -> list[str]:
+def crawl_upload_site(collection_name: str, description: str, url: str, search_tool: SearchTool) -> list[str]:
     create_collection(collection_name, description=description)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
     texts, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
-    ai_summary = summarize(texts)
+    ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
     encoder = load_vdb_param(collection_name, "encoder")
@@ -675,7 +677,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
         "text": texts[i],
     } for i in range(len(texts))]
     upload_data(collection_name, data)
-    print("new_urls: ", new_urls)
+    logger.info("new_urls: ", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
         if url == cur_url[:len(url)]:
@@ -685,7 +687,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
                 element for element in cur_elements if element not in prev_elements
             ]
             strs, metadatas = chunk_elements_by_title(new_elements, 3000, 1000, 300)
-            ai_summary = summarize(strs)
+            ai_summary = summarize(strs, search_tool.summary_method, search_tool.chat_model)
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
             vectors = embed_strs(strs, encoder)
@@ -696,7 +698,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
             } for i in range(len(texts))]
             upload_data(collection_name, data)
             prev_elements = cur_elements
-    print(urls)
+    logger.info(urls)
     return urls
 
 
@@ -704,8 +706,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str) -> list[
 def upload_site(
     collection_name: str,
     url: str,
-    bot_id: str,
-    tool_name: str,
+    search_tool: SearchTool,
     max_chars: int = 10000,
     new_after_n_chars: int = 2500,
     overlap: int = 500,
@@ -718,10 +719,8 @@ def upload_site(
         Where the chunks will be uploaded.
     url : str
         The site to scrape.
-    bot_id : str
-        The ID of the bot using this tool
-    tool_name : str
-        The name of the search tool
+    tool: SearchTool
+        The search tool which this function is being used for
     max_chars : int, optional
         Maximum characters per chunk, by default 10000
     new_after_n_chars : int, optional
@@ -745,7 +744,9 @@ def upload_site(
         overlap,
     )
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
-    ai_summary = summarize(texts)
+    ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
+    bot_id = search_tool.bot_id
+    tool_name = search_tool.name
     for metadata in metadatas:
         metadata["timestamp"] = str(time.time())
         metadata["url"] = url

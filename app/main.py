@@ -32,6 +32,7 @@ from app.db import (
     store_opinion_feedback,
     store_session_feedback,
 )
+from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
@@ -55,16 +56,8 @@ from app.models import (
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 
-# this is to ensure tracing with langfuse
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
-#     # Operation on startup
-
-#     yield  # wait until shutdown
-
-#     # Flush all events to be sent to Langfuse on shutdown and
-#     # terminate all Threads gracefully. This operation is blocking.
-#     langfuse.flush()
+langfuse_context.configure(release=get_git_hash())
+logger = setup_logger()
 
 X_API_KEY = APIKeyHeader(name="X-API-Key")
 
@@ -551,7 +544,7 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
         Success or failure message.
 
     """
-    print(f"api_key {api_key} uploading file")
+    logger.info(f"api_key {api_key} uploading file")
     try:
         return file_upload(file, session_id, summary)
     except Exception as error:
@@ -579,7 +572,7 @@ def upload_files(files: list[UploadFile],
         Success or failure message.
 
     """
-    print(f"api_key {api_key} uploading files")
+    logger.info(f"api_key {api_key} uploading files")
     if not summaries:
         summaries = [None] * len(files)
     elif len(files) != len(summaries):
@@ -607,7 +600,7 @@ def vectordb_upload_ocr(file: UploadFile,
         session_id: str, summary: str | None = None,
         api_key: str = Security(api_key_auth)) -> dict:
     """Upload a file by user and use OCR to extract info."""
-    print(f"api_key {api_key} uploading file with OCR")
+    logger.info(f"api_key {api_key} uploading file with OCR")
     return session_upload_ocr(file, session_id, summary if summary else None)
 
 
@@ -625,7 +618,7 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
         api key
 
     """
-    print(f"api_key {api_key} deleting file {filename}")
+    logger.info(f"api_key {api_key} deleting file {filename}")
     return delete_expr(
         SESSION_DATA,
         f"metadata['source']=='{filename}' and session_id=='{session_id}'",
@@ -651,7 +644,7 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
         Success message with number of files deleted.
 
     """
-    print(f"api_key {api_key} deleting files")
+    logger.info(f"api_key {api_key} deleting files")
     for filename in filenames:
         delete_file(filename, session_id)
     return {"message": f"Success: deleted {len(filenames)} files"}
@@ -674,7 +667,7 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
         Success message with list of filenames.
 
     """
-    print(f"api_key {api_key} getting session files for session {session_id}")
+    logger.info(f"api_key {api_key} getting session files for session {session_id}")
 
     files = fetch_session_data_files(session_id=session_id)
     return {"message": f"Success: found {len(files)} files", "result": files}
@@ -694,7 +687,7 @@ def delete_session_files(session_id: str, api_key: str = Security(api_key_auth))
     _type_
         _description_
     """
-    print(f"api_key {api_key} deleting session files for session {session_id}")
+    logger.info(f"api_key {api_key} deleting session files for session {session_id}")
     return delete_expr(SESSION_DATA, f'metadata["session_id"] in ["{session_id}"]')
 
 

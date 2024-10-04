@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from app import main
+from app.logger import setup_logger
 from app.models import (
     BotRequest,
     ChatBySession,
@@ -16,6 +17,7 @@ from app.models import (
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
 
+logger = setup_logger()
 client = TestClient(main.api, headers={"X-API-KEY": os.environ["OPB_TEST_API_KEY"]})
 
 class TestApi:
@@ -40,7 +42,7 @@ class TestApi:
         assert response_json["message"] == "Success"
         assert "bot_id" in response_json
         assert "output" in response_json
-        print(response_json["output"])
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -80,7 +82,7 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
+        logger.info(response_json["session_id"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -119,7 +121,7 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
+        logger.info(response_json["session_id"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -167,9 +169,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -215,9 +217,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -263,9 +265,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -311,9 +313,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -359,9 +361,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -407,9 +409,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -429,9 +431,9 @@ class TestApi:
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -445,16 +447,16 @@ class TestApi:
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
         response_json = response.json()
-        print(response_json)
+        logger.info(response_json)
         assert response_json["message"] == "Success"
         assert "bot_id" in response_json
         assert isinstance(response_json["bot_id"], str)
         assert "output" in response_json
         assert isinstance(response_json["output"], str)
         assert "session_id" in response_json
-        print(response_json["session_id"])
-        print("---- OUTPUT ----")
-        print(response_json["output"])
+        logger.info(response_json["session_id"])
+        logger.info("---- OUTPUT ----")
+        logger.info(response_json["output"])
         assert isinstance(response_json["session_id"], str)
         assert len(response_json["session_id"]) == 36
 
@@ -471,11 +473,11 @@ class TestApi:
     #         bot_id=bot_id,
     #         message="what is the rule in Florida related to designating an email address for service in litigation?",
     #     )
-    #     print(test_initialize_session.model_dump())
+    #     logger.info(test_initialize_session.model_dump())
     #     response = client.post(
     #         "/initialize_session_chat_stream", json=test_initialize_session.model_dump(),
     #     )
-    #     print(response)
+    #     logger.info(response)
 
 
     def test_multiple_tool_calls(self):
@@ -488,7 +490,7 @@ class TestApi:
             "/initialize_session_chat", json=test_initialize_session.model_dump(),
         )
         response_json = response.json()
-        print(response_json)
+        logger.info(response_json)
         assert response_json["message"] == "Success"
         assert "bot_id" in response_json
         assert isinstance(response_json["bot_id"], str)
@@ -513,6 +515,6 @@ class TestApi:
         for chunk in response.iter_text(chunk_size=1024):
             if chunk:
                 accumulated_response += chunk
-        print(accumulated_response)
+        logger.info(accumulated_response)
         assert accumulated_response, "Response should not be empty"
         #this only tests that it didnt fail

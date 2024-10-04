@@ -1,6 +1,7 @@
 """Tests for bot methods."""
 
 from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
+from app.logger import setup_logger
 from app.models import (
     AnthropicModelEnum,
     BotRequest,
@@ -10,6 +11,7 @@ from app.models import (
     OpenAIModelEnum,
 )
 
+logger = setup_logger()
 
 def test_openai_bot() -> None:
     search_tool = {
@@ -46,7 +48,7 @@ def test_openai_bot_stream() -> None:
     }
     cr = ChatRequest(history=[sys_msg, user_msg], bot_id = "")
     for chunk in openai_bot_stream(cr, bot):
-        print(chunk, end="", flush=True)
+        logger.info(chunk, end="", flush=True)
 
 
 def test_anthropic_bot() -> None:
@@ -89,4 +91,4 @@ def test_anthropic_bot_stream() -> None:
     }
     cr = ChatRequest(history=[sys_msg, user_msg], bot_id = "")
     for chunk in anthropic_bot_stream(cr, bot):
-        print(chunk, end="", flush=True)
+        logger.info(chunk, end="", flush=True)
