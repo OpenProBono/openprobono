@@ -15,5 +15,5 @@ def test_hi_chat_single_gemini() -> None:
 
 def test_chat_gemini() -> None:
    chatmodel = ChatModelParams(engine=EngineEnum.google, model=GoogleModelEnum.gemini_1_5_flash)
-   msg = "Hi"
+   msg = [{"role":"user", "content":"Hi"}]
    output = (chat_gemini(msg, chatmodel.model))

@@ -435,7 +435,7 @@ def get_cached_response(bot_id: str, api_key: str, message: str) -> str | None:
         A cached LLM response, if it exists
 
     """
-    sessions = db.collection(CONVERSATION_COLLECTION + VERSION)
+    sessions = db.collection(CONVERSATION_COLLECTION + DB_VERSION)
     matched_sessions = (
         sessions
         .where(filter=FieldFilter("api_key", "==", api_key))

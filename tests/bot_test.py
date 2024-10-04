@@ -48,7 +48,7 @@ def test_openai_bot_stream() -> None:
     }
     cr = ChatRequest(history=[sys_msg, user_msg], bot_id = "")
     for chunk in openai_bot_stream(cr, bot):
-        logger.info(chunk, end="", flush=True)
+        print(chunk, end="", flush=True)
 
 
 def test_anthropic_bot() -> None:
@@ -91,4 +91,4 @@ def test_anthropic_bot_stream() -> None:
     }
     cr = ChatRequest(history=[sys_msg, user_msg], bot_id = "")
     for chunk in anthropic_bot_stream(cr, bot):
-        logger.info(chunk, end="", flush=True)
+        print(chunk, end="", flush=True)

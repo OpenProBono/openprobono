@@ -251,7 +251,7 @@ class SearchTool(BaseModel):
 
     """
 
-    method: SearchMethodEnum = SearchMethodEnum.serpapi
+    method: SearchMethodEnum = SearchMethodEnum.dynamic_serpapi
     chat_model: ChatModelParams = ChatModelParams(model=OpenAIModelEnum.gpt_4o_mini)
     summary_method: SummaryMethodEnum = SummaryMethodEnum.stuff_reduce
     name: str
