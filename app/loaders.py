@@ -68,9 +68,9 @@ def scrape(site: str) -> list[Element]:
     try:
         r = requests.get(site, timeout=10)
         r.raise_for_status()
-
         if site.endswith(".pdf"):
             # try PyPDF first
+            logger.info(f"scraping PDF: {site}")
             reader = PdfReader(io.BytesIO(r.content))
             for i, page in enumerate(reader.pages, start=1):
                 e = Element(metadata=ElementMetadata(url=site, page_number=i))
@@ -79,17 +79,21 @@ def scrape(site: str) -> list[Element]:
             # PyPDF can't do OCR. If the elements are all blank,
             # we probably need OCR (unstructured).
             if not any(e.text for e in elements):
+                logger.info(f"pypdf didnt work, trying partition_pdf: {site}")
                 elements = partition_pdf(file=io.BytesIO(r.content))
         elif site.endswith(".rtf"):
+            logger.info(f"scraping .rtf: {site}")
             ensure_pandoc_installed()
             elements = partition_rtf(file=io.BytesIO(r.content))
         elif b"<!DOCTYPE" in r.content[:100] or b"<html" in r.content[:100]:
+            logger.info(f"scraping html w beautifulsoup: {site}")
             # it's HTML, use BeautifulSoup
             soup = BeautifulSoup(r.content, "html.parser")
             e = Element(metadata=ElementMetadata(url=site))
             e.text = soup.get_text()
             elements.append(e)
         else:
+            logger.info(f"scraping fallback to unstructed: {site}")
             # fall back to unstructured
             elements = partition(file=io.BytesIO(r.content))
 
@@ -101,13 +105,13 @@ def scrape(site: str) -> list[Element]:
         logger.exception(f"Timeout error, {site}, ")
         langfuse_context.update_current_observation(
             level="ERROR",
-            status_message=timeout_err,
+            status_message=str(timeout_err),
         )
     except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
         logger.exception(f"SSL error, {site}, ")
         langfuse_context.update_current_observation(
             level="ERROR",
-            status_message=ssl_err,
+            status_message=str(ssl_err),
         )
     except (
         requests.exceptions.ConnectionError,
@@ -116,11 +120,11 @@ def scrape(site: str) -> list[Element]:
         logger.exception(f"Connection error, {site}, ")
         langfuse_context.update_current_observation(
             level="ERROR",
-            status_message=conn_err,
+            status_message=str(conn_err),
         )
     except Exception as error:
-        logger.exception(f"Unexpected error, {site}, ", error)
-        langfuse_context.update_current_observation(level="ERROR", status_message=error)
+        logger.exception(f"Unexpected error, {site}, ")
+        langfuse_context.update_current_observation(level="ERROR", status_message=str(error))
 
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
