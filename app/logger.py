@@ -31,23 +31,24 @@ def get_git_tag():
 def setup_logger():
     # Create a logger
     logger = logging.getLogger("logger")
-    logger.setLevel(logging.DEBUG)
+    if not len(logger.handlers):
+        logger.setLevel(logging.DEBUG)
 
-    # Create a console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
+        # Create a console handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
 
-    # Create a formatter that includes git info
-    formatter = GitInfoFormatter(
-        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s [commit: %(git_hash)s, tag: %(git_tag)s]',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+        # Create a formatter that includes git info
+        formatter = GitInfoFormatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s [commit: %(git_hash)s, tag: %(git_tag)s]',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
-    # Set the formatter for the console handler
-    ch.setFormatter(formatter)
+        # Set the formatter for the console handler
+        ch.setFormatter(formatter)
 
-    # Add the handler to the logger
-    logger.addHandler(ch)
+        # Add the handler to the logger
+        logger.addHandler(ch)
 
     return logger
 
