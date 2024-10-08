@@ -37,7 +37,8 @@ class SearchToolTests(unittest.TestCase):
 
     def test_dynamic_courtroom5_search(self):
         qr = "Wyoming rule for designating email address for service in litigation"
-        results = search_tools.dynamic_courtroom5_search_tool(qr)
+        st = SearchTool(name="test_tool", prompt="test_tool_prompt")
+        results = search_tools.dynamic_courtroom5_search_tool(qr, st)
         self.assertTrue(isinstance(results, dict))
         self.assertTrue(len(results.keys()) != 0)
 
