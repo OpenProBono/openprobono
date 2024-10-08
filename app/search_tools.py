@@ -112,7 +112,7 @@ def dynamic_serpapi_tool(
         # Check if URL has already failed
         with failed_urls_lock:
             if url in failed_urls:
-                logger.info(f"Skipping previously failed URL: {url}")
+                logger.info("Skipping previously failed URL: %s", url)
                 return
 
         with url_lock:
@@ -122,10 +122,10 @@ def dynamic_serpapi_tool(
         with url_locks[url]:
             try:
                 if not source_exists(search_collection, url, bot_id, tool_name):
-                    logger.info("Uploading site: " + url)
+                    logger.info("Uploading site: %s", url)
                     upload_site(search_collection, url, tool)
-            except Exception as error:
-                logger.exception("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
+            except Exception:
+                logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", url)
                 with failed_urls_lock:
                     failed_urls.add(url)
 
@@ -260,10 +260,10 @@ def dynamic_courtroom5_search_tool(qr: str, tool: SearchTool, prf: str="") -> di
     def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                logger.info("Uploading site: " + result["link"])
+                logger.info("Uploading site: %s", result["link"])
                 upload_site(search_collection, result["link"], tool)
-        except Exception as error:
-            logger.exception("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
+        except Exception:
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", result["link"])
 
     for result in response["items"]:
         process_site(result)

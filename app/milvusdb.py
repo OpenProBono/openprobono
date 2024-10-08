@@ -677,7 +677,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str, search_t
         "text": texts[i],
     } for i in range(len(texts))]
     upload_data(collection_name, data)
-    logger.info("new_urls: ", new_urls)
+    logger.info("new_urls: %r", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
         if url == cur_url[:len(url)]:

@@ -54,7 +54,7 @@ def build_hierarchy(taxonomy: dict[str, LISTTerm]) -> LISTTerm:
     return root
 
 def print_hierarchy(term: LISTTerm, level: int = 0) -> None:
-    logger.info("  " * level + f"{term.code}: {term.title}")
+    logger.info("%s%s: %s", "  " * level, term.code, term.title)
     for child in term.children:
         print_hierarchy(child, level + 1)
 
