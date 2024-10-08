@@ -82,6 +82,30 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
             dict1[key] = dict2[key]
 
 
+def openai_tool_call(tool_call: ChatCompletionMessageToolCall, bot: BotRequest) -> dict:
+    function_name = tool_call.function.name
+    function_args = json.loads(tool_call.function.arguments)
+    logger.info("RUN TOOL: %s", function_name)
+    vdb_tool = find_vdb_tool(bot, function_name)
+    search_tool = find_search_tool(bot, function_name)
+    # Step 3: call the function
+    # Note: the JSON response may not always be valid;
+    # be sure to handle errors
+    if vdb_tool:
+        tool_response = run_vdb_tool(vdb_tool, function_args)
+    elif search_tool:
+        tool_response = run_search_tool(search_tool, function_args)
+    else:
+        tool_response = "error: unable to run tool"
+    # extend conversation with function response
+    return {
+        "tool_call_id": tool_call.id,
+        "role": "tool",
+        "name": function_name,
+        "content": tool_response,
+    }
+
+
 @observe(capture_input=False)
 def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     """Call bot using openai engine.
@@ -185,30 +209,21 @@ def openai_tools_stream(
         else:
             break
 
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = find_vdb_tool(bot, function_name)
-            search_tool = find_search_tool(bot, function_name)
-            # Step 3: call the function
-            # Note: the JSON response may not always be valid;
-            # be sure to handle errors
-            yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n"
-            if vdb_tool:
-                tool_response = run_vdb_tool(vdb_tool, function_args)
-            elif search_tool:
-                tool_response = run_search_tool(search_tool, function_args)
-            else:
-                tool_response = "error: unable to run tool"
-            # Step 4: send the info for each function call and function response to
-            # the model
-            messages.append({
-                "tool_call_id": tool_call.id,
-                "role": "tool",
-                "name": function_name,
-                "content": tool_response,
-            })  # extend conversation with function response
-            tools_used += 1
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for tool_call in tool_calls:
+                ctx = copy_context()
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+                yield f"  \nRunning {function_name} tool with the following arguments: {function_args}  \n"
+                def task(tc=tool_call, context=ctx):  # noqa: ANN001, ANN202
+                    return context.run(openai_tool_call, tc, bot)
+                futures.append(executor.submit(task))
+            for future in as_completed(futures):
+                result = future.result()
+                messages.append(result)
+                tools_used += 1
+
         # get a new response from the model where it can see the function response
         response = chat_stream(messages, bot.chat_model, **kwargs)
     # add usage to tracing after all tools are called
@@ -265,32 +280,6 @@ def openai_bot(r: ChatRequest, bot: BotRequest) -> str:
     response_message = response.choices[0].message
     return openai_tools(messages, response_message, bot, **kwargs)
 
-
-def openai_tool_call(
-    tool_call: ChatCompletionMessageToolCall,
-    bot: BotRequest,
-) -> dict:
-    logger.info("RUN TOOL")
-    function_name = tool_call.function.name
-    function_args = json.loads(tool_call.function.arguments)
-    vdb_tool = find_vdb_tool(bot, function_name)
-    search_tool = find_search_tool(bot, function_name)
-    # Step 3: call the function
-    # Note: the JSON response may not always be valid;
-    # be sure to handle errors
-    if vdb_tool:
-        tool_response = run_vdb_tool(vdb_tool, function_args)
-    elif search_tool:
-        tool_response = run_search_tool(search_tool, function_args)
-    else:
-        tool_response = "error: unable to run tool"
-    # extend conversation with function response
-    return {
-        "tool_call_id": tool_call.id,
-        "role": "tool",
-        "name": function_name,
-        "content": tool_response,
-    }
 
 def openai_tools(
     messages: list[dict],
