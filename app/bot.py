@@ -1,5 +1,7 @@
 """Defines the bot engines. The meaty stuff."""
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from typing import Generator
 
 import openai
@@ -15,6 +17,7 @@ from openai.types.chat import (
 )
 
 from app.chat_models import chat, chat_stream
+from app.logger import setup_logger
 from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
 from app.prompts import MAX_NUM_TOOLS
@@ -32,6 +35,8 @@ from app.vdb_tools import (
 )
 
 openai.log = "debug"
+
+logger = setup_logger()
 
 def stream_openai_response(response: OpenAIStream):
     full_delta_dict_collection = []
@@ -93,6 +98,45 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
                 dict1[key] += dict2[key]
         else:
             dict1[key] = dict2[key]
+
+
+def openai_tool_call(tool_call: ChatCompletionMessageToolCall, bot: BotRequest) -> tuple[str, str, dict]:
+    """Call a tool for an OpenAI bot.
+
+    Parameters
+    ----------
+    tool_call : ChatCompletionMessageToolCall
+        the tool call object
+    bot : BotRequest
+        the bot calling the tool
+
+    Returns
+    -------
+    tuple[str, str, dict]
+        tool call id, tool response, formatted tool results
+
+    """
+    function_name = tool_call.function.name
+    function_args = json.loads(tool_call.function.arguments)
+    logger.info("RUN TOOL: %s", function_name)
+    vdb_tool = find_vdb_tool(bot, function_name)
+    search_tool = find_search_tool(bot, function_name)
+    # Step 3: call the function
+    # Note: the JSON response may not always be valid;
+    # be sure to handle errors
+    if vdb_tool:
+        tool_response = run_vdb_tool(vdb_tool, function_args)
+        formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    elif search_tool:
+        tool_response = run_search_tool(search_tool, function_args)
+        formatted_results = format_search_tool_results(
+            tool_response,
+            search_tool,
+        )
+    else:
+        tool_response = "error: unable to run tool"
+        formatted_results = []
+    return tool_call.id, str(tool_response), formatted_results
 
 
 @observe(capture_input=False)
@@ -186,49 +230,43 @@ def openai_tools_stream(
         else:
             break
 
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = find_vdb_tool(bot, function_name)
-            search_tool = find_search_tool(bot, function_name)
-            # Step 3: call the function
-            # Note: the JSON response may not always be valid;
-            # be sure to handle errors
-            yield json.dumps({
-                "type": "tool_call",
-                "index": tools_used,
-                "name": function_name,
-                "args": tool_call.function.arguments,
-            }) + "\n"
-            if vdb_tool:
-                tool_response = run_vdb_tool(vdb_tool, function_args)
-                formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
-            elif search_tool:
-                tool_response = run_search_tool(search_tool, function_args)
-                formatted_results = format_search_tool_results(
-                    tool_response,
-                    search_tool,
-                )
-            else:
-                tool_response = "error: unable to run tool"
-                formatted_results = []
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            # map tool ids to tool counter for this iteration
+            tool_count = 1
+            tool_ids_indices = {}
+            for tool_call in tool_calls:
+                ctx = copy_context()
+                function_name = tool_call.function.name
+                yield json.dumps({
+                    "type": "tool_call",
+                    "index": tool_count,
+                    "name": function_name,
+                    "args": tool_call.function.arguments,
+                }) + "\n"
+                tool_ids_indices[tool_call.id] = tool_count
+                tool_count += 1
+                def task(tc=tool_call, context=ctx):  # noqa: ANN001, ANN202
+                    return context.run(openai_tool_call, tc, bot)
+                futures.append(executor.submit(task))
+            for future in as_completed(futures):
+                tool_call_id, tool_response, formatted_results = future.result()
+                yield json.dumps({
+                    "type": "tool_result",
+                    "index": tool_ids_indices[tool_call_id],
+                    "name": function_name,
+                    "results": formatted_results,
+                }) + "\n"
+                all_sources += [res["id"] for res in formatted_results]
+                # extend conversation with function response
+                messages.append({
+                    "tool_call_id": tool_call_id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": tool_response,
+                })
+                tools_used += 1
 
-            yield json.dumps({
-                "type": "tool_result",
-                "index": tools_used,
-                "name": function_name,
-                "results": formatted_results,
-            }) + "\n"
-            all_sources += [res["id"] for res in formatted_results]
-            # Step 4: send the info for each function call and function response to
-            # the model
-            messages.append({
-                "tool_call_id": tool_call.id,
-                "role": "tool",
-                "name": function_name,
-                "content": str(tool_response),
-            })  # extend conversation with function response
-            tools_used += 1
         # remove duplicate sources while maintaining original order
         srcset = set()
         all_sources = [src for src in all_sources if not (src in srcset or srcset.add(src))]
@@ -318,43 +356,19 @@ def openai_tools(
         return response_message.content
 
     tools_used = 0
-    all_sources = []
     while tool_calls and tools_used < MAX_NUM_TOOLS:
         messages.append(response_message.model_dump())
-        # TODO: run tool calls in parallel
-        for tool_call in tool_calls:
-            print("RUN TOOL")
-            function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            vdb_tool = find_vdb_tool(bot, function_name)
-            search_tool = find_search_tool(bot, function_name)
-            # Step 3: call the function
-            # Note: the JSON response may not always be valid;
-            # be sure to handle errors
-            if vdb_tool:
-                tool_response, sources = run_vdb_tool(vdb_tool, function_args)
-            elif search_tool:
-                tool_response, sources = run_search_tool(search_tool, function_args)
-            else:
-                tool_response = "error: unable to run tool"
-            # add sources from this tool call to the overall source list
-            if sources:
-                # yield "Sources found: \n"
-                # for i, src in enumerate(sources, start=len(all_sources) + 1):
-                #     yield f"{i}. {src} \n"
-                # yield "\n\n"
-                all_sources += sources
-            # extend conversation with function response
-            messages.append({
-                "tool_call_id": tool_call.id,
-                "role": "tool",
-                "name": function_name,
-                "content": str(tool_response),
-            })
-            tools_used += 1
-        # append the source list as a system message
-        source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
-        messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for tool_call in tool_calls:
+                ctx = copy_context()
+                def task(tc=tool_call, context=ctx):  # noqa: ANN001, ANN202
+                    return context.run(openai_tool_call, tc, bot)
+                futures.append(executor.submit(task))
+            for future in as_completed(futures):
+                result = future.result()
+                messages.append(result)
+                tools_used += 1
         # Step 4: send the function responses to the model
         response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
         # get a new response from the model where it can see the function response

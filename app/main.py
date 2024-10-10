@@ -33,6 +33,7 @@ from app.db import (
     store_opinion_feedback,
     store_session_feedback,
 )
+from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
@@ -56,16 +57,8 @@ from app.models import (
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 
-# this is to ensure tracing with langfuse
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):  # noqa: ARG001, ANN201, D103
-#     # Operation on startup
-
-#     yield  # wait until shutdown
-
-#     # Flush all events to be sent to Langfuse on shutdown and
-#     # terminate all Threads gracefully. This operation is blocking.
-#     langfuse.flush()
+langfuse_context.configure(release=get_git_hash())
+logger = setup_logger()
 
 X_API_KEY = APIKeyHeader(name="X-API-Key")
 
@@ -138,12 +131,8 @@ async def process_chat_stream(r: ChatRequest, message: str):
 
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
-    # tracing
-    langfuse_context.update_current_trace(
-        input=message,
-        session_id=r.session_id,
-        metadata={"bot_id": r.bot_id},
-    )
+    # trace bot id
+    langfuse_context.update_current_trace(metadata={"bot_id": r.bot_id})
     # check if bot exists
     bot = load_bot(r.bot_id)
     if bot is None:
@@ -152,8 +141,9 @@ def process_chat(r: ChatRequest, message: str) -> dict:
         return {"message": error}
 
     # set conversation history
-    if not r.history:
-        r.history = [{"role": "system", "content": bot.system_prompt}]
+    system_prompt_msg = {"role": "system", "content": bot.system_prompt}
+    if not r.history or system_prompt_msg not in r.history:
+        r.history.insert(0, system_prompt_msg)
     if message:
         r.history.append({"role": "user", "content": message})
     else:
@@ -163,6 +153,9 @@ def process_chat(r: ChatRequest, message: str) -> dict:
             if "role" in msg and msg["role"] == "user"
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
+
+    # trace input
+    langfuse_context.update_current_trace(input=message)
 
     # see if the response is cached
     # requirements:
@@ -188,8 +181,8 @@ def process_chat(r: ChatRequest, message: str) -> dict:
 
     # store conversation (and also log the api_key)
     store_conversation(r, output)
-    # tracing
-    langfuse_context.update_current_trace(output=output)
+    # trace session id and output
+    langfuse_context.update_current_trace(session_id=r.session_id, output=output)
     # return the chat and the bot_id
     return {"message": "Success", "output": output, "bot_id": r.bot_id}
 
@@ -570,7 +563,7 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
         Success or failure message.
 
     """
-    print(f"api_key {api_key} uploading file")
+    logger.info("api_key %s uploading file", api_key)
     try:
         return file_upload(file, session_id, summary)
     except Exception as error:
@@ -601,7 +594,7 @@ def upload_files(
         Success or failure message.
 
     """
-    print(f"api_key {api_key} uploading files")
+    logger.info("api_key %s uploading files", api_key)
     if not summaries:
         summaries = [None] * len(files)
     elif len(files) != len(summaries):
@@ -629,7 +622,7 @@ def vectordb_upload_ocr(file: UploadFile,
         session_id: str, summary: str | None = None,
         api_key: str = Security(api_key_auth)) -> dict:
     """Upload a file by user and use OCR to extract info."""
-    print(f"api_key {api_key} uploading file with OCR")
+    logger.info("api_key %s uploading file with OCR", api_key)
     return session_upload_ocr(file, session_id, summary if summary else None)
 
 
@@ -647,7 +640,7 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
         api key
 
     """
-    print(f"api_key {api_key} deleting file {filename}")
+    logger.info("api_key %s deleting file %s", api_key, filename)
     return delete_expr(
         SESSION_DATA,
         f"metadata['source']=='{filename}' and session_id=='{session_id}'",
@@ -673,7 +666,7 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
         Success message with number of files deleted.
 
     """
-    print(f"api_key {api_key} deleting files")
+    logger.info("api_key %s deleting files", api_key)
     for filename in filenames:
         delete_file(filename, session_id)
     return {"message": f"Success: deleted {len(filenames)} files"}
@@ -696,7 +689,7 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
         Success message with list of filenames.
 
     """
-    print(f"api_key {api_key} getting session files for session {session_id}")
+    logger.info("api_key %s getting session files for session %s", api_key, session_id)
 
     files = fetch_session_data_files(session_id=session_id)
     return {"message": f"Success: found {len(files)} files", "result": files}
@@ -716,7 +709,7 @@ def delete_session_files(session_id: str, api_key: str = Security(api_key_auth))
     _type_
         _description_
     """
-    print(f"api_key {api_key} deleting session files for session {session_id}")
+    logger.info("api_key %s deleting session files for session %s", api_key, session_id)
     return delete_expr(SESSION_DATA, f'metadata["session_id"] in ["{session_id}"]')
 
 

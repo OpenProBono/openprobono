@@ -6,9 +6,15 @@ from contextvars import copy_context
 
 from langfuse.decorators import langfuse_context, observe
 
-from app.chat_models import chat_str
+from app.chat_models import chat_single_gemini, chat_str
 from app.encoders import max_token_indices
-from app.models import ChatModelParams, OpenAIModelEnum, SummaryMethodEnum
+from app.models import (
+    ChatModelParams,
+    EngineEnum,
+    GoogleModelEnum,
+    OpenAIModelEnum,
+    SummaryMethodEnum,
+)
 from app.prompts import (
     OPINION_SUMMARY_MAP_PROMPT,
     OPINION_SUMMARY_REDUCE_PROMPT,
@@ -265,6 +271,29 @@ def get_summary_message(
         case _:
             raise ValueError(method)
     return msg
+
+@observe()
+def summarize_gemini_full(docs: list[str]) -> str:
+    """Summarize text using Google's Gemini model without chunking.
+
+    Parameters
+    ----------
+    docs: list[str]
+        list of strings that is the documents
+
+    Returns
+    -------
+    str
+        The summarized text
+
+    """
+    fulltext = ""
+    for text in docs:
+        fulltext += text
+        fulltext += "\n"
+    chat_model = ChatModelParams(engine=EngineEnum.google, model=GoogleModelEnum.gemini_1_5_flash)
+    return chat_single_gemini(SUMMARY_PROMPT.format(text=fulltext), chat_model.model)
+
 
 @observe(capture_input=False)
 def summarize(

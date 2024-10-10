@@ -393,6 +393,7 @@ def chat_gemini(messages: list[dict], model: str, **kwargs: dict) -> str:
         The response from the LLM
 
     """
+    messages = [{"role":msg["role"], "parts":[msg["content"]]} for msg in messages]
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
     # Create the model
@@ -414,6 +415,46 @@ def chat_gemini(messages: list[dict], model: str, **kwargs: dict) -> str:
         response_text.append(response.text.strip())
     return "\n".join(response_text)
 
+
+@observe(as_type="generation")
+def chat_single_gemini(
+    message: str,
+    model: str,
+    **kwargs: dict,
+) -> str:
+    """Chat with a Gemini LLM.
+
+    Parameters
+    ----------
+    message : str
+        The single message
+    model : str
+        The name of the model.
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    str
+        The response from the LLM
+
+    """
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+
+    # Create the model
+    # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
+    set_kwargs_gemini(kwargs)
+    generation_config = {"response_mime_type": "text/plain"} | kwargs
+
+    llm = genai.GenerativeModel(
+        model_name=model,
+        # generation_config=generation_config,
+        # safety_settings = Adjust safety settings
+        # See https://ai.google.dev/gemini-api/docs/safety-settings
+    )
+
+    response_text = llm.generate_content(message).text.strip()
+    return response_text
 
 def set_kwargs_gemini(kwargs: dict) -> None:
     """Set default values for genai.ChatSession API call."""

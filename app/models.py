@@ -31,6 +31,15 @@ class SearchMethodEnum(str, Enum):
     courtroom5 = "courtroom5"
     dynamic_courtroom5 = "dynamic_courtroom5"
 
+@unique
+class SummaryMethodEnum(str, Enum):
+    """Enumeration class representing different ways of summarizing text."""
+
+    stuffing = "stuffing"
+    stuff_reduce = "stuff_reduce"
+    map_reduce = "map_reduce"
+    refine = "refine"
+    gemini_full = "gemini_full" #is special case because it uses gemini instead of same llm as chat itself.
 
 @unique
 class VDBMethodEnum(str, Enum):
@@ -38,140 +47,6 @@ class VDBMethodEnum(str, Enum):
 
     query = "query"
     get_source = "get_source"
-
-
-class SearchTool(BaseModel):
-    """Model class representing a search tool.
-
-    Attributes
-    ----------
-        method (SearchMethodEnum): The search method to be used.
-        name (str): The name of the search tool.
-        prompt (str): The prompt for the search tool.
-        prefix (str): The prefix for the search tool.
-        bot_id (str): The bot associated with this tool.
-
-    """
-
-    method: SearchMethodEnum = SearchMethodEnum.serpapi
-    name: str
-    prompt: str
-    prefix: str = ""
-    bot_id: str = ""
-
-class VDBTool(BaseModel):
-    """Model class representing a VDB tool.
-
-    Attributes
-    ----------
-        name (str): The name of the VDB tool.
-        collection_name (str): The collection name for the VDB tool.
-        k (int): K is the number of chunks to return for the VDB tool.
-        prompt (str): The prompt for the VDB tool.
-        session_id (str | None): The session id if querying session data, else None.
-        method (VDBMethodEnum): The vector database method to be used.
-        bot_id (str): The bot associated with this tool.
-
-    """
-
-    name: str
-    collection_name: str
-    k: int = 4
-    prompt: str = ""
-    session_id: str | None = None
-    method: VDBMethodEnum = VDBMethodEnum.query
-    bot_id: str = ""
-
-
-class ChatRequest(BaseModel):
-    """Model class representing a chat request.
-
-    Attributes
-    ----------
-        history (list): The chat history.
-        bot_id (str): The ID of the bot.
-        session_id (str): The session ID.
-        api_key (str): The API key.
-
-    """
-
-    history: list
-    bot_id: str
-    session_id: str = None
-    api_key: str = ""
-
-
-class ChatBySession(BaseModel):
-    """Model class representing a chat request by session.
-
-    Attributes
-    ----------
-        message (str): The chat message.
-        session_id (str): The session ID.
-        api_key (str): The API key.
-
-    """
-
-    message: str
-    session_id: str
-    api_key: str = ""
-
-class InitializeSession(BaseModel):
-    """Model class representing an initialize session request.
-
-    Attributes
-    ----------
-        bot_id (str): The ID of the bot.
-        api_key (str): The API key.
-
-    """
-
-    bot_id: str
-    api_key: str = ""
-
-class InitializeSessionChat(BaseModel):
-    """Model class representing an initialize session request with a message.
-
-    Attributes
-    ----------
-        message (str): The initialization message.
-        bot_id (str): The ID of the bot.
-        api_key (str): The API key.
-
-    """
-
-    message: str
-    bot_id: str
-    api_key: str = ""
-
-
-class FetchSession(BaseModel):
-    """Model class representing a fetch session request.
-
-    Attributes
-    ----------
-        session_id (str): The session ID.
-        api_key (str): The API key.
-
-    """
-
-    session_id: str
-    api_key: str = ""
-
-class SessionFeedback(BaseModel):
-    """Model class representing a session feedback request.
-
-    Attributes
-    ----------
-        feedback_text (str): The feedback text from the consumer
-        session_id (str): The session ID.
-        api_key (str): The API key.
-
-    """
-
-    feedback_text: str
-    session_id: str
-    api_key: str = ""
 
 
 @unique
@@ -199,6 +74,7 @@ class GoogleModelEnum(str, Enum):
     """Enumeration class representing different Google models."""
 
     gemini_1_5_flash = "gemini-1.5-flash"
+    gemini_1_5_pro = "gemini-1.5-pro"
 
 
 @unique
@@ -250,16 +126,6 @@ class MilvusMetadataEnum(str, Enum):
     json = "json"
     field = "field"
     no_field = "none"
-
-
-@unique
-class SummaryMethodEnum(str, Enum):
-    """Enumeration class representing different ways of summarizing text."""
-
-    stuffing = "stuffing"
-    stuff_reduce = "stuff_reduce"
-    map_reduce = "map_reduce"
-    refine = "refine"
 
 
 class ChatModelParams(BaseModel):
@@ -379,3 +245,139 @@ class LISTTermProb(BaseModel):
 
     title: str
     probability: float
+
+class SearchTool(BaseModel):
+    """Model class representing a search tool.
+
+    Attributes
+    ----------
+        method (SearchMethodEnum): The search method to be used.
+        summary_method (SummaryMethodEnum): The summary method to be used (not always used depending on the type of serach method, currently only dynamic serpapi)
+        name (str): The name of the search tool.
+        prompt (str): The prompt for the search tool.
+        prefix (str): The prefix for the search tool.
+
+    """
+
+    method: SearchMethodEnum = SearchMethodEnum.dynamic_serpapi
+    chat_model: ChatModelParams = ChatModelParams(model=OpenAIModelEnum.gpt_4o_mini)
+    summary_method: SummaryMethodEnum = SummaryMethodEnum.stuff_reduce
+    name: str
+    prompt: str
+    prefix: str = ""
+    bot_id: str = ""
+
+
+class VDBTool(BaseModel):
+    """Model class representing a VDB tool.
+
+    Attributes
+    ----------
+        name (str): The name of the VDB tool.
+        collection_name (str): The collection name for the VDB tool.
+        k (int): K is the number of chunks to return for the VDB tool.
+        prompt (str): The prompt for the VDB tool.
+        session_id (str | None): The session id if querying session data, else None.
+        method (VDBMethodEnum): The vector database method to be used.
+        bot_id (str): The bot associated with this tool.
+
+    """
+
+    name: str
+    collection_name: str
+    k: int = 4
+    prompt: str = ""
+    session_id: str | None = None
+    method: VDBMethodEnum = VDBMethodEnum.query
+    bot_id: str = ""
+
+
+class ChatRequest(BaseModel):
+    """Model class representing a chat request.
+
+    Attributes
+    ----------
+        history (list): The chat history.
+        bot_id (str): The ID of the bot.
+        session_id (str): The session ID.
+        api_key (str): The API key.
+
+    """
+
+    history: list
+    bot_id: str
+    session_id: str = None
+    api_key: str = ""
+
+
+class ChatBySession(BaseModel):
+    """Model class representing a chat request by session.
+
+    Attributes
+    ----------
+        message (str): The chat message.
+        session_id (str): The session ID.
+        api_key (str): The API key.
+
+    """
+
+    message: str
+    session_id: str
+    api_key: str = ""
+
+class InitializeSession(BaseModel):
+    """Model class representing an initialize session request.
+
+    Attributes
+    ----------
+        bot_id (str): The ID of the bot.
+        api_key (str): The API key.
+
+    """
+
+    bot_id: str
+    api_key: str = ""
+
+class InitializeSessionChat(BaseModel):
+    """Model class representing an initialize session request with a message.
+
+    Attributes
+    ----------
+        message (str): The initialization message.
+        bot_id (str): The ID of the bot.
+        api_key (str): The API key.
+
+    """
+
+    message: str
+    bot_id: str
+    api_key: str = ""
+
+
+class FetchSession(BaseModel):
+    """Model class representing a fetch session request.
+
+    Attributes
+    ----------
+        session_id (str): The session ID.
+        api_key (str): The API key.
+
+    """
+
+    session_id: str
+    api_key: str = ""
+
+class SessionFeedback(BaseModel):
+    """Model class representing a session feedback request.
+
+    Attributes
+    ----------
+        feedback_text (str): The feedback text from the consumer
+        session_id (str): The session ID.
+        api_key (str): The API key.
+
+    """
+
+    feedback_text: str
+    session_id: str
+    api_key: str = ""

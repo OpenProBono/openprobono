@@ -1,6 +1,7 @@
 """Tests for bot methods."""
 
 from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
+from app.logger import setup_logger
 from app.models import (
     AnthropicModelEnum,
     BotRequest,
@@ -10,6 +11,7 @@ from app.models import (
     OpenAIModelEnum,
 )
 
+logger = setup_logger()
 
 def test_openai_bot() -> None:
     search_tool = {

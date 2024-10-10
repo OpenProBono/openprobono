@@ -10,9 +10,11 @@ import re
 from langfuse.decorators import observe
 
 from app.chat_models import chat_str
+from app.logger import setup_logger
 from app.models import ChatModelParams, LISTTerm, LISTTermProb, OpenAIModelEnum
 from app.prompts import ISSUE_CLASSIFER_PROMPT
 
+logger = setup_logger()
 
 def parse_bracketed_items(text: str):
     # Use regex to find all items enclosed in square brackets
@@ -52,7 +54,7 @@ def build_hierarchy(taxonomy: dict[str, LISTTerm]) -> LISTTerm:
     return root
 
 def print_hierarchy(term: LISTTerm, level: int = 0) -> None:
-    print("  " * level + f"{term.code}: {term.title}")
+    logger.info("%s%s: %s", "  " * level, term.code, term.title)
     for child in term.children:
         print_hierarchy(child, level + 1)
 

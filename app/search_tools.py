@@ -2,12 +2,14 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
+from threading import Lock
 
 import requests
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 from serpapi.google_search import GoogleSearch
 
 from app.courtlistener import courtlistener_query, courtlistener_tool_args
+from app.logger import setup_logger
 from app.milvusdb import query, source_exists, upload_site
 from app.models import (
     BotRequest,
@@ -18,11 +20,21 @@ from app.models import (
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
 
+logger = setup_logger()
+
 GoogleSearch.SERP_API_KEY = os.environ["SERPAPI_KEY"]
 
 COURTROOM5_SEARCH_CX_KEY = "05be7e1be45d04eda"
 
 search_collection = "search_collection_vj1"
+
+# Global lock for URL processing
+url_locks = {}
+url_lock = Lock()
+
+# Set to keep track of failed URLs
+failed_urls = set()
+failed_urls_lock = Lock()
 
 def filtered_search(results: dict) -> dict:
     """Filter search results returned by serpapi to only include relevant results.
@@ -47,24 +59,37 @@ def filtered_search(results: dict) -> dict:
 
 
 @observe()
-def process_site(result: dict, bot_id: str, tool_name: str) -> None:
-    try:
-        if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-            print("Uploading site: " + result["link"])
-            upload_site(search_collection, result, bot_id=bot_id, tool_name=tool_name)
-    except Exception as error:
-        print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-        print("The error was: " + str(error))
+def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
+    url = result["link"]
+
+    # Check if URL has already failed
+    with failed_urls_lock:
+        if url in failed_urls:
+            logger.info("Skipping previously failed URL: %s", url)
+            return
+
+    with url_lock:
+        if url not in url_locks:
+            url_locks[url] = Lock()
+
+    with url_locks[url]:
+        try:
+            if not source_exists(search_collection, url, bot_id, tool.name):
+                logger.info("Uploading site: %s", url)
+                upload_site(search_collection, result, tool)
+        except Exception:
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", url)
+            with failed_urls_lock:
+                failed_urls.add(url)
 
 
-@observe(capture_output=False)
+@observe(capture_input=False, capture_output=False)
 def dynamic_serpapi_tool(
     qr: str,
     prf: str,
-    num_results: int = 3,
+    tool: SearchTool,
+    num_results: int = 5,
     k: int = 3,
-    bot_id: str = "",
-    tool_name: str = "",
 ) -> dict:
     """Upgraded serpapi tool, scrape the websites and embed them to query whole pages.
 
@@ -74,14 +99,12 @@ def dynamic_serpapi_tool(
         the query
     prf : str
         the prefix given by tool (used for whitelists)
+    tool : SearchTool
+        the tool using this search method
     num_results : int, optional
         number of results to return, by default 3
     k : int, optional
         number of chunks to return from milvus, by default 3
-    bot_id : str, optional
-        the ID of the bot using this tool, by default ""
-    tool_name : str, optional
-        the name of the search tool, by default ""
 
     Returns
     -------
@@ -89,6 +112,19 @@ def dynamic_serpapi_tool(
         result of the query on the embeddings uploaded to the search collection
 
     """
+    bot_id = tool.bot_id
+    tool_name = tool.name
+    # tracing
+    langfuse_context.update_current_observation(
+        input={
+            "query": qr,
+            "prefix": prf,
+            "num_results": num_results,
+            "k": k,
+            "bot_id": bot_id,
+            "tool_name": tool_name,
+        },
+    )
     response = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
@@ -100,13 +136,17 @@ def dynamic_serpapi_tool(
         for result in response["organic_results"]:
             ctx = copy_context()
             def task(r=result, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(process_site, r, bot_id, tool_name)
+                return context.run(process_site, r, bot_id, tool)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
             _ = future.result()
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
-    return query(search_collection, qr, k=k, expr=filter_expr)
+    res = query(search_collection, qr, k=k, expr=filter_expr)
+    if "result" in res:
+        pks = [str(hit["id"]) for hit in res["result"]]
+        langfuse_context.update_current_observation(output=pks)
+    return res
 
 
 @observe()
@@ -179,12 +219,7 @@ def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> dict:
 
 # Implement this for regular programatic google search as well.
 @observe()
-def dynamic_courtroom5_search_tool(
-    qr: str,
-    prf: str = "",
-    bot_id: str = "",
-    tool_name: str = "",
-) -> dict:
+def dynamic_courtroom5_search_tool(qr: str, tool: SearchTool, prf: str="") -> dict:
     """Query the custom courtroom5 google search api, scrape the sites and embed them.
 
     Whitelisted sites defined by search cx key.
@@ -193,12 +228,10 @@ def dynamic_courtroom5_search_tool(
     ----------
     qr : str
         the query itself
+    tool : SearchTool
+        the tool using this search method
     prf : str
         the prefix given by the tool, by default empty string
-    bot_id : str
-        the id of the bot using this tool for caching results, by default empty string
-    tool_name : str
-        the name of the tool for caching results, by default empty string
 
     Returns
     -------
@@ -206,6 +239,8 @@ def dynamic_courtroom5_search_tool(
         search results
 
     """
+    bot_id = tool.bot_id
+    tool_name = tool.name
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
@@ -225,11 +260,10 @@ def dynamic_courtroom5_search_tool(
     def process_site(result: dict) -> None:
         try:
             if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
-                print("Uploading site: " + result["link"])
-                upload_site(search_collection, result["link"], bot_id=bot_id, tool_name=tool_name)
-        except Exception as error:
-            print("Warning: Failed to upload site for dynamic serpapi: " + result["link"])
-            print("The error was: " + str(error))
+                logger.info("Uploading site: %s", result["link"])
+                upload_site(search_collection, result["link"], tool)
+        except Exception:
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", result["link"])
 
     for result in response["items"]:
         process_site(result)
@@ -369,7 +403,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
-            function_response = dynamic_serpapi_tool(qr, prf, bot_id=tool.bot_id, tool_name=tool.name)
+            function_response = dynamic_serpapi_tool(qr, prf, tool)
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
@@ -378,7 +412,10 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
             tool_after_date = None
             tool_before_date = None
             if "jurisdictions" in function_args:
-                tool_jurisdictions = [jurisdiction.lower() for jurisdiction in function_args["jurisdictions"]]
+                tool_jurisdictions = [
+                    jurisdiction.lower()
+                    for jurisdiction in function_args["jurisdictions"]
+                ]
             if "keyword-qr" in function_args:
                 tool_kw_query = function_args["keyword-qr"]
             if "after-date" in function_args:
@@ -396,12 +433,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
         case SearchMethodEnum.courtroom5:
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
-            function_response = dynamic_courtroom5_search_tool(
-                qr,
-                prf,
-                bot_id=tool.bot_id,
-                tool_name=tool.name,
-            )
+            function_response = dynamic_courtroom5_search_tool(qr, prf, tool)
     return function_response
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:

@@ -23,9 +23,13 @@ from unstructured.partition.auto import partition
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.rtf import partition_rtf
 
+from app.logger import setup_logger
+
 if TYPE_CHECKING:
     from fastapi import UploadFile
     from openai.types import Batch
+
+logger = setup_logger()
 
 
 def partition_uploadfile(file: UploadFile) -> list[Element]:
@@ -64,9 +68,9 @@ def scrape(site: str) -> list[Element]:
     try:
         r = requests.get(site, timeout=10)
         r.raise_for_status()
-
         if site.endswith(".pdf"):
             # try PyPDF first
+            logger.info("scraping PDF: %s", site)
             reader = PdfReader(io.BytesIO(r.content))
             for i, page in enumerate(reader.pages, start=1):
                 e = Element(metadata=ElementMetadata(url=site, page_number=i))
@@ -75,48 +79,52 @@ def scrape(site: str) -> list[Element]:
             # PyPDF can't do OCR. If the elements are all blank,
             # we probably need OCR (unstructured).
             if not any(e.text for e in elements):
+                logger.info("pypdf didnt work, trying partition_pdf: %s", site)
                 elements = partition_pdf(file=io.BytesIO(r.content))
         elif site.endswith(".rtf"):
+            logger.info("scraping .rtf: %s", site)
             ensure_pandoc_installed()
             elements = partition_rtf(file=io.BytesIO(r.content))
-        else:
-            # try beautiful soup first
+        elif b"<!DOCTYPE" in r.content[:100] or b"<html" in r.content[:100]:
+            logger.info("scraping html w beautifulsoup: %s", site)
+            # it's HTML, use BeautifulSoup
             soup = BeautifulSoup(r.content, "html.parser")
             e = Element(metadata=ElementMetadata(url=site))
             e.text = soup.get_text()
-            if not e.text:
-                # fall back to unstructured
-                elements = partition(file=io.BytesIO(r.content))
-            else:
-                elements.append(e)
+            elements.append(e)
+        else:
+            logger.info("scraping fallback to unstructed: %s", site)
+            # fall back to unstructured
+            elements = partition(file=io.BytesIO(r.content))
+
 
     except (
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,
     ) as timeout_err:
-        print(f"Timeout error, {site}, ", timeout_err)
+        logger.exception("Timeout error: %s", site)
         langfuse_context.update_current_observation(
             level="ERROR",
-            status_message=timeout_err,
+            status_message=str(timeout_err),
         )
     except (requests.exceptions.SSLError, urllib3.exceptions.SSLError) as ssl_err:
-        print(f"SSL error, {site}, ", ssl_err)
+        logger.exception("SSL error: %s", site)
         langfuse_context.update_current_observation(
             level="ERROR",
-            status_message=ssl_err,
+            status_message=str(ssl_err),
         )
     except (
         requests.exceptions.ConnectionError,
         urllib3.exceptions.ProtocolError,
     ) as conn_err:
-        print(f"Connection error, {site}, ", conn_err)
+        logger.exception("Connection error: %s", site)
         langfuse_context.update_current_observation(
             level="ERROR",
-            status_message=conn_err,
+            status_message=str(conn_err),
         )
     except Exception as error:
-        print(f"Unexpected error, {site}, ", error)
-        langfuse_context.update_current_observation(level="ERROR", status_message=error)
+        logger.exception("Unexpected error: %s", site)
+        langfuse_context.update_current_observation(level="ERROR", status_message=str(error))
 
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
@@ -141,7 +149,7 @@ def scrape_with_links(
         URLs, elements
 
     """
-    print("site: ", site)
+    logger.info("site: %s", site)
     r = requests.get(site, timeout=10)
     site_base = "/".join(site.split("/")[:-1])
     # converting the text
@@ -208,7 +216,7 @@ def quickstart_ocr(file: UploadFile) -> str:
     processor_name = client.processor_path(project_id, location, processor_id)
 
     # Print the processor information
-    print(f"Processor Name: {processor_name}")
+    logger.info("Processor Name: %s", processor_name)
 
     # Load binary data
     raw_document = documentai.RawDocument(
@@ -233,8 +241,7 @@ def quickstart_ocr(file: UploadFile) -> str:
     document = result.document
 
     # Read the text recognition output from the processor
-    print("The document contains the following text:")
-    print(document.text)
+    logger.info("The document contains the following text: %s", document.text)
     return document.text
 
 
@@ -259,10 +266,10 @@ def transfer_hive(collection_name: str) -> None:
     num_batches = 0
     error = False
     while len(res) > 0:
-        print(f"processing batch {num_batches}")
+        logger.info("processing batch %s", num_batches)
         for i, item in enumerate(res):
             if i % 100 == 0:
-                print(f" i = {i}")
+                logger.info(" i = %s", i)
             data = {"text_data": item["text"]}
             attempt = 1
             num_attempts = 75
@@ -275,20 +282,24 @@ def transfer_hive(collection_name: str) -> None:
                         timeout=75,
                     )
                     if response.status_code != 200:
-                        print(response.json())
-                        print(f"ERROR: status code = {response.status_code}, current pk = {item['pk']}")
+                        logger.error(
+                            "ERROR: status code = %s, current pk = %s, JSON = %s",
+                            response.status_code,
+                            item["pk"],
+                            response.json(),
+                        )
                         error = True
                     break
                 except:
                     time.sleep(1)
                     attempt += 1
             if error or attempt == num_attempts:
-                print(f"ERROR REPORTED: attempt = {attempt}")
+                logger.error("ERROR REPORTED: attempt = %s", attempt)
                 error = True
                 break
         num_batches += 1
         if error:
-            print("ERROR REPORTED: exiting")
+            logger.error("ERROR REPORTED: exiting")
             break
         res = q_iter.next()
     q_iter.close()
@@ -365,7 +376,7 @@ def wait_for_batches(wait_time: int = 10 * 60) -> None:
     count = 1
     while not completed_or_failed:
         time.sleep(wait_time)
-        print(f"waited {count} times, checking batches")
+        logger.info("waited %s times, checking batches", count)
         client = OpenAI()
         completed_or_failed = True
         batches = client.batches.list()
@@ -388,39 +399,39 @@ def delete_completed_batches(basedir: str) -> None:
             # handle completed batches
             if batch.status != "completed":
                 continue
-            print(f"batch {batch.id} completed")
+            logger.info("batch %s completed", batch.id)
             in_exists, out_exists = False, False
             in_fname, out_fname = None, None
             for fpage in files.iter_pages():
                 for f in fpage.data:
                     if f.id == batch.input_file_id:
-                        print(f.filename)
+                        logger.info(f.filename)
                         in_exists = True
                         in_fname = f.filename
                         split_fname = f.filename.split(".")
                         out_fname = split_fname[0] + "_out.jsonl"
                     elif f.id == batch.output_file_id:
-                        print(f.filename)
+                        logger.info(f.filename)
                         out_exists = True
                 if in_exists and out_exists:
                     break
             if in_exists:
-                print("deleted input file in API")
+                logger.info("deleted input file in API")
                 client.files.delete(batch.input_file_id)
                 # move file from basedir to basedir + completed
                 pathlib.Path(basedir + in_fname).rename(basedir + "completed/" + in_fname)
-                print(f"moved {in_fname} to completed/")
+                logger.info("moved %s to completed/", in_fname)
                 pathlib.Path(basedir + out_fname).rename(basedir + "completed/" + out_fname)
-                print(f"moved {out_fname} to completed/")
+                logger.info("moved %s to completed/", out_fname)
                 if batch.error_file_id is not None:
-                    print("batch contains an error file, downloading")
+                    logger.info("batch contains an error file, downloading")
                     client.files.content(batch.error_file_id)
                     result = client.files.content(batch.error_file_id).content
                     with pathlib.Path(basedir + "completed/errors/errors_" + in_fname).open("wb") as f:
                         f.write(result)
-                    print(f"downloaded errors for {in_fname}")
+                    logger.info("downloaded errors for %s", in_fname)
             if out_exists:
-                print("deleted output file")
+                logger.info("deleted output file")
                 client.files.delete(batch.output_file_id)
 
 
@@ -440,18 +451,18 @@ def retry_failed_batches() -> None:
             for fpage in files.iter_pages():
                 for f in fpage.data:
                     if f.id == in_file_id:
-                        print(f.filename)
+                        logger.info(f.filename)
                         in_exists = True
                         break
                 if in_exists:
                     break
             if not in_exists:
-                print(f"batch {batch.id} input file not found, skipping")
+                logger.info("batch %s input file not found, skipping", batch.id)
                 continue
             if in_file_id in restarted_infile_ids:
-                print(f"batch {batch.id} input file already restarted in another batch, skipping")
+                logger.info("batch %s input file already restarted in another batch, skipping", batch.id)
                 continue
-            print(f"batch {batch.id} failed and has input file, recreating")
+            logger.info("batch %s failed and has input file, recreating", batch.id)
             client.batches.create(
                 completion_window="24h",
                 endpoint="/v1/embeddings",
