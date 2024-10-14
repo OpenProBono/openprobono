@@ -248,6 +248,7 @@ class SearchTool(BaseModel):
         name (str): The name of the search tool.
         prompt (str): The prompt for the search tool.
         prefix (str): The prefix for the search tool.
+        jurisdictions (list[str]): The jurisdictions for the search tool.
 
     """
 
@@ -258,6 +259,7 @@ class SearchTool(BaseModel):
     prompt: str
     prefix: str = ""
     bot_id: str = ""
+    jurisdictions: list[str] = []
 
 class VDBTool(BaseModel):
     """Model class representing a VDB tool.
@@ -269,6 +271,7 @@ class VDBTool(BaseModel):
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
         session_id (str | None): The session id if querying session data, else None.
+
     """
 
     name: str

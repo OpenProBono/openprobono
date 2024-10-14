@@ -85,7 +85,7 @@ def merge_dicts_stream_openai_completion(dict1, dict2):
 def openai_tool_call(tool_call: ChatCompletionMessageToolCall, bot: BotRequest) -> dict:
     function_name = tool_call.function.name
     function_args = json.loads(tool_call.function.arguments)
-    logger.info("RUN TOOL: %s", function_name)
+    logger.info("Tool %s Called With Args %s", function_name, function_args)
     vdb_tool = find_vdb_tool(bot, function_name)
     search_tool = find_search_tool(bot, function_name)
     # Step 3: call the function
@@ -97,6 +97,7 @@ def openai_tool_call(tool_call: ChatCompletionMessageToolCall, bot: BotRequest) 
         tool_response = run_search_tool(search_tool, function_args)
     else:
         tool_response = "error: unable to run tool"
+        logger.error("Tool %s encountered an error", function_name)
     # extend conversation with function response
     return {
         "tool_call_id": tool_call.id,

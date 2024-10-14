@@ -1,11 +1,9 @@
 """Functions for managing and searching vectors and collections in Milvus."""
 from __future__ import annotations
 
-import logging
 import os
 import time
 from json import loads
-from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING
 
 from langfuse.decorators import langfuse_context, observe
@@ -18,6 +16,7 @@ from pymilvus import (
     utility,
 )
 
+from app.classifiers import url_jurisdiction
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
@@ -40,20 +39,6 @@ logger = setup_logger()
 connection_args = loads(os.environ["Milvus"])  # noqa: SIM112
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
-
-
-# init logs
-log_formatter = logging.Formatter(
-    "%(asctime)s %(levelname)s %(funcName)s(%(lineno)d) %(message)s",
-)
-my_handler = RotatingFileHandler("vdb.log", maxBytes=5*1024*1024, backupCount=2)
-my_handler.setFormatter(log_formatter)
-my_handler.setLevel(logging.ERROR)
-
-vdb_log = logging.getLogger("vdb")
-vdb_log.setLevel(logging.ERROR)
-
-vdb_log.addHandler(my_handler)
 
 
 # used to cache collection params from firebase
@@ -155,6 +140,7 @@ def create_collection(
     """
     if utility.has_collection(name):
         already_exists = f"collection named {name} already exists"
+        logger.error(already_exists)
         raise ValueError(already_exists)
     encoder = encoder if encoder is not None else EncoderParams()
     db_fields = None
@@ -226,6 +212,7 @@ def create_collection(
     }
     if db_fields is not None:
         COLLECTION_PARAMS[name]["fields"] = db_fields
+    logger.info("Collection Created: %s", name)
     return coll
 
 
@@ -293,6 +280,7 @@ def query(
             langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
+    logger.info("Collection queried: %s", collection_name)
     return {"message": "Failure: unable to complete search"}
 
 
@@ -435,7 +423,7 @@ def upload_data(
                 f"{res.insert_count}. "
             )
             if bad_deletes:
-                logging.error(
+                logger.error(
                     "dangling data",
                     extra={"pks": bad_deletes},
                 )
@@ -447,7 +435,9 @@ def upload_data(
                 )
             else:
                 bad_insert += "Any partially uploaded data has been deleted."
+            logger.error(bad_insert)
             return {"message": bad_insert}
+    logger.info("Collection uploaded data: %s", collection_name)
     return {"message": "Success", "insert_count": insert_count}
 
 
@@ -496,6 +486,7 @@ def upload_data_firebase(
             db_batch.commit()
             db_batch = get_batch()
     db_batch.commit()
+    logger.info("Collection uploaded data to Firebase: %s", coll_name)
     return {"message": "Success", "insert_count": insert_count}
 
 
@@ -538,6 +529,7 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         res = q_iter.next()
     q_iter.close()
     langfuse_context.update_current_observation(output=f"{len(hits)} hits")
+    logger.info("Collection got expression: %s", collection_name)
     return {"message": "Success", "result": hits}
 
 
@@ -561,6 +553,7 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     coll = Collection(collection_name)
     ids = coll.delete(expr=expr)
     coll.flush()
+    logger.info("Collection deleted expression: %s", collection_name)
     return {"message": "Success", "delete_count": ids.delete_count}
 
 
@@ -599,6 +592,7 @@ def upsert_expr(
         return delete_result
     delete_count = delete_result["delete_count"]
     insert_result = upload_data(collection_name, upsert_data)
+    logger.info("Collection upserted: %s", collection_name)
     return {"delete_count": delete_count, **insert_result}
 
 
@@ -736,7 +730,10 @@ def upload_site(
     """
     elements = scrape(url)
     if len(elements) == 0:
-        return {"message": f"Failure: no elements found at {url}"}
+        error = f"Failure: no elements found at {url}"
+        logger.error(error)
+        return {"message": error}
+    jurisdiction = url_jurisdiction(search_tool.chat_model, url)
     texts, metadatas = chunk_elements_by_title(
         elements,
         max_chars,
@@ -752,6 +749,7 @@ def upload_site(
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
         metadata["bot_and_tool_id"] = [bot_id + tool_name]
+        metadata["jurisdiction"] = jurisdiction
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],
@@ -874,52 +872,9 @@ def fetch_session_data_files(
     coll = Collection(SESSION_DATA)
     coll.load()
     query = coll.query(
-        expr=f"metadata[\"session_id\"] in [\"{session_id}\"]",
+        expr=f'metadata["session_id"] in ["{session_id}"]',
         output_fields=["metadata"],
         batch_size=batch_size,
     )
     files = [data["metadata"]["filename"] for data in query]
     return set(files)
-
-
-def session_source_summaries(
-    session_id: str,
-    batch_size: int = 1000,
-) -> dict[str, dict[str, str]]:
-    """Get AI and user-written summaries of any files from a session.
-
-    Parameters
-    ----------
-    session_id : str
-        The session to search for file summaries.
-    batch_size : int, optional
-        The number of chunks to return from the query iterator at a time,
-        by default 1000.
-
-    Returns
-    -------
-    dict[str, dict[str, str]]
-        {"source": {"ai_summary": "str", "user_summary": "str"}}
-
-    """
-    coll = Collection(SESSION_DATA)
-    q_iter = coll.query_iterator(
-        expr=f"session_id=='{session_id}'",
-        output_fields=["metadata"],
-        batch_size=batch_size,
-    )
-    source_summaries = {}
-    res = q_iter.next()
-    while len(res) > 0:
-        for item in res:
-            metadata = item["metadata"]
-            if metadata["source"] not in source_summaries:
-                source_summaries[metadata["source"]] = {
-                    "ai_summary": metadata["ai_summary"],
-                }
-                if "user_summary" in metadata:
-                    source_summary = source_summaries[metadata["source"]]
-                    source_summary["user_summary"] = metadata["user_summary"]
-        res = q_iter.next()
-    q_iter.close()
-    return source_summaries

@@ -90,25 +90,34 @@ async def process_chat_stream(r: ChatRequest, message: str):
     if bot is None:
         yield "An error occurred."
         return
-    else:
-        if not r.history:
-            r.history = [{"role": "system", "content": bot.system_prompt}]
-        if message:
-            r.history.append({"role": "user", "content": message})
 
-        match bot.chat_model.engine:
-            case EngineEnum.openai:
-                for chunk in openai_bot_stream(r, bot):
-                    yield chunk
-                    # Add a small delay to avoid blocking the event loop
-                    await asyncio.sleep(0)
-            case EngineEnum.anthropic:
-                for chunk in anthropic_bot_stream(r, bot):
-                    yield chunk
-                    # Add a small delay to avoid blocking the event loop
-                    await asyncio.sleep(0)
-            case _:
-                yield Exception("Invalid bot engine for streaming")
+    # set conversation history
+    system_prompt_msg = {"role": "system", "content": bot.system_prompt}
+    if not r.history or system_prompt_msg not in r.history:
+        r.history.insert(0, system_prompt_msg)
+    if message:
+        r.history.append({"role": "user", "content": message})
+    else:
+        # invoke bot does not pass a new message, so get it from history
+        user_messages = [
+            msg for msg in r.history
+            if "role" in msg and msg["role"] == "user"
+        ]
+        message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
+
+    match bot.chat_model.engine:
+        case EngineEnum.openai:
+            for chunk in openai_bot_stream(r, bot):
+                yield chunk
+                # Add a small delay to avoid blocking the event loop
+                await asyncio.sleep(0)
+        case EngineEnum.anthropic:
+            for chunk in anthropic_bot_stream(r, bot):
+                yield chunk
+                # Add a small delay to avoid blocking the event loop
+                await asyncio.sleep(0)
+        case _:
+            yield Exception("Invalid bot engine for streaming")
 
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:

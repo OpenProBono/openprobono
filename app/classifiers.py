@@ -1,4 +1,4 @@
-"""Classifies a chat request into LIST categories."""
+"""LLM classification tasks."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from langfuse.decorators import observe
 from app.chat_models import chat_str
 from app.logger import setup_logger
 from app.models import ChatModelParams, LISTTerm, LISTTermProb, OpenAIModelEnum
-from app.prompts import ISSUE_CLASSIFER_PROMPT
+from app.prompts import ISSUE_CLASSIFER_PROMPT, JURISDICTION_PROMPT
 
 logger = setup_logger()
 
@@ -154,6 +154,16 @@ def tree_search(
         depth += 1
 
     return selected_terms
+
+
+def url_jurisdiction(chatmodel: ChatModelParams, url: str) -> str:
+    messages = [
+        {"role": "system", "content": JURISDICTION_PROMPT},
+        {"role": "user", "content": url},
+    ]
+    kwargs = {"max_tokens": 250}
+    return chat_str(messages, chatmodel, **kwargs)
+
 
 # usage
 # taxonomy = read_taxonomy()

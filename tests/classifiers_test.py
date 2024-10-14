@@ -1,6 +1,6 @@
 import pytest
 
-from app.list_classifier import get_probs
+from app.classifiers import get_probs
 from app.models import AnthropicModelEnum, ChatModelParams, EngineEnum, OpenAIModelEnum
 
 test_msg = "I am a new tenant and I'm having trouble with my utilities."

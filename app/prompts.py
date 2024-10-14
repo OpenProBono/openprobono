@@ -180,7 +180,9 @@ VDB_PROMPT = (
     "The database description is: {description}."
 )
 
-# for list_classifier.py
+# for classifiers.py
+
+JURISDICTION_PROMPT = """Your task is to classify a URL into a state or federal jurisdiction. Your output should be the two letter code of a state or \"US\" if the jurisdiction is federal. Do not output anything else."""
 
 ISSUE_CLASSIFER_PROMPT = """You are a legal analysis AI trained to categorize non-lawyer descriptions of situations into predefined legal categories. Your task is to analyze a given situation and provide a probability distribution of possible classifications over a set of legal categories.
 
