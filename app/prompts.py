@@ -162,17 +162,34 @@ FILTERED_CASELAW_PROMPT = (
 # for vdb_tools.py
 
 VDB_QUERY_PROMPT = (
-    "This tool queries a database named {collection_name} "
-    "and returns the top {k} results. "
-    "The database description is: {description}."
+  "This tool queries a database named {collection_name} "
+  "and returns the top {k} results. "
+  "The database description is: {description}."
 )
 
 VDB_SOURCE_PROMPT = (
-    "This tool gets all of the text chunks comprising a source document "
-    "in their original order."
+  "This tool gets all of the text chunks comprising a source document "
+  "in their original order."
 )
 
-# for list_classifier.py
+# for classifiers.py
+
+JURISDICTION_SUMMARY_PROMPT = """Use the following summary of the URL to inform your classifications:
+
+{ai_summary}"""
+
+JURISDICTION_PROMPT = """Your task is to classify a URL into state and/or federal jurisdictions. Your output must be a list in the following format:
+
+[
+  {{
+    "name": a two letter code of a state or "US" if the jurisdiction is federal,
+    "confidence": a number between 0 and 1
+  }}
+]
+
+{optional_summary_prompt}
+
+Multiple jurisdictions are allowed. Do not output anything else."""
 
 ISSUE_CLASSIFER_PROMPT = """You are a legal analysis AI trained to categorize non-lawyer descriptions of situations into predefined legal categories. Your task is to analyze a given situation and provide a probability distribution of possible classifications over a set of legal categories.
 

@@ -8,6 +8,7 @@ import voyageai
 from langfuse.decorators import observe
 from openai import APITimeoutError, OpenAI
 
+from app.logger import setup_logger
 from app.models import (
     AnthropicModelEnum,
     EncoderParams,
@@ -15,6 +16,8 @@ from app.models import (
     OpenAIModelEnum,
     VoyageModelEnum,
 )
+
+logger = setup_logger()
 
 VOYAGE_MODELS = {
     VoyageModelEnum.large_2_instruct,
@@ -84,6 +87,7 @@ def embed_strs(text: list[str], encoder: EncoderParams) -> list:
         A list of lists of floats representing the embedded text
 
     """
+    logger.info("Embedding strings with %s", encoder.name)
     if encoder.name not in VOYAGE_MODELS:
         return embed_strs_openai(text, encoder)
     return embed_strs_voyage(text, encoder)
@@ -118,6 +122,7 @@ def embed_strs_openai(text: list[str], encoder: EncoderParams) -> list:
             tokens = token_count(text[j], encoder.name)
             if tokens > max_tokens:
                 msg = f"str at index {j} is {tokens} tokens but the max is {max_tokens}"
+                logger.error(msg)
                 raise ValueError(msg)
             j += 1
         attempt = 1
@@ -169,6 +174,7 @@ def embed_strs_voyage(text: list[str], encoder: EncoderParams) -> list:
             # determine if a string is too many tokens
             if tokens > max_tokens:
                 msg = f"str at index {j} is {tokens} tokens but the max is {max_tokens}"
+                logger.error(msg)
                 raise ValueError(msg)
             # determine if the array is too many tokens
             if array_tokens + tokens > max_array_tokens:

@@ -58,25 +58,37 @@ def filtered_search(results: dict) -> dict:
     return new_dict
 
 
-@observe()
+@observe(capture_input=False, capture_output=False)
 def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
     url = result["link"]
+    num_attempts = 10
 
-    # Check if URL has already failed
-    with failed_urls_lock:
-        if url in failed_urls:
-            logger.info("Skipping previously failed URL: %s", url)
-            return
+    langfuse_context.update_current_observation(input=url)
 
     with url_lock:
         if url not in url_locks:
             url_locks[url] = Lock()
 
     with url_locks[url]:
+        # Check if URL has already failed before processing
+        with failed_urls_lock:
+            if url in failed_urls:
+                logger.info("Skipping previously failed URL: %s", url)
+                return
         try:
             if not source_exists(search_collection, url, bot_id, tool.name):
                 logger.info("Uploading site: %s", url)
                 upload_site(search_collection, result, tool)
+                # check to ensure site appears in collection before releasing URL lock
+                attempt = 0
+                while not source_exists(search_collection, url, bot_id, tool.name) and attempt < num_attempts:
+                    attempt += 1
+                if attempt == num_attempts:
+                    logger.error("Site not found in collection, add to failed URLs: %s", url)
+                    with failed_urls_lock:
+                        failed_urls.add(url)
+            else:
+                logger.info("Site already uploaded: %s", url)
         except Exception:
             logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", url)
             with failed_urls_lock:
@@ -125,6 +137,7 @@ def dynamic_serpapi_tool(
             "tool_name": tool_name,
         },
     )
+
     response = filtered_search(
         GoogleSearch({
             "q": prf + " " + qr,
@@ -135,13 +148,16 @@ def dynamic_serpapi_tool(
         futures = []
         for result in response["organic_results"]:
             ctx = copy_context()
-            def task(r=result, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(process_site, r, bot_id, tool)
+            def task(r=result, b=bot_id, t=tool, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(process_site, r, b, t)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
             _ = future.result()
+
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
+    if tool.jurisdictions:
+        filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
         pks = [str(hit["id"]) for hit in res["result"]]
@@ -337,6 +353,15 @@ def openai_tool(t: SearchTool) -> dict:
         # default tool definition
         if not t.prompt:
             body["function"]["description"] = FILTERED_CASELAW_PROMPT
+    if t.method == SearchMethodEnum.dynamic_serpapi:
+        # add jurisdictions argument
+        body["function"]["parameters"]["properties"].update({
+            "jurisdictions": courtlistener_tool_args["jurisdictions"],
+        })
+        # modify query text to include jurisdiction in both args
+        body["function"]["parameters"]["properties"]["qr"]["description"] = (
+            "The search text. Include the jurisdiction here as well, if provided."
+        )
     return body
 
 def anthropic_tool(t: SearchTool) -> dict:
@@ -403,6 +428,8 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
         case SearchMethodEnum.serpapi:
             function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
+            if "jurisdictions" in function_args:
+                tool.jurisdictions = [j.upper() for j in function_args["jurisdictions"]]
             function_response = dynamic_serpapi_tool(qr, prf, tool)
         case SearchMethodEnum.google:
             function_response = google_search_tool(qr, prf)

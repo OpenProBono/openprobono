@@ -256,6 +256,7 @@ class SearchTool(BaseModel):
         name (str): The name of the search tool.
         prompt (str): The prompt for the search tool.
         prefix (str): The prefix for the search tool.
+        jurisdictions (list[str]): The jurisdictions for the search tool.
 
     """
 
@@ -266,6 +267,7 @@ class SearchTool(BaseModel):
     prompt: str
     prefix: str = ""
     bot_id: str = ""
+    jurisdictions: list[str] = []
 
 
 class VDBTool(BaseModel):

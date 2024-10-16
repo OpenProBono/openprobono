@@ -1,4 +1,4 @@
-"""Classifies a chat request into LIST categories."""
+"""LLM classification tasks."""
 
 from __future__ import annotations
 
@@ -12,7 +12,11 @@ from langfuse.decorators import observe
 from app.chat_models import chat_str
 from app.logger import setup_logger
 from app.models import ChatModelParams, LISTTerm, LISTTermProb, OpenAIModelEnum
-from app.prompts import ISSUE_CLASSIFER_PROMPT
+from app.prompts import (
+    ISSUE_CLASSIFER_PROMPT,
+    JURISDICTION_PROMPT,
+    JURISDICTION_SUMMARY_PROMPT,
+)
 
 logger = setup_logger()
 
@@ -101,10 +105,8 @@ def get_probs(
         "content": ISSUE_CLASSIFER_PROMPT.format(terms=terms_str, message=message),
     }
     response: str = chat_str([msg], chatmodel, **kwargs)
-    if "json" in response:
-        response = response.replace("json", "")
-    if "`" in response:
-        response = response.replace("`", "")
+    response = response.replace("json", "")
+    response = response.replace("`", "")
     response_json: dict = json.loads(response)
     categories = response_json.get("categories", [])
     return [
@@ -151,6 +153,47 @@ def tree_search(
         depth += 1
 
     return selected_terms
+
+
+def url_jurisdictions(
+    url: str,
+    chatmodel: ChatModelParams | None = None,
+    summary: str = "",
+) -> list[dict[str, str]]:
+    """Get jurisdiction(s) from a URL.
+
+    Parameters
+    ----------
+    url : str
+        URL to search for jurisdictions.
+    chatmodel : ChatModelParams | None, optional
+        Chat model to use for classification, by default None
+    summary : str, optional
+        Summary of the URL contents to aid classification, by default ""
+
+    Returns
+    -------
+    list[dict[str, str]]
+        List of dicts containing predicted jurisdiction `name` and `confidence`.
+
+    """
+    if summary:
+        summary_prompt = JURISDICTION_SUMMARY_PROMPT.format(ai_summary=summary)
+    else:
+        summary_prompt = ""
+    sys_prompt = JURISDICTION_PROMPT.format(optional_summary_prompt=summary_prompt)
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": url},
+    ]
+    kwargs = {"max_tokens": 250}
+    if chatmodel is None:
+        chatmodel = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
+    response = chat_str(messages, chatmodel, **kwargs)
+    response = response.replace("json", "")
+    response = response.replace("`", "")
+    return json.loads(response)
+
 
 # usage
 # taxonomy = read_taxonomy()
