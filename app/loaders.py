@@ -68,7 +68,7 @@ def scrape(site: str) -> list[Element]:
     try:
         r = requests.get(site, timeout=10)
         r.raise_for_status()
-        if site.endswith(".pdf"):
+        if site.endswith(".pdf") or b"%PDF" in r.content[:1024]:
             # try PyPDF first
             logger.info("scraping PDF: %s", site)
             reader = PdfReader(io.BytesIO(r.content))

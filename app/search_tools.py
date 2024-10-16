@@ -157,7 +157,7 @@ def dynamic_serpapi_tool(
 
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
     if tool.jurisdictions:
-        filter_expr += f" and metadata['jurisdiction'] in {tool.jurisdictions}"
+        filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
         pks = [str(hit["id"]) for hit in res["result"]]

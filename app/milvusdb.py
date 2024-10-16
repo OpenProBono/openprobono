@@ -16,7 +16,7 @@ from pymilvus import (
     utility,
 )
 
-from app.classifiers import url_jurisdiction
+from app.classifiers import url_jurisdictions
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
@@ -733,15 +733,17 @@ def upload_site(
         error = f"Failure: no elements found at {url}"
         logger.error(error)
         return {"message": error}
-    jurisdiction = url_jurisdiction(search_tool.chat_model, url)
     texts, metadatas = chunk_elements_by_title(
         elements,
         max_chars,
         new_after_n_chars,
         overlap,
     )
+    # TODO: vectors, ai summary, and jurisdictions can be done in parallel,
+    # unless jurisdictions are low confidence, then they need a summary
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
     ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
+    jurisdictions = url_jurisdictions(url, summary=ai_summary)
     bot_id = search_tool.bot_id
     tool_name = search_tool.name
     for metadata in metadatas:
@@ -749,7 +751,7 @@ def upload_site(
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
         metadata["bot_and_tool_id"] = [bot_id + tool_name]
-        metadata["jurisdiction"] = jurisdiction
+        metadata["jurisdictions"] = [j["name"] for j in jurisdictions]
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],

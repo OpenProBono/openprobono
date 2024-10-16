@@ -182,7 +182,22 @@ VDB_PROMPT = (
 
 # for classifiers.py
 
-JURISDICTION_PROMPT = """Your task is to classify a URL into a state or federal jurisdiction. Your output should be the two letter code of a state or \"US\" if the jurisdiction is federal. Do not output anything else."""
+JURISDICTION_SUMMARY_PROMPT = """Use the following summary of the URL to inform your classifications:
+
+{ai_summary}"""
+
+JURISDICTION_PROMPT = """Your task is to classify a URL into state and/or federal jurisdictions. Your output must be a list in the following format:
+
+[
+  {{
+    "name": a two letter code of a state or "US" if the jurisdiction is federal,
+    "confidence": a number between 0 and 1
+  }}
+]
+
+{optional_summary_prompt}
+
+Multiple jurisdictions are allowed. Do not output anything else."""
 
 ISSUE_CLASSIFER_PROMPT = """You are a legal analysis AI trained to categorize non-lawyer descriptions of situations into predefined legal categories. Your task is to analyze a given situation and provide a probability distribution of possible classifications over a set of legal categories.
 

@@ -124,7 +124,7 @@ class ChatModelParams(BaseModel):
     """Define a chat model for RAG."""
 
     engine: EngineEnum = EngineEnum.openai
-    model: str = OpenAIModelEnum.gpt_3_5.value
+    model: str = OpenAIModelEnum.gpt_4o_mini.value
     seed: int = 0
     temperature: float = 0.0
 

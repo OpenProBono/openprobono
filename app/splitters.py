@@ -84,7 +84,11 @@ def chunk_elements_by_title(
         maxlen = 1000
         keys_to_remove = [
             key for key in md
-            if not md[key] or (isinstance(md[key], str) and len(md[key]) > maxlen)
+            if not md[key] or (isinstance(md[key], str) and len(md[key]) > maxlen) \
+            or (
+                isinstance(md[key], list) \
+                and sum([len(str(item)) for item in md[key]]) > maxlen
+            )
         ]
         for key in keys_to_remove:
             del md[key]
