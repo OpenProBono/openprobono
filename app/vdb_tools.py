@@ -152,7 +152,7 @@ def session_data_toolset_creator(session_id: str | None) -> VDBTool | None:
             name="session_data",
             collection_name=SESSION_DATA,
             k=5,
-            prompt="Used to search user uploaded data. Only available if a user has uploaded a file.",
+            prompt="Use to search user uploaded files. ALWAYS use this tool if its available.",
             session_id=session_id,
         )
     else:
