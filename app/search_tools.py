@@ -76,17 +76,18 @@ def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
                 logger.info("Skipping previously failed URL: %s", url)
                 return
         try:
-            if not source_exists(search_collection, url, bot_id, tool.name):
+            if not source_exists(search_collection, result, bot_id, tool.name):
                 logger.info("Uploading site: %s", url)
-                upload_site(search_collection, result, tool)
-                # check to ensure site appears in collection before releasing URL lock
-                attempt = 0
-                while not source_exists(search_collection, url, bot_id, tool.name) and attempt < num_attempts:
-                    attempt += 1
-                if attempt == num_attempts:
-                    logger.error("Site not found in collection, add to failed URLs: %s", url)
-                    with failed_urls_lock:
-                        failed_urls.add(url)
+                res = upload_site(search_collection, result, tool)
+                if res["message"] == "Success":
+                    # check to ensure site appears in collection before releasing URL lock
+                    attempt = 0
+                    while not source_exists(search_collection, result, bot_id, tool.name) and attempt < num_attempts:
+                        attempt += 1
+                    if attempt == num_attempts:
+                        logger.error("Site not found in collection, add to failed URLs: %s", url)
+                        with failed_urls_lock:
+                            failed_urls.add(url)
             else:
                 logger.info("Site already uploaded: %s", url)
         except Exception:
@@ -275,9 +276,9 @@ def dynamic_courtroom5_search_tool(qr: str, tool: SearchTool, prf: str="") -> di
 
     def process_site(result: dict) -> None:
         try:
-            if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
+            if(not source_exists(search_collection, result, bot_id, tool_name)):
                 logger.info("Uploading site: %s", result["link"])
-                upload_site(search_collection, result["link"], tool)
+                upload_site(search_collection, result, tool)
         except Exception:
             logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", result["link"])
 
@@ -516,13 +517,17 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
     formatted_results = []
 
     if tool_output["message"] != "Success" or "result" not in tool_output:
+        logger.error("Unable to format search tool results: %s", tool.name)
         return formatted_results
 
     for result in tool_output["result"]:
-        entity = result.get("entity", result)
+        if "entity" in result:
+            entity = result["entity"]
+            # pks need to be strings to handle in JavaScript front end
+            entity["pk"] = str(result["id"])
         if tool.method == SearchMethodEnum.courtlistener:
             entity_type = "opinion"
-            entity_id = str(entity["opinion_id"]) + "-" + str(entity["chunk_index"])
+            entity_id = entity["opinion_id"]
         elif tool.method in (
             SearchMethodEnum.dynamic_serpapi,
             SearchMethodEnum.dynamic_courtroom5,

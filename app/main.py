@@ -85,7 +85,7 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
     return x_api_key
 
 
-@observe(capture_input=False)
+@observe(capture_input=False, capture_output=False)
 async def process_chat_stream(r: ChatRequest, message: str):
     # tracing
     langfuse_context.update_current_trace(
@@ -97,10 +97,10 @@ async def process_chat_stream(r: ChatRequest, message: str):
     if bot is None:
         error = "Failure: No bot found with bot id: " + r.bot_id
         langfuse_context.update_current_observation(level="ERROR", status_message=error)
-        yield json.dumps({
+        yield {
             "type": "response",
             "content": error,
-        }) + "\n"
+        }
         return
 
     # set conversation history
@@ -117,9 +117,12 @@ async def process_chat_stream(r: ChatRequest, message: str):
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
 
+    full_response = ""
     match bot.chat_model.engine:
         case EngineEnum.openai:
             for chunk in openai_bot_stream(r, bot):
+                if isinstance(chunk, dict) and chunk["type"] == "response":
+                    full_response += chunk["content"]
                 yield chunk
                 # Add a small delay to avoid blocking the event loop
                 await asyncio.sleep(0)
@@ -134,10 +137,14 @@ async def process_chat_stream(r: ChatRequest, message: str):
                 level="ERROR",
                 status_message=error,
             )
-            yield json.dumps({
+            yield {
                 "type": "response",
                 "content": error,
-            }) + "\n"
+            }
+    # trace and store
+    if full_response:
+        langfuse_context.update_current_trace(output=full_response)
+        store_conversation(r, full_response)
 
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
@@ -320,7 +327,6 @@ def init_session_chat_stream(
                 },
             ),
         ],
-        background_tasks: BackgroundTasks,
         api_key: str = Security(api_key_auth)) -> dict:
     """Initialize a new session with a message."""
     request.api_key = api_key
@@ -334,16 +340,12 @@ def init_session_chat_stream(
         api_key=request.api_key,
     )
 
-    async def stream_and_store():
-        full_response = ""
+    async def stream_response():
         yield cr.session_id #return the session id first (only in init)
         async for chunk in process_chat_stream(cr, request.message):
-            full_response += chunk
-            yield chunk
-        background_tasks.add_task(store_conversation, cr, full_response)
+            yield json.dumps(chunk) + "\n"
 
-    return StreamingResponse(stream_and_store(), media_type="text/event-stream")
-
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
 @api.post("/chat_session", tags=["Session Chat"])
@@ -398,22 +400,17 @@ def chat_session_stream(
                 },
             ),
         ],
-        background_tasks: BackgroundTasks,
         api_key: str = Security(api_key_auth))  -> StreamingResponse:
     """Continue a chat session with a message."""
     request.api_key = api_key
 
     cr = load_session(request)
 
-    async def stream_and_store():
-        full_response = ""
+    async def stream_response():
         async for chunk in process_chat_stream(cr, request.message):
-            full_response += chunk
-            yield chunk
-        background_tasks.add_task(store_conversation, cr, full_response)
+            yield json.dumps(chunk) + "\n"
 
-
-    return StreamingResponse(stream_and_store(), media_type="text/event-stream")
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
 

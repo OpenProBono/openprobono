@@ -65,8 +65,11 @@ def scrape(site: str) -> list[Element]:
 
     """
     elements = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) Gecko/20100101 Firefox/131.0"
+    }
     try:
-        r = requests.get(site, timeout=10)
+        r = requests.get(site, timeout=10, headers=headers)
         r.raise_for_status()
         if site.endswith(".pdf") or b"%PDF" in r.content[:1024]:
             # try PyPDF first
@@ -96,8 +99,6 @@ def scrape(site: str) -> list[Element]:
             logger.info("scraping fallback to unstructed: %s", site)
             # fall back to unstructured
             elements = partition(file=io.BytesIO(r.content))
-
-
     except (
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,

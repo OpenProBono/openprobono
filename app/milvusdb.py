@@ -12,6 +12,7 @@ from pymilvus import (
     CollectionSchema,
     DataType,
     FieldSchema,
+    MilvusException,
     connections,
     utility,
 )
@@ -266,6 +267,7 @@ def query(
     if expr:
         search_params["expr"] = expr
     res = coll.search(**search_params)
+    logger.info("Collection queried: %s", collection_name)
     if res:
         # on success, returns a list containing a single inner list containing
         # result objects
@@ -280,7 +282,6 @@ def query(
             langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
-    logger.info("Collection queried: %s", collection_name)
     return {"message": "Failure: unable to complete search"}
 
 
@@ -321,15 +322,15 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
 
 
 @observe()
-def source_exists(collection_name: str, url: str, bot_id: str, tool_name: str) -> bool:
+def source_exists(collection_name: str, search_result: dict, bot_id: str, tool_name: str) -> bool:
     """Check if a url source exists in a collection, for a specific bot and tool.
 
     Parameters
     ----------
     collection_name : str
         name of collection
-    url : str
-        source url to check for
+    search_result : dict
+        search result to check for
     bot_id : str
         bot id
     tool_name : str
@@ -341,16 +342,22 @@ def source_exists(collection_name: str, url: str, bot_id: str, tool_name: str) -
         True if the url is found, False otherwise
 
     """
+    url = search_result["link"]
     res = get_expr(collection_name, f"metadata['url']=='{url}'")
     hits = res["result"]
     q = sorted(hits, key=lambda x: x["pk"])
     pks, docs = [], []
     for doc in q:
         md = doc["metadata"]
-        if("bot_and_tool_id" not in md):
+        if "bot_and_tool_id" not in md:
             md["bot_and_tool_id"] = [bot_id + tool_name]
-        elif( (bot_id + tool_name) not in md["bot_and_tool_id"]):
+        elif bot_id + tool_name not in md["bot_and_tool_id"]:
             md["bot_and_tool_id"].append(bot_id + tool_name)
+        # TODO: remove this check after database is fully updated
+        if "title" not in md:
+            md["title"] = search_result["title"]
+            md["source"] = search_result["source"]
+            md["favicon"] = search_result["favicon"]
         else:
             continue
 
@@ -517,17 +524,22 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
             output_fields += [*load_vdb_param(collection_name, "fields")]
         case MilvusMetadataEnum.json:
             output_fields += ["metadata"]
-    q_iter = coll.query_iterator(
-        expr=expr,
-        output_fields=output_fields,
-        batch_size=batch_size,
-    )
     hits = []
-    res = q_iter.next()
-    while len(res) > 0:
-        hits += res
+    try:
+        q_iter = coll.query_iterator(
+            expr=expr,
+            output_fields=output_fields,
+            batch_size=batch_size,
+        )
         res = q_iter.next()
-    q_iter.close()
+        while len(res) > 0:
+            hits += res
+            res = q_iter.next()
+        q_iter.close()
+    except MilvusException as e:
+        logger.exception("Collection failed to get expression: %s", collection_name)
+        langfuse_context.update_current_observation(level="ERROR", status_message=str(e))
+        return {"message": "Failure"}
     pks = [str(hit["pk"]) for hit in hits]
     langfuse_context.update_current_observation(output=pks)
     logger.info("Collection got expression: %s", collection_name)

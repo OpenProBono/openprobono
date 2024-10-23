@@ -56,17 +56,17 @@ def stream_openai_response(response: OpenAIStream):
             if(chunk_content):
                 content += chunk_content
                 if content.endswith("\n"):
-                    yield json.dumps({
+                    yield {
                         "type": "response",
                         "content": content,
-                    }) + "\n"
+                    }
                     content = ""
 
     if content:
-        yield json.dumps({
+        yield {
             "type": "response",
             "content": content,
-        }) + "\n"
+        }
 
     tool_calls, current_dict = [], {}
     if(no_yield):
@@ -141,8 +141,8 @@ def openai_tool_call(tool_call: ChatCompletionMessageToolCall, bot: BotRequest) 
 
 
 @observe(capture_input=False)
-def openai_bot_stream(r: ChatRequest, bot: BotRequest):
-    """Call bot using openai engine.
+def openai_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator[dict, None, None]:
+    """Call streaming bot using openai engine.
 
     Parameters
     ----------
@@ -151,20 +151,27 @@ def openai_bot_stream(r: ChatRequest, bot: BotRequest):
     bot : BotRequest
         BotRequest object, containing the bot data
 
-    Returns
-    -------
-    str
-        The response from the bot
+
+    Yields
+    ------
+    Generator[dict]
+        The response chunks from the bot
 
     """
     if r.history[-1]["content"].strip() == "":
-        yield "Hi, how can I assist you today?"
+        yield {
+            "type": "response",
+            "content": "Hi, how can I assist you today?",
+        }
         return
     if moderate(r.history[-1]["content"].strip()):
-        yield (
-            "I'm sorry, I can't help you with that. "
-            "Please modify your message and try again."
-        )
+        yield {
+            "type": "response",
+            "content": (
+                "I'm sorry, I can't help you with that. "
+                "Please modify your message and try again."
+            ),
+        }
         return
 
     toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot, r.bot_id, r.session_id)
@@ -233,37 +240,35 @@ def openai_tools_stream(
 
         with ThreadPoolExecutor() as executor:
             futures = []
-            # map tool ids to tool counter for this iteration
-            tool_count = 1
-            tool_ids_indices = {}
+            # map tool ids to tool name
+            tool_id_name = {}
             for tool_call in tool_calls:
                 ctx = copy_context()
                 function_name = tool_call.function.name
-                yield json.dumps({
+                yield {
                     "type": "tool_call",
-                    "index": tool_count,
+                    "id": tool_call.id,
                     "name": function_name,
                     "args": tool_call.function.arguments,
-                }) + "\n"
-                tool_ids_indices[tool_call.id] = tool_count
-                tool_count += 1
+                }
+                tool_id_name[tool_call.id] = function_name
                 def task(tc=tool_call, context=ctx):  # noqa: ANN001, ANN202
                     return context.run(openai_tool_call, tc, bot)
                 futures.append(executor.submit(task))
             for future in as_completed(futures):
                 tool_call_id, tool_response, formatted_results = future.result()
-                yield json.dumps({
+                yield {
                     "type": "tool_result",
-                    "index": tool_ids_indices[tool_call_id],
-                    "name": function_name,
+                    "id": tool_call_id,
+                    "name": tool_id_name[tool_call_id],
                     "results": formatted_results,
-                }) + "\n"
+                }
                 all_sources += [res["id"] for res in formatted_results]
                 # extend conversation with function response
                 messages.append({
                     "tool_call_id": tool_call_id,
                     "role": "tool",
-                    "name": function_name,
+                    "name": tool_id_name[tool_call_id],
                     "content": tool_response,
                 })
                 tools_used += 1

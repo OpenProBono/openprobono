@@ -26,7 +26,8 @@ courtlistener_tool_args = {
         },
         "description": (
             "The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX', "
-            "to filter query results by jurisdiction. Use 'US' for federal courts."
+            "to filter query results by jurisdiction. Use 'US' for federal courts. "
+            "Leave empty to search all jurisdictions."
         ),
     },
     "keyword-qr": {

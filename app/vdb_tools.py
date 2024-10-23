@@ -4,11 +4,13 @@ from __future__ import annotations
 from pymilvus import Collection
 
 from app.courtlistener import courtlistener_collection
+from app.logger import setup_logger
 from app.milvusdb import SESSION_DATA, check_session_data, get_expr, query
 from app.models import BotRequest, EngineEnum, SearchMethodEnum, VDBMethodEnum, VDBTool
 from app.prompts import VDB_QUERY_PROMPT, VDB_SOURCE_PROMPT
 from app.search_tools import search_collection
 
+logger = setup_logger()
 
 def tool_prompt(tool: VDBTool) -> str:
     """Create a prompt for the given tool.
@@ -167,13 +169,7 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
             else:
                 # probably search_collection, assume source id is a URL
                 expr = f"metadata['url']=='{tool_source}'"
-            res = get_expr(collection_name, expr)
-            function_response = {
-                "text": "\n".join([hit["text"] for hit in res["result"]]),
-                # we're not currently doing anything that requires every chunks metadata
-                # so just return the first instance
-                "metadata": res["result"][0]["metadata"],
-            }
+            function_response = get_expr(collection_name, expr)
     return function_response
 
 
@@ -260,30 +256,56 @@ def find_vdb_tool(bot: BotRequest, tool_name: str) -> VDBTool | None:
 
 
 def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
-    formatted_results = []
+    """Format the output of a VDB tool.
 
+    Parameters
+    ----------
+    tool_output : dict
+        The output of the VDB tool
+    tool : VDBTool
+        The tool definition
+
+    Returns
+    -------
+    list[dict]
+        The formatted results
+
+    """
     if tool_output["message"] != "Success" or "result" not in tool_output:
-        return formatted_results
+        logger.error("Unable to format VDB tool results: %s", tool.name)
+        return []
 
-    for result in tool_output["result"]:
-        entity = result.get("entity", result)
-        if tool.collection_name == courtlistener_collection:
-            entity_type = "opinion"
-            entity_id = entity["opinion_id"] + "-" + entity["chunk_index"]
-        elif tool.collection_name == search_collection:
-            entity_type = "url"
-            entity_id = entity["metadata"]["url"]
-        elif tool.collection_name == SESSION_DATA:
-            entity_type = "file"
-            entity_id = entity["metadata"]["filename"]
-        else:
-            entity_type = "unknown"
-            entity_id = "unknown"
+    if tool.method == VDBMethodEnum.query:
+        entities = []
+        # query results contain 'distance', 'pk', and 'entity' keys
+        for hit in tool_output["result"]:
+            entity = hit["entity"]
+            # pks need to be strings to handle in JavaScript front end
+            entity["pk"] = str(hit["pk"])
+            entities.append(entity)
+    else:
+        # get_source uses get_expr which returns vectors, we don't need them here
+        entities = tool_output["result"]
+        for hit in entities:
+            del hit["vector"]
+            # pks need to be strings to handle in JavaScript front end
+            hit["pk"] = str(hit["pk"])
 
-        formatted_results.append({
-            "type": entity_type,
-            "entity": entity,
-            "id": entity_id,
-        })
+    if tool.collection_name == courtlistener_collection:
+        entity_type = "opinion"
+        entity_id_key = "id"
+    elif tool.collection_name == search_collection:
+        entity_type = "url"
+        entity_id_key = "url"
+    elif tool.collection_name == SESSION_DATA:
+        entity_type = "file"
+        entity_id_key = "filename"
+    else:
+        entity_type = "unknown"
+        entity_id_key = "unknown"
 
-    return formatted_results
+    return [{
+        "id": "unknown" if entity_type == "unknown" else hit["metadata"][entity_id_key],
+        "type": entity_type,
+        "entity": hit,
+    } for hit in entities]
