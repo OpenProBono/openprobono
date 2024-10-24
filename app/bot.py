@@ -219,8 +219,18 @@ def openai_tools_stream(
     """
     tools_used = 0
     usage_dict = {"input": 0, "output": 0, "total": 0}
+    # get the bot's source list up to this point in the conversation
     all_sources = []
+    src_msgs = [
+        msg for msg in messages
+        if msg["role"] == "system" and msg["content"].startswith("**Sources**:\n")
+    ]
+    for src_msg in src_msgs:
+        numbered_srcs = src_msg["content"].split("\n")[1:] # ignore first line
+        srcs = [num_src.split(" ")[1] for num_src in numbered_srcs]
+        all_sources += srcs
     while tools_used < MAX_NUM_TOOLS:
+        new_sources = []
         # Step 2: see if the bot wants to call any functions
         tool_calls, current_dict, usage = yield from stream_openai_response(response)
         if usage:
@@ -263,7 +273,7 @@ def openai_tools_stream(
                     "name": tool_id_name[tool_call_id],
                     "results": formatted_results,
                 }
-                all_sources += [res["id"] for res in formatted_results]
+                new_sources += [str(res["id"]) for res in formatted_results]
                 # extend conversation with function response
                 messages.append({
                     "tool_call_id": tool_call_id,
@@ -274,9 +284,18 @@ def openai_tools_stream(
                 tools_used += 1
 
         # remove duplicate sources while maintaining original order
-        srcset = set()
-        all_sources = [src for src in all_sources if not (src in srcset or srcset.add(src))]
-        source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
+        srcset = set(all_sources)
+        new_sources = [
+            src
+            for src in new_sources
+            if not (src in srcset or srcset.add(src))
+        ]
+        # only add the new sources to the bots source list
+        source_list = "\n".join([
+            f"{i}. {src}"
+            for i, src in enumerate(new_sources, start=len(all_sources) + 1)
+        ])
+        all_sources += new_sources
         # append the source list as a system message
         messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
         # get a new response from the model where it can see the function response
