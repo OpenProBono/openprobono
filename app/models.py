@@ -310,6 +310,8 @@ class ChatRequest(BaseModel):
     bot_id: str
     session_id: str = None
     api_key: str = ""
+    last_modified: str = ""
+    title: str = ""
 
 
 class ChatBySession(BaseModel):

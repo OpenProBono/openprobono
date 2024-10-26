@@ -219,10 +219,12 @@ def fetch_session(r: FetchSession) -> ChatRequest:
     session_data = session_data.to_dict()
 
     return ChatRequest( #building the actual ChatRequest object
-        history=session_data["history"],
+        history=session_data.get("history", []),
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
+        last_modified=str(session_data.get("last_message_timestamp", "")),
+        title=session_data.get("title", ""),
     )
 
 def store_bot(r: BotRequest, bot_id: str) -> bool:

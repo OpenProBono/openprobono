@@ -6,7 +6,6 @@ import json
 from typing import Annotated
 
 from fastapi import (
-    BackgroundTasks,
     Body,
     Depends,
     FastAPI,
@@ -18,7 +17,13 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 from langfuse.decorators import langfuse_context, observe
 
-from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
+from app.bot import (
+    anthropic_bot,
+    anthropic_bot_stream,
+    openai_bot,
+    openai_bot_stream,
+    title_chat,
+)
 from app.db import (
     admin_check,
     api_key_check,
@@ -144,6 +149,8 @@ async def process_chat_stream(r: ChatRequest, message: str):
     # trace and store
     if full_response:
         langfuse_context.update_current_trace(output=full_response)
+        if not r.title:
+            r.title = title_chat(r, bot, full_response)
         store_conversation(r, full_response)
 
 @observe(capture_input=False, capture_output=False)
@@ -436,12 +443,7 @@ def get_session(
     request.api_key = api_key
 
     cr = fetch_session(request)
-    return {
-        "message": "Success",
-        "history": cr.history,
-        "bot_id": cr.bot_id,
-        "session_id": cr.session_id,
-    }
+    return {"message": "Success"} | cr.model_dump()
 
 @api.post(path="/session_feedback", tags=["Session Chat"])
 def session_feedback(

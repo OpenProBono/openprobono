@@ -16,7 +16,7 @@ from openai.types.chat import (
     ChatCompletionMessageToolCall,
 )
 
-from app.chat_models import chat, chat_stream
+from app.chat_models import chat, chat_str, chat_stream
 from app.logger import setup_logger
 from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
@@ -626,3 +626,10 @@ def anthropic_tools_stream(
                 usage=usage,
             )
             return
+
+
+def title_chat(cr: ChatRequest, bot: BotRequest, output: str) -> str:
+    sys_msg = {"role": "system", "content": "Your task is to give a title for a conversation between a human and an AI. The title must be 7 words or less. Do not include quotation marks or output anything other than the title."}
+    history = [*cr.history, {"role": "assistant", "content": output}]
+    conv_msg = {"role": "user", "content": "\n\n".join(str(msg) for msg in history if msg["role"] == "user" or msg["role"] == "assistant")}
+    return chat_str([sys_msg, conv_msg], bot.chat_model)
