@@ -1,4 +1,5 @@
 """Defines the bot engines. The meaty stuff."""
+import ast
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -633,3 +634,63 @@ def title_chat(cr: ChatRequest, bot: BotRequest, output: str) -> str:
     history = [*cr.history, {"role": "assistant", "content": output}]
     conv_msg = {"role": "user", "content": "\n\n".join(str(msg) for msg in history if msg["role"] == "user" or msg["role"] == "assistant")}
     return chat_str([sys_msg, conv_msg], bot.chat_model)
+
+
+def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
+    """Format messages for front end display.
+
+    Parameters
+    ----------
+        cr : ChatRequest
+            Containing the conversation and session data
+        bot : BotRequest
+            To look up the tools used in the session
+
+    Returns
+    -------
+        list
+            The conversation history with formatted messages
+
+    """
+    history = []
+    for msg in cr.history:
+        if msg["role"] == "system": # ignore system prompts for front end display
+            continue
+        if msg["role"] == "assistant" and "tool_calls" in msg: # tool call
+            history += [
+                {
+                    "type": "tool_call",
+                    "id": tool_call["id"],
+                    "name": tool_call["function"]["name"],
+                    "args": tool_call["function"]["arguments"],
+                }
+                for tool_call in msg["tool_calls"]
+            ]
+        elif msg["role"] == "tool": # tool result
+            function_name = msg["name"]
+            tool_result = ast.literal_eval(msg["content"])
+            vdb_tool = find_vdb_tool(bot, function_name)
+            search_tool = find_search_tool(bot, function_name)
+            # Step 3: call the function
+            # Note: the JSON response may not always be valid;
+            # be sure to handle errors
+            if vdb_tool:
+                formatted_results = format_vdb_tool_results(tool_result, vdb_tool)
+            elif search_tool:
+                formatted_results = format_search_tool_results(
+                    tool_result,
+                    search_tool,
+                )
+            else:
+                formatted_results = []
+            history.append({
+                "type": "tool_result",
+                "id": msg["tool_call_id"],
+                "name": function_name,
+                "results": formatted_results,
+            })
+        elif msg["role"] == "user": # user message
+            history.append({"type": "user", "content": msg["content"]})
+        elif msg["role"] == "assistant": # assistant response
+            history.append({"type": "response", "content": msg["content"]})
+    return history

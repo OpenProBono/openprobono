@@ -20,6 +20,7 @@ from langfuse.decorators import langfuse_context, observe
 from app.bot import (
     anthropic_bot,
     anthropic_bot_stream,
+    format_session_history,
     openai_bot,
     openai_bot_stream,
     title_chat,
@@ -153,6 +154,7 @@ async def process_chat_stream(r: ChatRequest, message: str):
             r.title = title_chat(r, bot, full_response)
         store_conversation(r, full_response)
 
+
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
     # trace bot id
@@ -244,6 +246,7 @@ def chat(
     request.api_key = api_key
     return process_chat(request, "")
 
+
 @api.post("/initialize_session", tags=["Init Session"])
 def init_session(
         request: Annotated[
@@ -314,6 +317,7 @@ def init_session_chat(
         }
     except:
         return response
+
 
 @api.post("/initialize_session_chat_stream", tags=["Init Session"], response_model=str)
 def init_session_chat_stream(
@@ -389,6 +393,7 @@ def chat_session(
     except:
         return response
 
+
 @api.post("/chat_session_stream", tags=["Session Chat"])
 def chat_session_stream(
         request: Annotated[
@@ -420,7 +425,6 @@ def chat_session_stream(
     return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
-
 @api.post("/fetch_session", tags=["Session Chat"])
 def get_session(
         request: Annotated[
@@ -444,6 +448,34 @@ def get_session(
 
     cr = fetch_session(request)
     return {"message": "Success"} | cr.model_dump()
+
+
+@api.post("/fetch_session_formatted_history", tags=["Session Chat"])
+def get_formatted_session_history(
+    request: Annotated[
+        FetchSession,
+        Body(
+            openapi_examples={
+                "fetch formatted chat history via session": {
+                    "summary": "fetch chat history via session",
+                    "description": "Returns: {message: 'Success', history: list of formatted messages",
+                    "value": {
+                        "session_id": "some session id",
+                    },
+                },
+            },
+        ),
+    ],
+    api_key: str = Security(api_key_auth),
+)  -> dict:
+    """Fetch the formatted history of a session for front end display."""
+    request.api_key = api_key
+
+    cr = fetch_session(request)
+    bot = load_bot(cr.bot_id)
+    history = format_session_history(cr, bot)
+    return {"message": "Success", "history": history}
+
 
 @api.post(path="/session_feedback", tags=["Session Chat"])
 def session_feedback(
@@ -546,9 +578,11 @@ def create_bot(
 
     return {"message": "Success", "bot_id": bot_id}
 
+
 @api.post("/view_bots", tags=["Bot"])
 def view_bots(api_key: str = Security(api_key_auth)) -> dict:
     return {"message": "Success", "data": browse_bots(api_key)}
+
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
@@ -754,6 +788,7 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
+
 
 @api.get("/get_opinion_count", tags=["Opinion Search"])
 def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
