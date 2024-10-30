@@ -196,6 +196,8 @@ def load_session(r: ChatBySession) -> ChatRequest:
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
+        last_modified=str(session_data.get("last_message_timestamp", "")),
+        title=session_data.get("title", ""),
     )
 
 
