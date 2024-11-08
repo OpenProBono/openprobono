@@ -25,6 +25,7 @@ from app.bot import (
     openai_bot_stream,
     title_chat,
 )
+from app.citation_map import extract_cited_clauses
 from app.db import (
     admin_check,
     api_key_check,
@@ -52,6 +53,7 @@ from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    CitationRequest,
     EngineEnum,
     FetchSession,
     InitializeSession,
@@ -499,6 +501,32 @@ def session_feedback(
     request.api_key = api_key
 
     return {"message": "Success" if store_session_feedback(request) else "Failure"}
+
+
+@api.post("/get_cited_clauses", tags=["Session Chat"])
+def get_cited_clauses(
+    request: Annotated[
+        CitationRequest,
+        Body(
+            openapi_examples={
+                "map clauses to citations in a message": {
+                    "summary": "map clauses to citations in a message",
+                    "description": "Returns: {message: 'Success', cited_clauses: list of cited clauses} or {message: 'Failure'}",
+                    "value": {
+                        "message": "some message",
+                    },
+                },
+            },
+        ),
+    ],
+    api_key: str = Security(api_key_auth),
+)  -> dict:
+    """Get the clause to citation mapping for an LLM response."""
+    request.api_key = api_key
+    cited_clauses = extract_cited_clauses(request.message)
+    if cited_clauses:
+        return {"message": "Success", "cited_clauses": cited_clauses}
+    return {"message": "Failure"}
 
 
 @api.post("/create_bot", tags=["Bot"])

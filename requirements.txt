@@ -9,13 +9,16 @@ google-search-results==2.4.2
 langchain-text-splitters==0.2.2
 langfuse==2.43.3
 libmagic==1.0
+numpy==1.26.4
 openai==1.40.6
+pandas==2.2.3
 pandoc==2.4
 poppler-utils==0.1.0
 pymilvus==2.4.5
 PyPDF2==3.0.1
 serpapi==0.1.5
+spacy==3.7.5
 tiktoken==0.7.0
-unstructured[all-docs]==0.15.1
+unstructured[all-docs]==0.16.4
 uvicorn[standard]==0.30.6
 voyageai==0.2.3

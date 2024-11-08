@@ -358,8 +358,6 @@ def source_exists(collection_name: str, search_result: dict, bot_id: str, tool_n
             md["title"] = search_result["title"]
             md["source"] = search_result["source"]
             md["favicon"] = search_result["favicon"]
-        else:
-            continue
 
         # delete fields which are empty or over 1000 characters
         maxlen = 1000
