@@ -694,4 +694,6 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
             history.append({"type": "user", "content": msg["content"]})
         elif msg["role"] == "assistant": # assistant response
             history.append({"type": "response", "content": msg["content"]})
+            # add a done event simulating end of a response stream
+            history.append({"type": "done"})
     return history
