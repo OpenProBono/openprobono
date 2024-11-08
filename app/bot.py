@@ -298,7 +298,8 @@ def openai_tools_stream(
         ])
         all_sources += new_sources
         # append the source list as a system message
-        messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
+        if source_list:
+            messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
         # get a new response from the model where it can see the function response
         response = chat_stream(messages, bot.chat_model, **kwargs)
     # add usage to tracing after all tools are called
