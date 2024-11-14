@@ -146,6 +146,8 @@ def dynamic_serpapi_tool(
 
     with ThreadPoolExecutor() as executor:
         futures = []
+        if("organic_results" not in response):
+            return {"message": "No results found."}
         for result in response["organic_results"]:
             ctx = copy_context()
             def task(r=result, b=bot_id, t=tool, context=ctx):  # noqa: ANN001, ANN202

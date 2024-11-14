@@ -62,7 +62,6 @@ logger = setup_logger()
 
 X_API_KEY = APIKeyHeader(name="X-API-Key")
 
-
 def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
     """Authenticate API key. Source: https://stackoverflow.com/questions/67942766/fastapi-api-key-as-parameter-secure-enough.
 
