@@ -2,10 +2,10 @@ This is our work-in-progress legal AI search tool! This is only the backend/API 
 
 We use external resources that you will need to set up if you want to recreate the project.
 # List of External Resources:
-- OpenAI: llm calls
-- Serpapi: web search
+- OpenAI/Anthropic/Other Providers: llm calls
+- Serpapi/Google: web search
 - Langfuse: tracing
-- Milvus/Zilliz: vector database
+- Zilliz(Milvus): vector database
 - Firebase: database
 - More that are optional
 
