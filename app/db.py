@@ -289,6 +289,27 @@ def browse_bots(api_key: str) -> dict:
         data_dict[datum.id].pop("api_key")
     return data_dict
 
+def get_bot_by_id(bot_id: str) -> dict:
+    """Browse Bots by api key.
+
+    Parameters
+    ----------
+    bot_id : str
+        bot_id
+
+    Returns
+    -------
+    dict
+        the bot, associated with the id, or empty dict if not found
+
+    """
+    try:
+        bot_ref = db.collection(BOT_COLLECTION + DB_VERSION).document(bot_id).get().to_dict()
+        bot_ref.pop("api_key")
+    except:
+        bot_ref = {}
+    return bot_ref
+
 def load_vdb(collection_name: str) -> dict:
     """Load the parameters for a collection from the database.
 

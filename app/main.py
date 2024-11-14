@@ -23,6 +23,7 @@ from app.db import (
     api_key_check,
     browse_bots,
     fetch_session,
+    get_bot_by_id,
     get_cached_response,
     load_bot,
     load_session,
@@ -530,6 +531,11 @@ def create_bot(
 @api.post("/view_bots", tags=["Bot"])
 def view_bots(api_key: str = Security(api_key_auth)) -> dict:
     return {"message": "Success", "data": browse_bots(api_key)}
+
+@api.post("/view_bot", tags=["Bot"])
+def view_bot(bot_id: str, api_key: str = Security(api_key_auth)) -> dict:
+    return {"message": "Success", "data": get_bot_by_id(bot_id)}
+
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
