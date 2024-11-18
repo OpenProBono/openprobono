@@ -22,7 +22,7 @@ We use external resources that you will need to set up if you want to recreate t
 
 # DB Schema
 - Firebase will create the database collections on the fly, no need to set up a schema.
-- Milvus/Zilliz, here are our main schemas, we mainly only ever change the dimension of the vector. You can create these collections using our create_collection function as well.
+- Milvus/Zilliz, here are our main schemas, we mainly only ever change the dimension of the vector. You can create these collections using our create_collection function as well. You may want to consider using Milvus Lite if trying to run locally.
   - <img width="800" alt="Screenshot 2024-11-14 at 12 05 39 PM" src="https://github.com/user-attachments/assets/1c60e89a-720f-4474-a6f2-fcb8848604cd">
   - <img width="800" alt="Screenshot 2024-11-14 at 12 07 02 PM" src="https://github.com/user-attachments/assets/db5e6f01-b97a-4f31-98fe-467300e6957f">
 
