@@ -1,0 +1,1 @@
+This tool gets all of the text chunks comprising a source document in their original order.

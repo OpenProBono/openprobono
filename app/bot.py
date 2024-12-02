@@ -1,14 +1,14 @@
 """Defines the bot engines. The meaty stuff."""
 import ast
 import json
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from typing import Generator
+from typing import TYPE_CHECKING
 
 import openai
 from anthropic import Stream as AnthropicStream
 from anthropic.types import Message as AnthropicMessage
-from anthropic.types.content_block import ContentBlock
 from langfuse.decorators import langfuse_context, observe
 from openai import Stream as OpenAIStream
 from openai.types.chat import (
@@ -21,7 +21,6 @@ from app.chat_models import chat, chat_str, chat_stream
 from app.logger import setup_logger
 from app.models import BotRequest, ChatRequest
 from app.moderation import moderate
-from app.prompts import MAX_NUM_TOOLS
 from app.search_tools import (
     find_search_tool,
     format_search_tool_results,
@@ -35,7 +34,11 @@ from app.vdb_tools import (
     vdb_toolset_creator,
 )
 
+if TYPE_CHECKING:
+    from anthropic.types.content_block import ContentBlock
+
 openai.log = "debug"
+MAX_NUM_TOOLS = 8
 
 logger = setup_logger()
 
@@ -293,7 +296,7 @@ def openai_tools_stream(
         ]
         # only add the new sources to the bots source list
         source_list = "\n".join([
-            f"{i}. {src}"
+            f"[{i}] {src}"
             for i, src in enumerate(new_sources, start=len(all_sources) + 1)
         ])
         all_sources += new_sources

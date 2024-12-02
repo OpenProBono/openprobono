@@ -18,7 +18,6 @@ from app.models import (
 from app.prompts import (
     OPINION_SUMMARY_MAP_PROMPT,
     OPINION_SUMMARY_REDUCE_PROMPT,
-    SUMMARY_MAP_PROMPT,
     SUMMARY_PROMPT,
     SUMMARY_REFINE_PROMPT,
 )
@@ -129,7 +128,7 @@ def summarize_map_reduce_msg(
     """
     summaries = []
     for doc in documents:
-        prompt = SUMMARY_MAP_PROMPT.format(text=doc)
+        prompt = SUMMARY_PROMPT.format(text=doc)
         doc_msg = {"role":"user", "content":prompt}
         summary = chat_str([doc_msg], chat_model, **kwargs)
         summaries.append(summary)

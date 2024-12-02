@@ -2,7 +2,9 @@
 !Dockerfile
 !*.py
 !*.ipynb
+!*.md
 !requirements.txt
 !tests/
 !app/
 !app/eval
+!app/prompts

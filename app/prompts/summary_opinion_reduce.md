@@ -1,0 +1,1 @@
+Your task is to combine partial summaries of a judicial opinion into a single, comprehensive summary. {base_prompt}

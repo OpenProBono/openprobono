@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import uuid
 from enum import Enum, unique
-from typing import List
 
 from pydantic import BaseModel
 
-from app.prompts import COMBINE_TOOL_OUTPUTS_TEMPLATE
+from app.prompts import BOT_PROMPT
 
 
 def get_uuid_id() -> str:
@@ -152,17 +151,17 @@ class BotRequest(BaseModel):
         system_prompt (str): The system prompt.
         message_prompt (str): The message prompt.
         model (str): The model to be used.
-        search_tools (List[SearchTool]): The list of search tools.
-        vdb_tools (List[VDBTool]): The list of VDB tools.
+        search_tools (list[SearchTool]): The list of search tools.
+        vdb_tools (list[VDBTool]): The list of VDB tools.
         engine (EngineEnum): The engine to be used.
         api_key (str): The API key.
 
     """
 
-    system_prompt: str = COMBINE_TOOL_OUTPUTS_TEMPLATE
+    system_prompt: str = BOT_PROMPT
     message_prompt: str = ""
-    search_tools: List[SearchTool] = []
-    vdb_tools: List[VDBTool] = []
+    search_tools: list[SearchTool] = []
+    vdb_tools: list[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
     api_key: str = ""
 

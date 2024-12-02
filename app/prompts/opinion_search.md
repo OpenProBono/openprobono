@@ -1,0 +1,1 @@
+Use to find case law and optionally filter by jurisdiction and date range. You can search by semantic or keyword. For example, to search for cases related to workers compensation that cite the Jones Act, you can search semantically for "workers compensation" and search by keyword for "Jones Act". Be sure to enter dates in YYYY-MM-DD format.

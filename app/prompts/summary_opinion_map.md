@@ -1,0 +1,1 @@
+Your task is to summarize a judicial opinion. {base_prompt} If there is not any information related to a title, write "I could not find any information." for that bullet point.

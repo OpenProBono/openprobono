@@ -14,8 +14,6 @@ RUN pip install -r requirements.txt --no-cache-dir
 
 RUN python -m nltk.downloader -d /usr/local/share/nltk_data punkt punkt_tab averaged_perceptron_tagger averaged_perceptron_tagger_eng
 
-RUN python -m spacy download en_core_web_lg
-
 COPY app/ /api/app
 
 COPY .git /api/.git
