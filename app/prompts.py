@@ -9,6 +9,9 @@ prompts_path = Path(Path.cwd() / "app/prompts")
 with (prompts_path / "bot.md").open("r") as f:
     BOT_PROMPT = f.read()
 
+with (prompts_path / "title_chat.md").open("r") as f:
+    TITLE_CHAT_PROMPT = f.read()
+
 # for moderation.py
 
 # based on moderation prompt from Anthropic's API:

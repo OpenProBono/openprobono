@@ -19,8 +19,9 @@ from openai.types.chat import (
 
 from app.chat_models import chat, chat_str, chat_stream
 from app.logger import setup_logger
-from app.models import BotRequest, ChatRequest
+from app.models import BotRequest, ChatRequest, EngineEnum
 from app.moderation import moderate
+from app.prompts import TITLE_CHAT_PROMPT
 from app.search_tools import (
     find_search_tool,
     format_search_tool_results,
@@ -498,6 +499,46 @@ def anthropic_tools(
     ])
 
 
+def anthropic_tool_call(tool_call: dict, tool_call_id: str, bot: BotRequest) -> tuple[str, str, dict]:
+    """Call a tool for an Anthropic bot.
+
+    Parameters
+    ----------
+    tool_call : dict
+        the tool call object
+    tool_call_id : str
+        the tool call id
+    bot : BotRequest
+        the bot calling the tool
+
+    Returns
+    -------
+    tuple[str, str, dict]
+        tool call id, tool response, formatted tool results
+
+    """
+    function_args = json.loads(tool_call["input"])
+    function_name = tool_call["name"]
+    logger.info("Tool %s Called With Args %s", function_name, function_args)
+    vdb_tool = find_vdb_tool(bot, function_name)
+    search_tool = find_search_tool(bot, function_name)
+    # Step 3: call the function
+    if vdb_tool:
+        tool_response = run_vdb_tool(vdb_tool, function_args)
+        formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    elif search_tool:
+        tool_response = run_search_tool(search_tool, function_args)
+        formatted_results = format_search_tool_results(
+            tool_response,
+            search_tool,
+        )
+    else:
+        tool_response = "error: unable to run tool"
+        logger.error("Tool %s encountered an error", function_name)
+        formatted_results = []
+    return tool_call_id, str(tool_response), formatted_results
+
+
 @observe(capture_input=False)
 def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     if r.history[-1]["content"].strip() == "":
@@ -527,7 +568,6 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id} | kwargs,
     )
-    yield "  \n"
 
     # Step 1: send initial message to the model
     response: AnthropicStream = chat_stream(messages, bot.chat_model, **kwargs)
@@ -543,13 +583,24 @@ def anthropic_tools_stream(
 ) -> Generator:
     tools_used = 0
     usage = {"input": 0, "output": 0}
+    # get the bot's source list up to this point in the conversation
     all_sources = []
+    src_msgs = [
+        msg for msg in messages
+        if msg["role"] == "user" and msg["content"].startswith("**Sources**:\n")
+    ]
+    for src_msg in src_msgs:
+        numbered_srcs = src_msg["content"].split("\n")[1:] # ignore first line
+        srcs = [num_src.split(" ")[1] for num_src in numbered_srcs]
+        all_sources += srcs
     while tools_used < MAX_NUM_TOOLS:
+        new_sources = []
         # Step 2: see if the model wants to call any functions
         current_tool_call = None
         current_text = None
         tool_call_id = None
         tool_msg = {"role": "assistant", "content": []}
+        content = ""
 
         for chunk in response:
             if chunk.type == "content_block_start":
@@ -564,34 +615,51 @@ def anthropic_tools_stream(
             elif chunk.type == "content_block_delta":
                 if chunk.delta.type == "text_delta":
                     current_text["text"] += chunk.delta.text
-                    yield chunk.delta.text
+                    content += chunk.delta.text
+                    if "\n" in content:
+                        index_of_newline = content.rfind("\n")
+                        yield {
+                            "type": "response",
+                            "content": content[:index_of_newline],
+                        }
+                        content = content[index_of_newline + 1 :]
                 elif chunk.delta.type == "input_json_delta" and current_tool_call:
                     current_tool_call["input"] += chunk.delta.partial_json
             elif chunk.type == "content_block_stop":
                 if current_text:
                     tool_msg["content"].append(current_text)
                     current_text = None
+                    if content:
+                        yield {
+                            "type": "response",
+                            "content": content,
+                        }
+                        content = ""
                 if current_tool_call:
                     # Step 3: call the function for the model
                     function_args = json.loads(current_tool_call["input"])
                     function_name = current_tool_call["name"]
-                    yield f"  \nRunning {function_name} tool with the following arguments: {function_args}"
+                    yield {
+                        "type": "tool_call",
+                        "id": tool_call_id,
+                        "name": function_name,
+                        "args": current_tool_call["input"],
+                    }
 
-                    vdb_tool = find_vdb_tool(bot, function_name)
-                    search_tool = find_search_tool(bot, function_name)
-                    if vdb_tool:
-                        tool_response, sources = run_vdb_tool(vdb_tool, function_args)
-                    elif search_tool:
-                        tool_response, sources = run_search_tool(search_tool, function_args)
-                    else:
-                        tool_response = "error: unable to identify tool"
+                    tool_call_id, tool_response, formatted_results = anthropic_tool_call(
+                        current_tool_call,
+                        tool_call_id,
+                        bot,
+                    )
+
+                    yield {
+                        "type": "tool_result",
+                        "id": tool_call_id,
+                        "name": function_name,
+                        "results": formatted_results,
+                    }
                     # add sources from this tool call to the overall source list
-                    if sources:
-                        yield "Sources found: \n"
-                        for i, src in enumerate(sources, start=len(all_sources) + 1):
-                            yield f"{i}. {src} \n"
-                        yield "\n\n"
-                        all_sources += sources
+                    new_sources += [str(res["id"]) for res in formatted_results]
                     # tool use message
                     current_tool_call["id"] = tool_call_id
                     current_tool_call["type"] = "tool_use"
@@ -618,10 +686,29 @@ def anthropic_tools_stream(
                 usage["input"] += chunk.message.usage.input_tokens
                 usage["output"] += chunk.message.usage.output_tokens
 
+        if content:
+            yield {
+                "type": "response",
+                "content": content,
+            }
+
         if tool_call_id:
+            # remove duplicate sources while maintaining original order
+            srcset = set(all_sources)
+            new_sources = [
+                src
+                for src in new_sources
+                if not (src in srcset or srcset.add(src))
+            ]
+            # only add the new sources to the bots source list
+            source_list = "\n".join([
+                f"[{i}] {src}"
+                for i, src in enumerate(new_sources, start=len(all_sources) + 1)
+            ])
+            all_sources += new_sources
             # append the source list as a system message
-            source_list = "\n".join([f"{i}. {src}" for i, src in enumerate(all_sources, start=1)])
-            messages.append({"role": "system", "content": "**Sources**:\n" + source_list})
+            if source_list:
+                messages.append({"role": "user", "content": "**Sources**:\n" + source_list})
             # Step 4: Send function results to the model and get a new response
             response = chat_stream(messages, bot.chat_model, **kwargs)
         else:
@@ -633,11 +720,41 @@ def anthropic_tools_stream(
             return
 
 
+@observe(capture_input=False)
 def title_chat(cr: ChatRequest, bot: BotRequest, output: str) -> str:
-    sys_msg = {"role": "system", "content": "Your task is to give a title for a conversation between a human and an AI. The title must be 7 words or less. Do not include quotation marks or output anything other than the title."}
+    """Title a chat for front end display.
+
+    Parameters
+    ----------
+    cr : ChatRequest
+        ChatRequest object, containing the conversation
+    bot : BotRequest
+        BotRequest object, used to create the title
+    output : str
+        The bots response to the latest user message
+
+    Returns
+    -------
+    str
+        A title for the chat
+
+    """
+    kwargs = {}
     history = [*cr.history, {"role": "assistant", "content": output}]
-    conv_msg = {"role": "user", "content": "\n\n".join(str(msg) for msg in history if msg["role"] == "user" or msg["role"] == "assistant")}
-    return chat_str([sys_msg, conv_msg], bot.chat_model)
+    history_str = "\n\n".join(
+        str(msg)
+        for msg in history
+        if msg["role"] == "user" or msg["role"] == "assistant"
+    )
+    conv_msg = {"role": "user", "content": history_str}
+    match bot.chat_model.engine:
+        case EngineEnum.openai:
+            sys_msg = {"role": "system", "content": TITLE_CHAT_PROMPT}
+            messages = [sys_msg, conv_msg]
+        case EngineEnum.anthropic:
+            kwargs["system"] = TITLE_CHAT_PROMPT
+            messages = [conv_msg]
+    return chat_str(messages, bot.chat_model, **kwargs)
 
 
 def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:

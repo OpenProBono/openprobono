@@ -96,7 +96,6 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
 async def process_chat_stream(r: ChatRequest, message: str):
     # tracing
     langfuse_context.update_current_trace(
-        input=message,
         session_id=r.session_id,
         metadata={"bot_id": r.bot_id},
     )
@@ -114,15 +113,17 @@ async def process_chat_stream(r: ChatRequest, message: str):
     system_prompt_msg = {"role": "system", "content": bot.system_prompt}
     if not r.history or system_prompt_msg not in r.history:
         r.history.insert(0, system_prompt_msg)
-    if message:
-        r.history.append({"role": "user", "content": message})
-    else:
+    if not message:
         # invoke bot does not pass a new message, so get it from history
         user_messages = [
             msg for msg in r.history
             if "role" in msg and msg["role"] == "user"
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
+
+    r.history.append({"role": "user", "content": message})
+    # trace input
+    langfuse_context.update_current_trace(input=message)
 
     full_response = ""
     match bot.chat_model.engine:
@@ -135,6 +136,8 @@ async def process_chat_stream(r: ChatRequest, message: str):
                 await asyncio.sleep(0)
         case EngineEnum.anthropic:
             for chunk in anthropic_bot_stream(r, bot):
+                if isinstance(chunk, dict) and chunk["type"] == "response":
+                    full_response += chunk["content"]
                 yield chunk
                 # Add a small delay to avoid blocking the event loop
                 await asyncio.sleep(0)
@@ -158,8 +161,11 @@ async def process_chat_stream(r: ChatRequest, message: str):
 
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
-    # trace bot id
-    langfuse_context.update_current_trace(metadata={"bot_id": r.bot_id})
+    # tracing
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
     # check if bot exists
     bot = load_bot(r.bot_id)
     if bot is None:
@@ -171,9 +177,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
     system_prompt_msg = {"role": "system", "content": bot.system_prompt}
     if not r.history or system_prompt_msg not in r.history:
         r.history.insert(0, system_prompt_msg)
-    if message:
-        r.history.append({"role": "user", "content": message})
-    else:
+    if not message:
         # invoke bot does not pass a new message, so get it from history
         user_messages = [
             msg for msg in r.history
@@ -181,6 +185,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
 
+    r.history.append({"role": "user", "content": message})
     # trace input
     langfuse_context.update_current_trace(input=message)
 
