@@ -109,10 +109,6 @@ async def process_chat_stream(r: ChatRequest, message: str):
         }
         return
 
-    # set conversation history
-    system_prompt_msg = {"role": "system", "content": bot.system_prompt}
-    if not r.history or system_prompt_msg not in r.history:
-        r.history.insert(0, system_prompt_msg)
     if not message:
         # invoke bot does not pass a new message, so get it from history
         user_messages = [
@@ -125,9 +121,16 @@ async def process_chat_stream(r: ChatRequest, message: str):
     # trace input
     langfuse_context.update_current_trace(input=message)
 
+    if not r.title:
+        r.title = title_chat(bot, message)
+
     full_response = ""
     match bot.chat_model.engine:
         case EngineEnum.openai:
+            # set conversation history
+            system_prompt_msg = {"role": "system", "content": bot.system_prompt}
+            if not r.history or system_prompt_msg not in r.history:
+                r.history.insert(0, system_prompt_msg)
             for chunk in openai_bot_stream(r, bot):
                 if isinstance(chunk, dict) and chunk["type"] == "response":
                     full_response += chunk["content"]
@@ -154,8 +157,6 @@ async def process_chat_stream(r: ChatRequest, message: str):
     # trace and store
     if full_response:
         langfuse_context.update_current_trace(output=full_response)
-        if not r.title:
-            r.title = title_chat(r, bot, full_response)
         store_conversation(r, full_response)
 
 

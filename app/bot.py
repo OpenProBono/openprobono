@@ -554,10 +554,8 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     toolset = search_toolset_creator(bot, r.bot_id) + vdb_toolset_creator(bot, r.bot_id, r.session_id)
 
     # Step 0: tracing
-    # input tracing
-    messages = [msg for msg in r.history if msg["role"] != "system"]
     last_user_msg = next(
-        (m for m in messages[::-1] if m["role"] == "user"),
+        (m for m in r.history[::-1] if m["role"] == "user"),
         None,
     )
     langfuse_context.update_current_observation(input=last_user_msg["content"])
@@ -570,8 +568,8 @@ def anthropic_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator:
     )
 
     # Step 1: send initial message to the model
-    response: AnthropicStream = chat_stream(messages, bot.chat_model, **kwargs)
-    yield from anthropic_tools_stream(messages, response, bot, **kwargs)
+    response: AnthropicStream = chat_stream(r.history, bot.chat_model, **kwargs)
+    yield from anthropic_tools_stream(r.history, response, bot, **kwargs)
 
 
 @observe(capture_input=False, capture_output=False, as_type="generation")
@@ -721,17 +719,15 @@ def anthropic_tools_stream(
 
 
 @observe(capture_input=False)
-def title_chat(cr: ChatRequest, bot: BotRequest, output: str) -> str:
+def title_chat(bot: BotRequest, message: str) -> str:
     """Title a chat for front end display.
 
     Parameters
     ----------
-    cr : ChatRequest
-        ChatRequest object, containing the conversation
     bot : BotRequest
         BotRequest object, used to create the title
-    output : str
-        The bots response to the latest user message
+    message : str
+        The users initial message
 
     Returns
     -------
@@ -740,13 +736,7 @@ def title_chat(cr: ChatRequest, bot: BotRequest, output: str) -> str:
 
     """
     kwargs = {}
-    history = [*cr.history, {"role": "assistant", "content": output}]
-    history_str = "\n\n".join(
-        str(msg)
-        for msg in history
-        if msg["role"] == "user" or msg["role"] == "assistant"
-    )
-    conv_msg = {"role": "user", "content": history_str}
+    conv_msg = {"role": "user", "content": message}
     match bot.chat_model.engine:
         case EngineEnum.openai:
             sys_msg = {"role": "system", "content": TITLE_CHAT_PROMPT}
@@ -774,46 +764,105 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
 
     """
     history = []
-    for msg in cr.history:
-        if msg["role"] == "system": # ignore system prompts for front end display
-            continue
-        if msg["role"] == "assistant" and "tool_calls" in msg: # tool call
-            history += [
-                {
-                    "type": "tool_call",
-                    "id": tool_call["id"],
-                    "name": tool_call["function"]["name"],
-                    "args": tool_call["function"]["arguments"],
-                }
-                for tool_call in msg["tool_calls"]
-            ]
-        elif msg["role"] == "tool": # tool result
-            function_name = msg["name"]
-            tool_result = ast.literal_eval(msg["content"])
-            vdb_tool = find_vdb_tool(bot, function_name)
-            search_tool = find_search_tool(bot, function_name)
-            # Step 3: call the function
-            # Note: the JSON response may not always be valid;
-            # be sure to handle errors
-            if vdb_tool:
-                formatted_results = format_vdb_tool_results(tool_result, vdb_tool)
-            elif search_tool:
-                formatted_results = format_search_tool_results(
-                    tool_result,
-                    search_tool,
-                )
-            else:
-                formatted_results = []
-            history.append({
-                "type": "tool_result",
-                "id": msg["tool_call_id"],
-                "name": function_name,
-                "results": formatted_results,
-            })
-        elif msg["role"] == "user": # user message
-            history.append({"type": "user", "content": msg["content"]})
-        elif msg["role"] == "assistant": # assistant response
-            history.append({"type": "response", "content": msg["content"]})
-            # add a done event simulating end of a response stream
-            history.append({"type": "done"})
+    match bot.chat_model.engine:
+        case EngineEnum.openai:
+            for msg in cr.history:
+                if msg["role"] == "system": # ignore system prompts for front end display
+                    continue
+                if msg["role"] == "assistant" and "tool_calls" in msg: # tool call
+                    history += [
+                        {
+                            "type": "tool_call",
+                            "id": tool_call["id"],
+                            "name": tool_call["function"]["name"],
+                            "args": tool_call["function"]["arguments"],
+                        }
+                        for tool_call in msg["tool_calls"]
+                    ]
+                elif msg["role"] == "tool": # tool result
+                    function_name = msg["name"]
+                    tool_result = ast.literal_eval(msg["content"])
+                    vdb_tool = find_vdb_tool(bot, function_name)
+                    search_tool = find_search_tool(bot, function_name)
+                    # Step 3: call the function
+                    # Note: the JSON response may not always be valid;
+                    # be sure to handle errors
+                    if vdb_tool:
+                        formatted_results = format_vdb_tool_results(tool_result, vdb_tool)
+                    elif search_tool:
+                        formatted_results = format_search_tool_results(
+                            tool_result,
+                            search_tool,
+                        )
+                    else:
+                        formatted_results = []
+                    history.append({
+                        "type": "tool_result",
+                        "id": msg["tool_call_id"],
+                        "name": function_name,
+                        "results": formatted_results,
+                    })
+                elif msg["role"] == "user": # user message
+                    history.append({"type": "user", "content": msg["content"]})
+                elif msg["role"] == "assistant": # assistant response
+                    history.append({"type": "response", "content": msg["content"]})
+        case EngineEnum.anthropic:
+            for msg in cr.history:
+                if msg["role"] == "assistant": # assistant response or tool call
+                    if isinstance(msg["content"], str): # assistant response
+                        history.append({"type": "response", "content": msg["content"]})
+                        continue
+                    # content is a list of responses and/or tool calls
+                    for content in msg["content"]:
+                        if content["type"] == "text": # response text
+                            history.append({"type": "response", "content": content["text"]})
+                        elif content["type"] == "tool_use": # tool call
+                            history.append({
+                                "type": "tool_call",
+                                "id": content["id"],
+                                "name": content["name"],
+                                "args": content["input"],
+                            })
+                elif msg["role"] == "user": # user message (tool result, source list, or actual user message)
+                    if isinstance(msg["content"], str): # source list or actual user message
+                        if not msg["content"].startswith("**Sources**:\n"):
+                            # actual user message
+                            history.append({"type": "user", "content": msg["content"]})
+                        # ignore source list
+                        continue
+                    for content in msg["content"]: # tool result
+                        tool_call_id = content["tool_use_id"]
+                        # find tool name from tool call message
+                        tool_call_msg = next(
+                            (
+                                m for m in history
+                                if m["type"] == "tool_call" and m["id"] == tool_call_id
+                            ),
+                            None,
+                        )
+                        if tool_call_msg is None:
+                            logger.error("Format session history did not find tool call message in session %s", cr.session_id)
+                            return []
+                        function_name = tool_call_msg["name"]
+                        tool_result = ast.literal_eval(content["content"])
+                        vdb_tool = find_vdb_tool(bot, function_name)
+                        search_tool = find_search_tool(bot, function_name)
+                        # reformat tool results
+                        if vdb_tool:
+                            formatted_results = format_vdb_tool_results(tool_result, vdb_tool)
+                        elif search_tool:
+                            formatted_results = format_search_tool_results(
+                                tool_result,
+                                search_tool,
+                            )
+                        else:
+                            formatted_results = []
+                        history.append({
+                            "type": "tool_result",
+                            "id": tool_call_id,
+                            "name": function_name,
+                            "results": formatted_results,
+                        })
+    # add a done event signaling end of a response stream
+    history.append({"type": "done"})
     return history
