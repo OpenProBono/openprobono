@@ -62,7 +62,8 @@ class EngineEnum(str, Enum):
 class AnthropicModelEnum(str, Enum):
     """Enumeration class representing different Anthropic chat models."""
 
-    claude_3_5_sonnet = "claude-3-5-sonnet-20240620"
+    claude_3_5_sonnet = "claude-3-5-sonnet-latest"
+    claude_3_5_haiku = "claude-3-5-haiku-latest"
     claude_3_opus = "claude-3-opus-20240229"
     claude_3_sonnet = "claude-3-sonnet-20240229"
     claude_3_haiku = "claude-3-haiku-20240307"
@@ -93,6 +94,7 @@ class OpenAIModelEnum(str, Enum):
     gpt_4 = "gpt-4"
     gpt_4o = "gpt-4o"
     gpt_4o_240806 = "gpt-4o-2024-08-06"
+    gpt_4o_241120 = "gpt-4o-2024-11-20"
     gpt_4o_mini = "gpt-4o-mini"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"

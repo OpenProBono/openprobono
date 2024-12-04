@@ -821,7 +821,7 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
                                 "type": "tool_call",
                                 "id": content["id"],
                                 "name": content["name"],
-                                "args": content["input"],
+                                "args": str(content["input"]),
                             })
                 elif msg["role"] == "user": # user message (tool result, source list, or actual user message)
                     if isinstance(msg["content"], str): # source list or actual user message
