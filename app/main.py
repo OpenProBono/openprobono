@@ -586,6 +586,12 @@ def create_bot(
     return {"message": "Success", "bot_id": bot_id}
 
 
+@api.get("/view_bot", tags=["Bot"])
+def view_bot(bot_id: str, api_key: str = Security(api_key_auth)) -> dict:
+    logger.info("api_key %s viewing bot", api_key)
+    return {"message": "Success", "data": load_bot(bot_id)}
+
+
 @api.post("/view_bots", tags=["Bot"])
 def view_bots(api_key: str = Security(api_key_auth)) -> dict:
     return {"message": "Success", "data": browse_bots(api_key)}
