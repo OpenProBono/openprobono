@@ -12,6 +12,7 @@ from pymilvus import (
     CollectionSchema,
     DataType,
     FieldSchema,
+    MilvusException,
     connections,
     utility,
 )
@@ -266,6 +267,7 @@ def query(
     if expr:
         search_params["expr"] = expr
     res = coll.search(**search_params)
+    logger.info("Collection queried: %s", collection_name)
     if res:
         # on success, returns a list containing a single inner list containing
         # result objects
@@ -280,7 +282,6 @@ def query(
             langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
-    logger.info("Collection queried: %s", collection_name)
     return {"message": "Failure: unable to complete search"}
 
 
@@ -321,15 +322,15 @@ def fuzzy_keyword_query(keyword_query: str) -> str:
 
 
 @observe()
-def source_exists(collection_name: str, url: str, bot_id: str, tool_name: str) -> bool:
+def source_exists(collection_name: str, search_result: dict, bot_id: str, tool_name: str) -> bool:
     """Check if a url source exists in a collection, for a specific bot and tool.
 
     Parameters
     ----------
     collection_name : str
         name of collection
-    url : str
-        source url to check for
+    search_result : dict
+        search result to check for
     bot_id : str
         bot id
     tool_name : str
@@ -341,18 +342,22 @@ def source_exists(collection_name: str, url: str, bot_id: str, tool_name: str) -
         True if the url is found, False otherwise
 
     """
+    url = search_result["link"]
     res = get_expr(collection_name, f"metadata['url']=='{url}'")
     hits = res["result"]
     q = sorted(hits, key=lambda x: x["pk"])
     pks, docs = [], []
     for doc in q:
         md = doc["metadata"]
-        if("bot_and_tool_id" not in md):
+        if "bot_and_tool_id" not in md:
             md["bot_and_tool_id"] = [bot_id + tool_name]
-        elif( (bot_id + tool_name) not in md["bot_and_tool_id"]):
+        elif bot_id + tool_name not in md["bot_and_tool_id"]:
             md["bot_and_tool_id"].append(bot_id + tool_name)
-        else:
-            continue
+        # TODO: remove this check after database is fully updated
+        if "title" not in md:
+            md["title"] = search_result["title"]
+            md["source"] = search_result["source"]
+            md["favicon"] = search_result["favicon"]
 
         # delete fields which are empty or over 1000 characters
         maxlen = 1000
@@ -398,7 +403,7 @@ def upload_data(
     data_count = len(data)
     langfuse_context.update_current_observation(
         input={
-            "collection_name":collection_name,
+            "collection_name": collection_name,
             "data_count": data_count,
         },
     )
@@ -517,18 +522,24 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
             output_fields += [*load_vdb_param(collection_name, "fields")]
         case MilvusMetadataEnum.json:
             output_fields += ["metadata"]
-    q_iter = coll.query_iterator(
-        expr=expr,
-        output_fields=output_fields,
-        batch_size=batch_size,
-    )
     hits = []
-    res = q_iter.next()
-    while len(res) > 0:
-        hits += res
+    try:
+        q_iter = coll.query_iterator(
+            expr=expr,
+            output_fields=output_fields,
+            batch_size=batch_size,
+        )
         res = q_iter.next()
-    q_iter.close()
-    langfuse_context.update_current_observation(output=f"{len(hits)} hits")
+        while len(res) > 0:
+            hits += res
+            res = q_iter.next()
+        q_iter.close()
+    except MilvusException as e:
+        logger.exception("Collection failed to get expression: %s", collection_name)
+        langfuse_context.update_current_observation(level="ERROR", status_message=str(e))
+        return {"message": "Failure"}
+    pks = [str(hit["pk"]) for hit in hits]
+    langfuse_context.update_current_observation(output=pks)
     logger.info("Collection got expression: %s", collection_name)
     return {"message": "Success", "result": hits}
 
@@ -699,7 +710,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str, search_t
 @observe(capture_output=False)
 def upload_site(
     collection_name: str,
-    url: str,
+    search_result: dict,
     search_tool: SearchTool,
     max_chars: int = 10000,
     new_after_n_chars: int = 2500,
@@ -711,8 +722,8 @@ def upload_site(
     ----------
     collection_name : str
         Where the chunks will be uploaded.
-    url : str
-        The site to scrape.
+    search_result : dict
+        The search result of the site to scrape and upload.
     tool: SearchTool
         The search tool which this function is being used for
     max_chars : int, optional
@@ -728,6 +739,7 @@ def upload_site(
         With a `message` indicating success or failure
 
     """
+    url = search_result["link"]
     elements = scrape(url)
     if len(elements) == 0:
         error = f"Failure: no elements found at {url}"
@@ -752,6 +764,10 @@ def upload_site(
         metadata["ai_summary"] = ai_summary
         metadata["bot_and_tool_id"] = [bot_id + tool_name]
         metadata["jurisdictions"] = [j["name"] for j in jurisdictions]
+        metadata["title"] = search_result["title"]
+        metadata["source"] = search_result["source"]
+        if "favicon" in search_result:
+            metadata["favicon"] = search_result["favicon"]
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],
@@ -808,6 +824,7 @@ def session_upload_ocr(
     return upload_data(SESSION_DATA, data)
 
 
+@observe(capture_input=False)
 def file_upload(
     file: UploadFile,
     session_id: str,
@@ -824,6 +841,8 @@ def file_upload(
         The session associated with the file.
     summary: str, optional
         A summary of the file written by the user, by default None.
+    collection_name : str, optional
+        The collection where the file will be stored, by default SessionData.
 
     Returns
     -------
@@ -831,6 +850,8 @@ def file_upload(
         With a `message` indicating success or failure
 
     """
+    # tracing
+    langfuse_context.update_current_trace(input=file.filename, session_id=session_id)
     # extract text
     elements = partition_uploadfile(file)
     # chunk text

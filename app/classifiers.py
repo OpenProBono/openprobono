@@ -80,9 +80,6 @@ def get_probs(
     chatmodel : ChatModelParams, optional
         The engine and model to use for classification, by default
         openai and gpt-4o.
-    client : OpenAI | anthropic.Anthropic, optional
-        The client to use for the classification request. If not specified,
-        one will be created.
     kwargs : dict, optional
         For the LLM. By default, temperature = 0 and max_tokens = 1000.
 

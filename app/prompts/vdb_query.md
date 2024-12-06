@@ -1,0 +1,1 @@
+This tool queries a database named {collection_name} and returns the top {k} results. The database description is: {description}.

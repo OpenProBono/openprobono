@@ -37,6 +37,10 @@ def moderate(message: str, chatmodel: ChatModelParams = DEFAULT_MODERATOR) -> bo
     """
     match chatmodel.engine:
         case EngineEnum.openai:
+            moderators = {OpenAIModelEnum.mod_latest, OpenAIModelEnum.mod_stable}
+            if chatmodel.model not in moderators:
+                msg = f"Unsupported moderation model: {chatmodel.model}"
+                raise ValueError(msg)
             return moderate_openai(message, chatmodel.model)
         case EngineEnum.anthropic:
             return moderate_anthropic(message, chatmodel.model)

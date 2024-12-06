@@ -80,7 +80,7 @@ def chunk_elements_by_title(
         else:
             texts.append(chunks[i].text)
         md = chunks[i].metadata.to_dict()
-        # delete fields which are empty or over 1000 characters
+        # delete fields which are empty or over 1000 characters (strings or lists)
         maxlen = 1000
         keys_to_remove = [
             key for key in md

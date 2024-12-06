@@ -8,11 +8,16 @@ from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import chat_single_gemini, chat_str
 from app.encoders import max_token_indices
-from app.models import ChatModelParams, EngineEnum, GoogleModelEnum, OpenAIModelEnum, SummaryMethodEnum
+from app.models import (
+    ChatModelParams,
+    EngineEnum,
+    GoogleModelEnum,
+    OpenAIModelEnum,
+    SummaryMethodEnum,
+)
 from app.prompts import (
     OPINION_SUMMARY_MAP_PROMPT,
     OPINION_SUMMARY_REDUCE_PROMPT,
-    SUMMARY_MAP_PROMPT,
     SUMMARY_PROMPT,
     SUMMARY_REFINE_PROMPT,
 )
@@ -123,7 +128,7 @@ def summarize_map_reduce_msg(
     """
     summaries = []
     for doc in documents:
-        prompt = SUMMARY_MAP_PROMPT.format(text=doc)
+        prompt = SUMMARY_PROMPT.format(text=doc)
         doc_msg = {"role":"user", "content":prompt}
         summary = chat_str([doc_msg], chat_model, **kwargs)
         summaries.append(summary)
@@ -316,8 +321,6 @@ def summarize(
         The summarized text.
 
     """
-    # if(method != SummaryMethodEnum.gemini_full):
-    #     print("in method not gemini")
     if chat_model is None:
         chat_model = ChatModelParams(model=OpenAIModelEnum.gpt_4o_mini)
     langfuse_context.update_current_observation(

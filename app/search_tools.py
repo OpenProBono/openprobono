@@ -76,17 +76,18 @@ def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
                 logger.info("Skipping previously failed URL: %s", url)
                 return
         try:
-            if not source_exists(search_collection, url, bot_id, tool.name):
+            if not source_exists(search_collection, result, bot_id, tool.name):
                 logger.info("Uploading site: %s", url)
-                upload_site(search_collection, url, tool)
-                # check to ensure site appears in collection before releasing URL lock
-                attempt = 0
-                while not source_exists(search_collection, url, bot_id, tool.name) and attempt < num_attempts:
-                    attempt += 1
-                if attempt == num_attempts:
-                    logger.error("Site not found in collection, add to failed URLs: %s", url)
-                    with failed_urls_lock:
-                        failed_urls.add(url)
+                res = upload_site(search_collection, result, tool)
+                if res["message"] == "Success":
+                    # check to ensure site appears in collection before releasing URL lock
+                    attempt = 0
+                    while not source_exists(search_collection, result, bot_id, tool.name) and attempt < num_attempts:
+                        attempt += 1
+                    if attempt == num_attempts:
+                        logger.error("Site not found in collection, add to failed URLs: %s", url)
+                        with failed_urls_lock:
+                            failed_urls.add(url)
             else:
                 logger.info("Site already uploaded: %s", url)
         except Exception:
@@ -114,7 +115,7 @@ def dynamic_serpapi_tool(
     tool : SearchTool
         the tool using this search method
     num_results : int, optional
-        number of results to return, by default 5
+        number of results to return, by default 3
     k : int, optional
         number of chunks to return from milvus, by default 3
 
@@ -146,6 +147,8 @@ def dynamic_serpapi_tool(
 
     with ThreadPoolExecutor() as executor:
         futures = []
+        if("organic_results" not in response):
+            return {"message": "No results found."}
         for result in response["organic_results"]:
             ctx = copy_context()
             def task(r=result, b=bot_id, t=tool, context=ctx):  # noqa: ANN001, ANN202
@@ -166,7 +169,7 @@ def dynamic_serpapi_tool(
 
 
 @observe()
-def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
+def google_search_tool(qr: str, prf: str, k: int = 4) -> dict:
     """Query the google search api.
 
     Parameters
@@ -175,13 +178,13 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
         the query itself
     prf : str
         the prefix given by the tool (used for whitelists)
-    max_len : int, optional
-        maximum length of response text, by default 6400
+    k : int, optional
+        maximum number of results, by default 4
 
     Returns
     -------
-    str
-        the search results
+    dict
+        search results, sources
 
     """
     headers = {
@@ -193,14 +196,13 @@ def google_search_tool(qr: str, prf: str, max_len: int = 6400) -> str:
         "cx": os.environ["GOOGLE_SEARCH_API_CX"],
         "q": prf + " " + qr,
     }
-    return str(
-        requests.get("https://www.googleapis.com/customsearch/v1",
-                     params=params,
-                     headers=headers, timeout=30).json())[0:max_len]
+    site = "https://www.googleapis.com/customsearch/v1"
+    res = requests.get(site, params=params, headers=headers, timeout=15).json()
+    return res["items"][:k]
 
 
 @observe()
-def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
+def courtroom5_search_tool(qr: str, prf: str = "", k: int = 4) -> dict:
     """Query the custom courtroom5 google search api.
 
     Whitelisted sites defined by search cx key.
@@ -211,13 +213,13 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
         the query itself
     prf : str
         the prefix given by the tool (whitelisted sites defined by search cx key)
-    max_len : int, optional
-        maximum length of response text, by default 6400
+    k : int, optional
+        maximum number of results, by default 4
 
     Returns
     -------
-    str
-        the search results
+    dict
+        search results, sources
 
     """
     headers = {
@@ -229,10 +231,9 @@ def courtroom5_search_tool(qr: str, prf: str="", max_len: int = 6400) -> str:
         "cx": COURTROOM5_SEARCH_CX_KEY,
         "q": prf + " " + qr,
     }
-    return str(
-        requests.get("https://www.googleapis.com/customsearch/v1",
-                     params=params,
-                     headers=headers, timeout=30).json())[0:max_len]
+    site = "https://www.googleapis.com/customsearch/v1"
+    res = requests.get(site, params=params, headers=headers, timeout=15).json()
+    return res["items"][:k]
 
 
 # Implement this for regular programatic google search as well.
@@ -249,12 +250,12 @@ def dynamic_courtroom5_search_tool(qr: str, tool: SearchTool, prf: str="") -> di
     tool : SearchTool
         the tool using this search method
     prf : str
-        the prefix given by the tool
+        the prefix given by the tool, by default empty string
 
     Returns
     -------
-    str
-        the search results
+    dict
+        search results
 
     """
     bot_id = tool.bot_id
@@ -277,9 +278,9 @@ def dynamic_courtroom5_search_tool(qr: str, tool: SearchTool, prf: str="") -> di
 
     def process_site(result: dict) -> None:
         try:
-            if(not source_exists(search_collection, result["link"], bot_id, tool_name)):
+            if(not source_exists(search_collection, result, bot_id, tool_name)):
                 logger.info("Uploading site: %s", result["link"])
-                upload_site(search_collection, result["link"], tool)
+                upload_site(search_collection, result, tool)
         except Exception:
             logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", result["link"])
 
@@ -305,7 +306,7 @@ def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     Returns
     -------
     dict
-        the dict of results
+        results
 
     """
     return filtered_search(
@@ -407,7 +408,7 @@ def anthropic_tool(t: SearchTool) -> dict:
     return body
 
 
-def run_search_tool(tool: SearchTool, function_args: dict) -> str:
+def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
     """Create a search tool for an openai agent.
 
     Parameters
@@ -419,7 +420,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
 
     Returns
     -------
-    str
+    dict
         The response from the search tool
 
     """
@@ -463,7 +464,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
             function_response = dynamic_courtroom5_search_tool(qr, prf, tool)
-    return str(function_response)
+    return function_response
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
     """Create a search toolset for the bot from all the search tools.
@@ -512,3 +513,44 @@ def find_search_tool(bot: BotRequest, tool_name: str) -> SearchTool | None:
         (t for t in bot.search_tools if tool_name == t.name),
         None,
     )
+
+
+def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict]:
+    formatted_results = []
+
+    if tool_output["message"] != "Success" or "result" not in tool_output:
+        logger.error("Unable to format search tool results: %s", tool.name)
+        return formatted_results
+
+    for result in tool_output["result"]:
+        if "entity" in result:
+            entity = result["entity"]
+            # pks need to be strings to handle in JavaScript front end
+            entity["pk"] = str(result["id"])
+        if tool.method == SearchMethodEnum.courtlistener:
+            entity_type = "opinion"
+            entity_id = entity["opinion_id"]
+        elif tool.method in (
+            SearchMethodEnum.dynamic_serpapi,
+            SearchMethodEnum.dynamic_courtroom5,
+        ):
+            entity_type = "url"
+            entity_id = entity["metadata"]["url"]
+        elif tool.method in (
+            SearchMethodEnum.courtroom5,
+            SearchMethodEnum.google,
+            SearchMethodEnum.serpapi,
+        ):
+            entity_type = "url"
+            entity_id = entity["link"]
+        else:
+            entity_type = "unknown"
+            entity_id = "unknown"
+
+        formatted_results.append({
+            "type": entity_type,
+            "entity": entity,
+            "id": entity_id,
+        })
+
+    return formatted_results

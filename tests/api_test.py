@@ -3,8 +3,8 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from app import main
 from app.logger import setup_logger
-import app.main as main
 
 logger = setup_logger()
 

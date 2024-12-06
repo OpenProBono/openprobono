@@ -76,13 +76,12 @@ def admin_check(api_key: str) -> bool:
         return result.to_dict()["admin"]
     return False
 
-def store_conversation(r: ChatRequest, output: str) -> bool:
-    """Store the conversation in the database.
+def store_conversation_history(r: ChatRequest) -> bool:
+    """Store the conversation history in the database.
 
     Args:
     ----
-        r (ChatRequest): Chat request object
-        output (str): The output from the bot
+        r (ChatRequest): Chat request object containing history
 
     Returns:
     -------
@@ -91,8 +90,6 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
     """
     if r.session_id is None or r.session_id == "":
         r.session_id = get_uuid_id()
-
-    r.history.append({"role": "assistant", "content": output})
 
     data = r.model_dump()
     data["num_msg"] = len(r.history)
@@ -196,6 +193,8 @@ def load_session(r: ChatBySession) -> ChatRequest:
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
+        last_modified=str(session_data.get("last_message_timestamp", "")),
+        title=session_data.get("title", ""),
     )
 
 
@@ -219,10 +218,12 @@ def fetch_session(r: FetchSession) -> ChatRequest:
     session_data = session_data.to_dict()
 
     return ChatRequest( #building the actual ChatRequest object
-        history=session_data["history"],
+        history=session_data.get("history", []),
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
+        last_modified=str(session_data.get("last_message_timestamp", "")),
+        title=session_data.get("title", ""),
     )
 
 def store_bot(r: BotRequest, bot_id: str) -> bool:

@@ -1,5 +1,4 @@
 import unittest
-from re import search
 
 from app import search_tools
 from app.models import SearchTool

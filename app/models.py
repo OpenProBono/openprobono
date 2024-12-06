@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import uuid
 from enum import Enum, unique
-from typing import List
 
 from pydantic import BaseModel
 
-from app.prompts import COMBINE_TOOL_OUTPUTS_TEMPLATE
+from app.prompts import BOT_PROMPT
 
 
 def get_uuid_id() -> str:
@@ -41,6 +40,13 @@ class SummaryMethodEnum(str, Enum):
     refine = "refine"
     gemini_full = "gemini_full" #is special case because it uses gemini instead of same llm as chat itself.
 
+@unique
+class VDBMethodEnum(str, Enum):
+    """Enumeration class representing different VDB methods."""
+
+    query = "query"
+    get_source = "get_source"
+
 
 @unique
 class EngineEnum(str, Enum):
@@ -56,7 +62,8 @@ class EngineEnum(str, Enum):
 class AnthropicModelEnum(str, Enum):
     """Enumeration class representing different Anthropic chat models."""
 
-    claude_3_5_sonnet = "claude-3-5-sonnet-20240620"
+    claude_3_5_sonnet = "claude-3-5-sonnet-latest"
+    claude_3_5_haiku = "claude-3-5-haiku-latest"
     claude_3_opus = "claude-3-opus-20240229"
     claude_3_sonnet = "claude-3-sonnet-20240229"
     claude_3_haiku = "claude-3-haiku-20240307"
@@ -84,13 +91,15 @@ class OpenAIModelEnum(str, Enum):
 
     gpt_3_5 = "gpt-3.5-turbo-0125"
     gpt_3_5_1106 = "gpt-3.5-turbo-1106"
-    gpt_3_5_instruct = "gpt-3.5-turbo-instruct"
     gpt_4 = "gpt-4"
     gpt_4o = "gpt-4o"
     gpt_4o_240806 = "gpt-4o-2024-08-06"
+    gpt_4o_241120 = "gpt-4o-2024-11-20"
     gpt_4o_mini = "gpt-4o-mini"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
+    o1_preview = "o1-preview"
+    o1_mini = "o1-mini"
     mod_stable = "text-moderation-stable"
     mod_latest = "text-moderation-latest"
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down
@@ -144,17 +153,17 @@ class BotRequest(BaseModel):
         system_prompt (str): The system prompt.
         message_prompt (str): The message prompt.
         model (str): The model to be used.
-        search_tools (List[SearchTool]): The list of search tools.
-        vdb_tools (List[VDBTool]): The list of VDB tools.
+        search_tools (list[SearchTool]): The list of search tools.
+        vdb_tools (list[VDBTool]): The list of VDB tools.
         engine (EngineEnum): The engine to be used.
         api_key (str): The API key.
 
     """
 
-    system_prompt: str = COMBINE_TOOL_OUTPUTS_TEMPLATE
+    system_prompt: str = BOT_PROMPT
     message_prompt: str = ""
-    search_tools: List[SearchTool] = []
-    vdb_tools: List[VDBTool] = []
+    search_tools: list[SearchTool] = []
+    vdb_tools: list[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
     api_key: str = ""
 
@@ -167,7 +176,7 @@ class OpinionSearchRequest(BaseModel):
     query : str
         The query
     k : int, optional
-        The number of results to return, by default 10
+        The number of results to return, by default 5
     jurisdictions : list[str] | None, optional
         The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX',
         to filter query results by state. Use 'us-app' for federal appellate,
@@ -183,7 +192,7 @@ class OpinionSearchRequest(BaseModel):
     """
 
     query: str
-    k: int = 10
+    k: int = 5
     jurisdictions: list[str] | None = None
     keyword_query: str | None = None
     after_date: str | None = None
@@ -261,6 +270,7 @@ class SearchTool(BaseModel):
     bot_id: str = ""
     jurisdictions: list[str] = []
 
+
 class VDBTool(BaseModel):
     """Model class representing a VDB tool.
 
@@ -271,14 +281,18 @@ class VDBTool(BaseModel):
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
         session_id (str | None): The session id if querying session data, else None.
+        method (VDBMethodEnum): The vector database method to be used.
+        bot_id (str): The bot associated with this tool.
 
     """
 
     name: str
     collection_name: str
-    k: int
+    k: int = 4
     prompt: str = ""
     session_id: str | None = None
+    method: VDBMethodEnum = VDBMethodEnum.query
+    bot_id: str = ""
 
 
 class ChatRequest(BaseModel):
@@ -297,6 +311,8 @@ class ChatRequest(BaseModel):
     bot_id: str
     session_id: str = None
     api_key: str = ""
+    last_modified: str = ""
+    title: str = ""
 
 
 class ChatBySession(BaseModel):

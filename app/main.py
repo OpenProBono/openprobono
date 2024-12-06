@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Annotated
 
 from fastapi import (
-    BackgroundTasks,
     Body,
     Depends,
     FastAPI,
@@ -17,7 +17,14 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 from langfuse.decorators import langfuse_context, observe
 
-from app.bot import anthropic_bot, anthropic_bot_stream, openai_bot, openai_bot_stream
+from app.bot import (
+    anthropic_bot,
+    anthropic_bot_stream,
+    format_session_history,
+    openai_bot,
+    openai_bot_stream,
+    title_chat,
+)
 from app.db import (
     admin_check,
     api_key_check,
@@ -28,7 +35,7 @@ from app.db import (
     load_session,
     set_session_to_bot,
     store_bot,
-    store_conversation,
+    store_conversation_history,
     store_opinion_feedback,
     store_session_feedback,
 )
@@ -84,20 +91,24 @@ def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
     return x_api_key
 
 
-
+@observe(capture_input=False, capture_output=False)
 async def process_chat_stream(r: ChatRequest, message: str):
+    # tracing
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
     bot = load_bot(r.bot_id)
     if bot is None:
-        yield "An error occurred."
+        error = "Failure: No bot found with bot id: " + r.bot_id
+        langfuse_context.update_current_observation(level="ERROR", status_message=error)
+        yield {
+            "type": "response",
+            "content": error,
+        }
         return
 
-    # set conversation history
-    system_prompt_msg = {"role": "system", "content": bot.system_prompt}
-    if not r.history or system_prompt_msg not in r.history:
-        r.history.insert(0, system_prompt_msg)
-    if message:
-        r.history.append({"role": "user", "content": message})
-    else:
+    if not message:
         # invoke bot does not pass a new message, so get it from history
         user_messages = [
             msg for msg in r.history
@@ -105,24 +116,57 @@ async def process_chat_stream(r: ChatRequest, message: str):
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
 
+    r.history.append({"role": "user", "content": message})
+    # trace input
+    langfuse_context.update_current_trace(input=message)
+
+    if not r.title:
+        r.title = title_chat(bot, message)
+
+    full_response = ""
     match bot.chat_model.engine:
         case EngineEnum.openai:
+            # set conversation history
+            system_prompt_msg = {"role": "system", "content": bot.system_prompt}
+            if not r.history or system_prompt_msg not in r.history:
+                r.history.insert(0, system_prompt_msg)
             for chunk in openai_bot_stream(r, bot):
+                if isinstance(chunk, dict) and chunk["type"] == "response":
+                    full_response += chunk["content"]
                 yield chunk
                 # Add a small delay to avoid blocking the event loop
                 await asyncio.sleep(0)
         case EngineEnum.anthropic:
             for chunk in anthropic_bot_stream(r, bot):
+                if isinstance(chunk, dict) and chunk["type"] == "response":
+                    full_response += chunk["content"]
                 yield chunk
                 # Add a small delay to avoid blocking the event loop
                 await asyncio.sleep(0)
         case _:
-            yield Exception("Invalid bot engine for streaming")
+            error = "Failure: Invalid bot engine for streaming"
+            langfuse_context.update_current_observation(
+                level="ERROR",
+                status_message=error,
+            )
+            yield {
+                "type": "response",
+                "content": error,
+            }
+    # trace and store
+    if full_response:
+        langfuse_context.update_current_trace(output=full_response)
+        r.history.append({"role": "assistant", "content": full_response})
+        store_conversation_history(r)
+
 
 @observe(capture_input=False, capture_output=False)
 def process_chat(r: ChatRequest, message: str) -> dict:
-    # trace bot id
-    langfuse_context.update_current_trace(metadata={"bot_id": r.bot_id})
+    # tracing
+    langfuse_context.update_current_trace(
+        session_id=r.session_id,
+        metadata={"bot_id": r.bot_id},
+    )
     # check if bot exists
     bot = load_bot(r.bot_id)
     if bot is None:
@@ -134,9 +178,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
     system_prompt_msg = {"role": "system", "content": bot.system_prompt}
     if not r.history or system_prompt_msg not in r.history:
         r.history.insert(0, system_prompt_msg)
-    if message:
-        r.history.append({"role": "user", "content": message})
-    else:
+    if not message:
         # invoke bot does not pass a new message, so get it from history
         user_messages = [
             msg for msg in r.history
@@ -144,6 +186,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
 
+    r.history.append({"role": "user", "content": message})
     # trace input
     langfuse_context.update_current_trace(input=message)
 
@@ -170,7 +213,8 @@ def process_chat(r: ChatRequest, message: str) -> dict:
                 return {"message": error}
 
     # store conversation (and also log the api_key)
-    store_conversation(r, output)
+    r.history.append({"role": "assistant", "content": output})
+    store_conversation_history(r)
     # trace session id and output
     langfuse_context.update_current_trace(session_id=r.session_id, output=output)
     # return the chat and the bot_id
@@ -209,6 +253,7 @@ def chat(
     """Call a bot with history (only for backwards compat, could be deprecated)."""
     request.api_key = api_key
     return process_chat(request, "")
+
 
 @api.post("/initialize_session", tags=["Init Session"])
 def init_session(
@@ -281,6 +326,7 @@ def init_session_chat(
     except:
         return response
 
+
 @api.post("/initialize_session_chat_stream", tags=["Init Session"], response_model=str)
 def init_session_chat_stream(
         request: Annotated[
@@ -300,7 +346,6 @@ def init_session_chat_stream(
                 },
             ),
         ],
-        background_tasks: BackgroundTasks,
         api_key: str = Security(api_key_auth)) -> dict:
     """Initialize a new session with a message."""
     request.api_key = api_key
@@ -314,16 +359,12 @@ def init_session_chat_stream(
         api_key=request.api_key,
     )
 
-    async def stream_and_store():
-        full_response = ""
+    async def stream_response():
         yield cr.session_id #return the session id first (only in init)
         async for chunk in process_chat_stream(cr, request.message):
-            full_response += chunk
-            yield chunk
-        background_tasks.add_task(store_conversation, cr, full_response)
+            yield json.dumps(chunk) + "\n"
 
-    return StreamingResponse(stream_and_store(), media_type="text/event-stream")
-
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
 @api.post("/chat_session", tags=["Session Chat"])
@@ -360,6 +401,7 @@ def chat_session(
     except:
         return response
 
+
 @api.post("/chat_session_stream", tags=["Session Chat"])
 def chat_session_stream(
         request: Annotated[
@@ -378,23 +420,17 @@ def chat_session_stream(
                 },
             ),
         ],
-        background_tasks: BackgroundTasks,
         api_key: str = Security(api_key_auth))  -> StreamingResponse:
     """Continue a chat session with a message."""
     request.api_key = api_key
 
     cr = load_session(request)
 
-    async def stream_and_store():
-        full_response = ""
+    async def stream_response():
         async for chunk in process_chat_stream(cr, request.message):
-            full_response += chunk
-            yield chunk
-        background_tasks.add_task(store_conversation, cr, full_response)
+            yield json.dumps(chunk) + "\n"
 
-
-    return StreamingResponse(stream_and_store(), media_type="text/event-stream")
-
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
 @api.post("/fetch_session", tags=["Session Chat"])
@@ -419,12 +455,35 @@ def get_session(
     request.api_key = api_key
 
     cr = fetch_session(request)
-    return {
-        "message": "Success",
-        "history": cr.history,
-        "bot_id": cr.bot_id,
-        "session_id": cr.session_id,
-    }
+    return {"message": "Success"} | cr.model_dump()
+
+
+@api.post("/fetch_session_formatted_history", tags=["Session Chat"])
+def get_formatted_session_history(
+    request: Annotated[
+        FetchSession,
+        Body(
+            openapi_examples={
+                "fetch formatted chat history via session": {
+                    "summary": "fetch chat history via session",
+                    "description": "Returns: {message: 'Success', history: list of formatted messages",
+                    "value": {
+                        "session_id": "some session id",
+                    },
+                },
+            },
+        ),
+    ],
+    api_key: str = Security(api_key_auth),
+)  -> dict:
+    """Fetch the formatted history of a session for front end display."""
+    request.api_key = api_key
+
+    cr = fetch_session(request)
+    bot = load_bot(cr.bot_id)
+    history = format_session_history(cr, bot)
+    return {"message": "Success", "history": history}
+
 
 @api.post(path="/session_feedback", tags=["Session Chat"])
 def session_feedback(
@@ -527,9 +586,17 @@ def create_bot(
 
     return {"message": "Success", "bot_id": bot_id}
 
+
+@api.get("/view_bot", tags=["Bot"])
+def view_bot(bot_id: str, api_key: str = Security(api_key_auth)) -> dict:
+    logger.info("api_key %s viewing bot", api_key)
+    return {"message": "Success", "data": load_bot(bot_id)}
+
+
 @api.post("/view_bots", tags=["Bot"])
 def view_bots(api_key: str = Security(api_key_auth)) -> dict:
     return {"message": "Success", "data": browse_bots(api_key)}
+
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
@@ -561,9 +628,12 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
 
 
 @api.post("/upload_files", tags=["User Upload"])
-def upload_files(files: list[UploadFile],
-    session_id: str, summaries: list[str] | None = None,
-    api_key: str = Security(api_key_auth)) -> dict:
+def upload_files(
+    files: list[UploadFile],
+    session_id: str,
+    summaries: list[str] | None = None,
+    api_key: str = Security(api_key_auth),
+) -> dict:
     """Upload multiple files by user.
 
     Parameters
@@ -590,18 +660,44 @@ def upload_files(files: list[UploadFile],
                 f"instead found {len(files)} files and {len(summaries)} summaries.",
         }
 
-    failures = []
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    results = []
+    fail_occurred = False
+    success_occurred = False
     for i, file in enumerate(files):
+        if next(
+            (
+                f for f in cr.history
+                if f["content"].startswith("file:") and \
+                    f["content"].split(":")[1] == file.filename
+            ),
+            None,
+        ):
+            results.append({
+                "id": file.filename,
+                "message": "Failure: file with that name already exists",
+            })
+            continue
         result = file_upload(file, session_id, summaries[i])
         if result["message"].startswith("Failure"):
-            failures.append(
-                f"Upload #{i + 1} of {len(files)} failed. "
-                f"Internal message: {result['message']}",
-            )
-
-    if len(failures) == 0:
-        return {"message": f"Success: {len(files)} files uploaded"}
-    return {"message": f"Warning: {len(failures)} failures occurred: {failures}"}
+            fail_occurred = True
+            results.append({
+                "id": file.filename,
+                "message": result["message"],
+            })
+        else:
+            results.append({
+                "message": "Success",
+                "id": file.filename,
+                "insert_count": result["insert_count"],
+            })
+            cr.history.append({"role": "user", "content": f"file:{file.filename}"})
+            success_occurred = True
+    if success_occurred:
+        store_conversation_history(cr)
+    if fail_occurred:
+        return {"message": "Failure: not all files were uploaded", "results": results}
+    return {"message": "Success", "results": results}
 
 
 @api.post("/upload_file_ocr", tags=["User Upload"])
@@ -732,6 +828,7 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
+
 
 @api.get("/get_opinion_count", tags=["Opinion Search"])
 def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
