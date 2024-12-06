@@ -76,13 +76,12 @@ def admin_check(api_key: str) -> bool:
         return result.to_dict()["admin"]
     return False
 
-def store_conversation(r: ChatRequest, output: str) -> bool:
-    """Store the conversation in the database.
+def store_conversation_history(r: ChatRequest) -> bool:
+    """Store the conversation history in the database.
 
     Args:
     ----
-        r (ChatRequest): Chat request object
-        output (str): The output from the bot
+        r (ChatRequest): Chat request object containing history
 
     Returns:
     -------
@@ -91,8 +90,6 @@ def store_conversation(r: ChatRequest, output: str) -> bool:
     """
     if r.session_id is None or r.session_id == "":
         r.session_id = get_uuid_id()
-
-    r.history.append({"role": "assistant", "content": output})
 
     data = r.model_dump()
     data["num_msg"] = len(r.history)

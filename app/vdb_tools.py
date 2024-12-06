@@ -281,7 +281,7 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
         for hit in tool_output["result"]:
             entity = hit["entity"]
             # pks need to be strings to handle in JavaScript front end
-            entity["pk"] = str(hit["pk"])
+            entity["pk"] = str(hit["id"])
             entities.append(entity)
     else:
         # get_source uses get_expr which returns vectors, we don't need them here
@@ -289,7 +289,8 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
         for hit in entities:
             del hit["vector"]
             # pks need to be strings to handle in JavaScript front end
-            hit["pk"] = str(hit["pk"])
+            hit["pk"] = str(hit["id"])
+            del hit["id"]
 
     if tool.collection_name == courtlistener_collection:
         entity_type = "opinion"

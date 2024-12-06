@@ -764,6 +764,9 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
 
     """
     history = []
+    # session_data and get_source extension tools aren't in bot definition by default,
+    # add them here
+    _ = vdb_toolset_creator(bot, cr.bot_id, cr.session_id)
     match bot.chat_model.engine:
         case EngineEnum.openai:
             for msg in cr.history:
@@ -803,7 +806,19 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
                         "results": formatted_results,
                     })
                 elif msg["role"] == "user": # user message
-                    history.append({"type": "user", "content": msg["content"]})
+                    if msg["content"].startswith("file:"):
+                        # user file upload
+                        file_id = msg["content"][5:]
+                        history += [
+                            {"type": "file", "id": file_id},
+                            {
+                                "type": "file_upload_result",
+                                "status": "Success",
+                                "id": file_id,
+                            },
+                        ]
+                    else:
+                        history.append({"type": "user", "content": msg["content"]})
                 elif msg["role"] == "assistant": # assistant response
                     history.append({"type": "response", "content": msg["content"]})
         case EngineEnum.anthropic:
@@ -825,10 +840,21 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
                             })
                 elif msg["role"] == "user": # user message (tool result, source list, or actual user message)
                     if isinstance(msg["content"], str): # source list or actual user message
-                        if not msg["content"].startswith("**Sources**:\n"):
-                            # actual user message
+                        if msg["content"].startswith("file:"):
+                            # user file upload
+                            file_id = msg["content"][5:]
+                            history += [
+                                {"type": "file", "id": file_id},
+                                {
+                                    "type": "file_upload_result",
+                                    "status": "Success",
+                                    "id": file_id,
+                                },
+                            ]
+                        elif not msg["content"].startswith("**Sources**:\n"):
+                            # ignore sources message
+                            # append actual user message
                             history.append({"type": "user", "content": msg["content"]})
-                        # ignore source list
                         continue
                     for content in msg["content"]: # tool result
                         tool_call_id = content["tool_use_id"]
@@ -841,7 +867,7 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
                             None,
                         )
                         if tool_call_msg is None:
-                            logger.error("Format session history did not find tool call message in session %s", cr.session_id)
+                            logger.error("Format session history found a tool result without a tool call message in session %s", cr.session_id)
                             return []
                         function_name = tool_call_msg["name"]
                         tool_result = ast.literal_eval(content["content"])

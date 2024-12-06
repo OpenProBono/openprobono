@@ -35,7 +35,7 @@ from app.db import (
     load_session,
     set_session_to_bot,
     store_bot,
-    store_conversation,
+    store_conversation_history,
     store_opinion_feedback,
     store_session_feedback,
 )
@@ -52,7 +52,6 @@ from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
-    CitationRequest,
     EngineEnum,
     FetchSession,
     InitializeSession,
@@ -157,7 +156,8 @@ async def process_chat_stream(r: ChatRequest, message: str):
     # trace and store
     if full_response:
         langfuse_context.update_current_trace(output=full_response)
-        store_conversation(r, full_response)
+        r.history.append({"role": "assistant", "content": full_response})
+        store_conversation_history(r)
 
 
 @observe(capture_input=False, capture_output=False)
@@ -213,7 +213,8 @@ def process_chat(r: ChatRequest, message: str) -> dict:
                 return {"message": error}
 
     # store conversation (and also log the api_key)
-    store_conversation(r, output)
+    r.history.append({"role": "assistant", "content": output})
+    store_conversation_history(r)
     # trace session id and output
     langfuse_context.update_current_trace(session_id=r.session_id, output=output)
     # return the chat and the bot_id
@@ -659,18 +660,44 @@ def upload_files(
                 f"instead found {len(files)} files and {len(summaries)} summaries.",
         }
 
-    failures = []
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    results = []
+    fail_occurred = False
+    success_occurred = False
     for i, file in enumerate(files):
+        if next(
+            (
+                f for f in cr.history
+                if f["content"].startswith("file:") and \
+                    f["content"].split(":")[1] == file.filename
+            ),
+            None,
+        ):
+            results.append({
+                "id": file.filename,
+                "message": "Failure: file with that name already exists",
+            })
+            continue
         result = file_upload(file, session_id, summaries[i])
         if result["message"].startswith("Failure"):
-            failures.append(
-                f"Upload #{i + 1} of {len(files)} failed. "
-                f"Internal message: {result['message']}",
-            )
-
-    if len(failures) == 0:
-        return {"message": f"Success: {len(files)} files uploaded"}
-    return {"message": f"Warning: {len(failures)} failures occurred: {failures}"}
+            fail_occurred = True
+            results.append({
+                "id": file.filename,
+                "message": result["message"],
+            })
+        else:
+            results.append({
+                "message": "Success",
+                "id": file.filename,
+                "insert_count": result["insert_count"],
+            })
+            cr.history.append({"role": "user", "content": f"file:{file.filename}"})
+            success_occurred = True
+    if success_occurred:
+        store_conversation_history(cr)
+    if fail_occurred:
+        return {"message": "Failure: not all files were uploaded", "results": results}
+    return {"message": "Success", "results": results}
 
 
 @api.post("/upload_file_ocr", tags=["User Upload"])

@@ -386,29 +386,3 @@ class SessionFeedback(BaseModel):
     feedback_text: str
     session_id: str
     api_key: str = ""
-
-class CitationRequest(BaseModel):
-    """Model class representing a citation request.
-
-    Attributes
-    ----------
-        message (str): The message containing citations.
-        api_key (str): The API key.
-
-    """
-
-    message: str
-    api_key: str = ""
-
-class Citation(BaseModel):
-    """Model class representing a citation.
-
-    Attributes
-    ----------
-        number (int): The source's index in a chat models source list in a session
-        instance (int): The occurrence of the source in a response in a session
-
-    """
-
-    number: int
-    instance: int

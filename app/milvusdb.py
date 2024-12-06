@@ -403,7 +403,7 @@ def upload_data(
     data_count = len(data)
     langfuse_context.update_current_observation(
         input={
-            "collection_name":collection_name,
+            "collection_name": collection_name,
             "data_count": data_count,
         },
     )
@@ -850,7 +850,7 @@ def file_upload(
 
     """
     # tracing
-    langfuse_context.update_current_trace(session_id=session_id)
+    langfuse_context.update_current_trace(input=file.filename, session_id=session_id)
     # extract text
     elements = partition_uploadfile(file)
     # chunk text
