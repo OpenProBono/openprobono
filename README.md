@@ -11,10 +11,16 @@ We use external resources that you will need to set up if you want to recreate t
 - More that are optional
 
 # Docker Install
-You will need [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed on your machine. Clone the repository, add your credentials in `docker-compose.yml`, and enter the following commands:
+You will need [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed on your machine. First, clone the repository and copy `docker-compose-sample.yml` to `docker-compose.yml`:
+
 ```
 cd openprobono
 cp docker-compose.sample.yml docker-compose.yml
+```
+
+Add your credentials to `docker-compose.yml`, then run the API:
+
+```
 docker compose up
 ```
 
