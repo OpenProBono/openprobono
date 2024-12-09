@@ -8,3 +8,5 @@
 !app/
 !app/eval
 !app/prompts
+!docker-compose.sample.yml
+!.dockerignore

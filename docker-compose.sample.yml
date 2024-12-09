@@ -1,0 +1,38 @@
+services:
+  api:
+    build: .
+    command: sh -c "uvicorn app.main:api --reload --port=8080 --host=0.0.0.0"
+    environment:
+      Milvus: >
+        {
+          "uri":"localhost:19530",
+          "token":"root:Milvus"
+        }
+      Firebase: >
+        {
+          "type": "service_account",
+          "project_id": "<project_id>",
+          "private_key_id": "<private_key_id>",
+          "private_key": "<private_key>",
+          "client_email": "<client_email>",
+          "client_id": "<client_id>",
+          "auth_uri": "<auth_uri>",
+          "token_uri": "<token_uri>",
+          "auth_provider_x509_cert_url": "<auth_provider_x509_cert_url>",
+          "client_x509_cert_url": "<client_x509_cert_url>",
+          "universe_domain": "googleapis.com"
+        }
+      OPENAI_API_KEY: <replace_with_your_key>
+      SERPAPI_KEY: <replace_with_your_key>
+      GOOGLE_SEARCH_API_KEY: <replace_with_your_key>
+      GOOGLE_SEARCH_API_CX: <replace_with_your_key>
+      LANGFUSE_PUBLIC_KEY: <replace_with_your_key>
+      LANGFUSE_SECRET_KEY: <replace_with_your_key>
+      COURTLISTENER_API_KEY: <replace_with_your_key>
+      ANTHROPIC_API_KEY: <replace_with_your_key>
+      VOYAGE_API_KEY: <replace_with_your_key>
+      GEMINI_API_KEY: <replace_with_your_key>
+    ports:
+      - 8080:8080
+    volumes:
+      - .:/api
