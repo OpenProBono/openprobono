@@ -600,89 +600,99 @@ def anthropic_tools_stream(
         tool_msg = {"role": "assistant", "content": []}
         content = ""
 
-        for chunk in response:
-            if chunk.type == "content_block_start":
-                if chunk.content_block.type == "tool_use":
-                    current_tool_call = {
-                        "name": chunk.content_block.name,
-                        "input": "",
-                    }
-                    tool_call_id = chunk.content_block.id
-                elif chunk.content_block.type == "text":
-                    current_text = {"type": "text", "text": ""}
-            elif chunk.type == "content_block_delta":
-                if chunk.delta.type == "text_delta":
-                    current_text["text"] += chunk.delta.text
-                    content += chunk.delta.text
-                    if "\n" in content:
-                        index_of_newline = content.rfind("\n")
-                        yield {
-                            "type": "response",
-                            "content": content[:index_of_newline],
+        try:
+            for chunk in response:
+                if chunk.type == "content_block_start":
+                    if chunk.content_block.type == "tool_use":
+                        current_tool_call = {
+                            "name": chunk.content_block.name,
+                            "input": "",
                         }
-                        content = content[index_of_newline + 1 :]
-                elif chunk.delta.type == "input_json_delta" and current_tool_call:
-                    current_tool_call["input"] += chunk.delta.partial_json
-            elif chunk.type == "content_block_stop":
-                if current_text:
-                    tool_msg["content"].append(current_text)
-                    current_text = None
-                    if content:
+                        tool_call_id = chunk.content_block.id
+                    elif chunk.content_block.type == "text":
+                        current_text = {"type": "text", "text": ""}
+                elif chunk.type == "content_block_delta":
+                    if chunk.delta.type == "text_delta":
+                        current_text["text"] += chunk.delta.text
+                        content += chunk.delta.text
+                        if "\n" in content:
+                            index_of_newline = content.rfind("\n")
+                            yield {
+                                "type": "response",
+                                "content": content[:index_of_newline + 1],
+                            }
+                            content = content[index_of_newline + 1:]
+                    elif chunk.delta.type == "input_json_delta" and current_tool_call:
+                        current_tool_call["input"] += chunk.delta.partial_json
+                elif chunk.type == "content_block_stop":
+                    if current_text:
+                        tool_msg["content"].append(current_text)
+                        current_text = None
+                        if content:
+                            yield {
+                                "type": "response",
+                                "content": content,
+                            }
+                            content = ""
+                    if current_tool_call:
+                        # Step 3: call the function for the model
+                        function_args = json.loads(current_tool_call["input"])
+                        function_name = current_tool_call["name"]
                         yield {
-                            "type": "response",
-                            "content": content,
+                            "type": "tool_call",
+                            "id": tool_call_id,
+                            "name": function_name,
+                            "args": current_tool_call["input"],
                         }
-                        content = ""
-                if current_tool_call:
-                    # Step 3: call the function for the model
-                    function_args = json.loads(current_tool_call["input"])
-                    function_name = current_tool_call["name"]
-                    yield {
-                        "type": "tool_call",
-                        "id": tool_call_id,
-                        "name": function_name,
-                        "args": current_tool_call["input"],
-                    }
 
-                    tool_call_id, tool_response, formatted_results = anthropic_tool_call(
-                        current_tool_call,
-                        tool_call_id,
-                        bot,
-                    )
+                        tool_call_id, tool_response, formatted_results = anthropic_tool_call(
+                            current_tool_call,
+                            tool_call_id,
+                            bot,
+                        )
 
-                    yield {
-                        "type": "tool_result",
-                        "id": tool_call_id,
-                        "name": function_name,
-                        "results": formatted_results,
-                    }
-                    # add sources from this tool call to the overall source list
-                    new_sources += [str(res["id"]) for res in formatted_results]
-                    # tool use message
-                    current_tool_call["id"] = tool_call_id
-                    current_tool_call["type"] = "tool_use"
-                    current_tool_call["input"] = function_args
-                    tool_msg["content"].append(current_tool_call)
-                    messages.append(tool_msg)
-                    # tool response message
-                    tool_response_msg = {
-                        "type": "tool_result",
-                        "tool_use_id": tool_call_id,
-                        "content": tool_response,
-                    }
-                    messages.append({"role": "user", "content": [tool_response_msg]})
+                        yield {
+                            "type": "tool_result",
+                            "id": tool_call_id,
+                            "name": function_name,
+                            "results": formatted_results,
+                        }
+                        # add sources from this tool call to the overall source list
+                        new_sources += [str(res["id"]) for res in formatted_results]
+                        # tool use message
+                        current_tool_call["id"] = tool_call_id
+                        current_tool_call["type"] = "tool_use"
+                        current_tool_call["input"] = function_args
+                        tool_msg["content"].append(current_tool_call)
+                        messages.append(tool_msg)
+                        # tool response message
+                        tool_response_msg = {
+                            "type": "tool_result",
+                            "tool_use_id": tool_call_id,
+                            "content": tool_response,
+                        }
+                        messages.append({"role": "user", "content": [tool_response_msg]})
 
-                    tools_used += 1
-                    current_tool_call = None
-                    tool_msg = {"role": "assistant", "content": []}
+                        tools_used += 1
+                        current_tool_call = None
+                        tool_msg = {"role": "assistant", "content": []}
+                        break
+                elif chunk.type == "message_delta" and \
+                chunk.delta.stop_reason == "end_turn":
+                    usage["output"] += chunk.usage.output_tokens
                     break
-            elif chunk.type == "message_delta" and \
-            chunk.delta.stop_reason == "end_turn":
-                usage["output"] += chunk.usage.output_tokens
-                break
-            elif chunk.type == "message_start":
-                usage["input"] += chunk.message.usage.input_tokens
-                usage["output"] += chunk.message.usage.output_tokens
+                elif chunk.type == "message_start":
+                    usage["input"] += chunk.message.usage.input_tokens
+                    usage["output"] += chunk.message.usage.output_tokens
+        except Exception as e:
+            logger.exception("anthropic_tools_stream exception")
+            langfuse_context.update_current_observation(
+                level="ERROR",
+                status_message=str(e),
+            )
+            yield {"type": "error"}
+            yield {"type": "done"}
+            return
 
         if content:
             yield {

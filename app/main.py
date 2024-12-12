@@ -138,8 +138,11 @@ async def process_chat_stream(r: ChatRequest, message: str):
                 await asyncio.sleep(0)
         case EngineEnum.anthropic:
             for chunk in anthropic_bot_stream(r, bot):
-                if isinstance(chunk, dict) and chunk["type"] == "response":
+                if chunk["type"] == "response":
                     full_response += chunk["content"]
+                elif chunk["type"] == "tool_result":
+                    # any intermediate response is preamble to a tool call, clear it
+                    full_response = ""
                 yield chunk
                 # Add a small delay to avoid blocking the event loop
                 await asyncio.sleep(0)
