@@ -59,4 +59,4 @@ def add_opinion_summary(opinion_id: int) -> str:
 
 def count_opinions() -> int:
     # hardcoded for now
-    return 799315
+    return 1248514
