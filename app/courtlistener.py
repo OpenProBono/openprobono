@@ -34,7 +34,8 @@ courtlistener_tool_args = {
         "type": "string",
         "description": (
             "The keyword query to search for an exact name or term within the opinion "
-            "text."
+            "text. Only results containing the entire keyword query as a substring "
+            "will be returned, so it should be used precisely."
         ),
     },
     "after-date": {

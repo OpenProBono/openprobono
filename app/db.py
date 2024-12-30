@@ -118,8 +118,15 @@ def store_session_feedback(r: SessionFeedback) -> bool:
        True if successful, False otherwise
 
     """
+    data = r.model_dump()
+    data.pop("api_key", None)
+    data.pop("session_id", None)
+    if not data["categories"]:
+        del data["categories"]
     db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(
-        {"feedback": r.feedback_text}, merge=True)
+        {"feedback": firestore.ArrayUnion([data])},
+        merge=True,
+    )
     return True
 
 @observe()

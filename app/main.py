@@ -102,6 +102,7 @@ async def process_chat_stream(r: ChatRequest, message: str):
     if bot is None:
         error = "Failure: No bot found with bot id: " + r.bot_id
         langfuse_context.update_current_observation(level="ERROR", status_message=error)
+        logger.error(error)
         yield {
             "type": "response",
             "content": error,
@@ -148,6 +149,7 @@ async def process_chat_stream(r: ChatRequest, message: str):
                 await asyncio.sleep(0)
         case _:
             error = "Failure: Invalid bot engine for streaming"
+            logger.error(error)
             langfuse_context.update_current_observation(
                 level="ERROR",
                 status_message=error,

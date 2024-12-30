@@ -129,6 +129,15 @@ class MilvusMetadataEnum(str, Enum):
     no_field = "none"
 
 
+@unique
+class FeedbackType(str, Enum):
+    """Enumeration class representing different kinds of user feedback."""
+
+    like = "like"
+    dislike = "dislike"
+    generic = "generic"
+
+
 class ChatModelParams(BaseModel):
     """Define a chat model for RAG."""
 
@@ -379,10 +388,16 @@ class SessionFeedback(BaseModel):
     ----------
         feedback_text (str): The feedback text from the consumer
         session_id (str): The session ID.
+        feedback_type (FeedbackType): Like, dislike, or generic feedback.
+        message_index (int): The index corresponding to the bots response.
+        categories (list[str]): The categories for dislike feedback.
         api_key (str): The API key.
 
     """
 
     feedback_text: str
     session_id: str
+    feedback_type: FeedbackType = FeedbackType.generic
+    message_index: int = -1
+    categories: list[str] = []
     api_key: str = ""

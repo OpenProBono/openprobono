@@ -585,7 +585,8 @@ def anthropic_tools_stream(
     all_sources = []
     src_msgs = [
         msg for msg in messages
-        if msg["role"] == "user" and msg["content"].startswith("**Sources**:\n")
+        if msg["role"] == "user" and \
+        isinstance(msg["content"], str) and msg["content"].startswith("**Sources**:\n")
     ]
     for src_msg in src_msgs:
         numbered_srcs = src_msg["content"].split("\n")[1:] # ignore first line
