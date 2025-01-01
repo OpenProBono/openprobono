@@ -345,34 +345,25 @@ def source_exists(collection_name: str, search_result: dict, bot_id: str, tool_n
     url = search_result["link"]
     res = get_expr(collection_name, f"metadata['url']=='{url}'")
     hits = res["result"]
+    # sort to ensure we maintain original order, although Milvus may do this already
     q = sorted(hits, key=lambda x: x["pk"])
-    pks, docs = [], []
+    upsert_required = True
     for doc in q:
         md = doc["metadata"]
         if "bot_and_tool_id" not in md:
             md["bot_and_tool_id"] = [bot_id + tool_name]
         elif bot_id + tool_name not in md["bot_and_tool_id"]:
             md["bot_and_tool_id"].append(bot_id + tool_name)
-        # TODO: remove this check after database is fully updated
-        if "title" not in md:
-            md["title"] = search_result["title"]
-            md["source"] = search_result["source"]
-            md["favicon"] = search_result["favicon"]
-
-        # delete fields which are empty or over 1000 characters
-        maxlen = 1000
-        keys_to_remove = [
-            key for key in md
-            if not md[key] or (isinstance(md[key], str) and len(md[key])) > maxlen
-        ]
-        for key in keys_to_remove:
-            del md[key]
-
-        pks.append(doc["pk"])
-        del doc["pk"]
-        docs.append(doc)
-    if pks:
-        _ = upsert_expr(collection_name, expr=f"pk in {pks}", upsert_data=docs)
+        elif "title" not in md:
+            if "title" in search_result:
+                md["title"] = search_result["title"]
+            if "source" in search_result:
+                md["source"] = search_result["source"]
+        else:
+            upsert_required = False
+            break
+    if q and upsert_required:
+        _ = upsert_data(collection_name, q)
     return len(q) > 0
 
 
@@ -569,10 +560,9 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
 
 
 @observe()
-def upsert_expr(
+def upsert_data(
     collection_name: str,
-    expr: str,
-    upsert_data: list[dict],
+    data: list[dict],
 ) -> dict[str, str]:
     """Upsert database entries according to a boolean expression.
 
@@ -580,9 +570,7 @@ def upsert_expr(
     ----------
     collection_name : str
         The name of a pymilvus.Collection
-    expr : str
-        A boolean expression to filter database entries
-    upsert_data : list[dict]
+    data : list[dict]
         A list of dicts containing the data to be upserted into Milvus.
 
     Returns
@@ -594,17 +582,13 @@ def upsert_expr(
     langfuse_context.update_current_observation(
         input={
             "collection_name":collection_name,
-            "expr": expr,
-            "upsert_data_count": len(upsert_data),
+            "upsert_count": len(data),
         },
     )
-    delete_result = delete_expr(collection_name, expr)
-    if delete_result["message"] != "Success":
-        return delete_result
-    delete_count = delete_result["delete_count"]
-    insert_result = upload_data(collection_name, upsert_data)
+    coll = Collection(collection_name)
+    result = coll.upsert(data)
     logger.info("Collection upserted: %s", collection_name)
-    return {"delete_count": delete_count, **insert_result}
+    return {"message": "Success", "upsert_count": result.upsert_count}
 
 
 def fields_to_json(fields_entry: dict) -> dict:
