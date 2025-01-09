@@ -46,6 +46,8 @@ def add_opinion_summary(opinion_id: int) -> str:
     """
     res = get_expr(courtlistener_collection, f"opinion_id=={opinion_id}")
     hits = res["result"]
+    if len(hits) > 0 and "ai_summary" in hits[0]["metadata"]:
+        return hits[0]["metadata"]["ai_summary"]
     hits = sorted(hits, key=lambda x: x["pk"])
     texts = [hit["text"] for hit in hits]
     summary = summarize_opinion(texts, ChatModelParams(model="gpt-4o"))

@@ -313,6 +313,9 @@ class ChatRequest(BaseModel):
         bot_id (str): The ID of the bot.
         session_id (str): The session ID.
         api_key (str): The API key.
+        last_modified (str): The timestamp of the last change to the session.
+        title (str): The AI-generated title of the chat.
+        file_count (int): The number of files uploaded by the user.
 
     """
 
@@ -322,6 +325,7 @@ class ChatRequest(BaseModel):
     api_key: str = ""
     last_modified: str = ""
     title: str = ""
+    file_count: int = 0
 
 
 class ChatBySession(BaseModel):

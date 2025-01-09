@@ -32,7 +32,6 @@ from app.db import (
     fetch_session,
     get_cached_response,
     load_bot,
-    load_session,
     set_session_to_bot,
     store_bot,
     store_conversation_history,
@@ -44,8 +43,8 @@ from app.milvusdb import (
     SESSION_DATA,
     crawl_upload_site,
     delete_expr,
-    fetch_session_data_files,
     file_upload,
+    get_expr,
     session_upload_ocr,
 )
 from app.models import (
@@ -190,8 +189,13 @@ def process_chat(r: ChatRequest, message: str) -> dict:
             if "role" in msg and msg["role"] == "user"
         ]
         message = user_messages[-1]["content"] if len(user_messages) > 0 else ""
+        if not message:
+            error = "Failure: message not found in history."
+            langfuse_context.update_current_observation(level="ERROR", status_message=error)
+            return {"message": error}
+    else:
+        r.history.append({"role": "user", "content": message})
 
-    r.history.append({"role": "user", "content": message})
     # trace input
     langfuse_context.update_current_trace(input=message)
 
@@ -394,7 +398,8 @@ def chat_session(
     """Continue a chat session with a message."""
     request.api_key = api_key
 
-    cr = load_session(request)
+    session_obj = FetchSession(session_id=request.session_id, api_key=request.api_key)
+    cr = fetch_session(session_obj)
     response = process_chat(cr, request.message)
     try:
         return {
@@ -429,7 +434,8 @@ def chat_session_stream(
     """Continue a chat session with a message."""
     request.api_key = api_key
 
-    cr = load_session(request)
+    session_obj = FetchSession(session_id=request.session_id, api_key=request.api_key)
+    cr = fetch_session(session_obj)
 
     async def stream_response():
         async for chunk in process_chat_stream(cr, request.message):
@@ -483,7 +489,7 @@ def get_formatted_session_history(
 )  -> dict:
     """Fetch the formatted history of a session for front end display."""
     request.api_key = api_key
-
+    logger.info("api_key %s getting session %s history", api_key, request.session_id)
     cr = fetch_session(request)
     bot = load_bot(cr.bot_id)
     history = format_session_history(cr, bot)
@@ -626,10 +632,13 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
 
     """
     logger.info("api_key %s uploading file", api_key)
-    try:
-        return file_upload(file, session_id, summary)
-    except Exception as error:
-        return {"message": "Failure: Internal Error: " + str(error)}
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    result = file_upload(file, session_id, summary)
+    if result["message"] == "Success":
+        cr.file_count += 1
+        cr.history.append({"role": "user", "content": f"file:{file.filename}"})
+        store_conversation_history(cr)
+    return result
 
 
 @api.post("/upload_files", tags=["User Upload"])
@@ -649,6 +658,8 @@ def upload_files(
         the session to associate the file with.
     summaries : list[str] | None, optional
         summaries given by the user, by default None
+    api_key: str
+        The api key
 
     Returns
     -------
@@ -670,19 +681,6 @@ def upload_files(
     fail_occurred = False
     success_occurred = False
     for i, file in enumerate(files):
-        if next(
-            (
-                f for f in cr.history
-                if f["content"].startswith("file:") and \
-                    f["content"].split(":")[1] == file.filename
-            ),
-            None,
-        ):
-            results.append({
-                "id": file.filename,
-                "message": "Failure: file with that name already exists",
-            })
-            continue
         result = file_upload(file, session_id, summaries[i])
         if result["message"].startswith("Failure"):
             fail_occurred = True
@@ -691,6 +689,7 @@ def upload_files(
                 "message": result["message"],
             })
         else:
+            cr.file_count += 1
             results.append({
                 "message": "Success",
                 "id": file.filename,
@@ -711,11 +710,16 @@ def vectordb_upload_ocr(file: UploadFile,
         api_key: str = Security(api_key_auth)) -> dict:
     """Upload a file by user and use OCR to extract info."""
     logger.info("api_key %s uploading file with OCR", api_key)
-    return session_upload_ocr(file, session_id, summary if summary else None)
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    result = session_upload_ocr(file, session_id, summary if summary else None)
+    if result["message"] == "Success":
+        cr.file_count += 1
+        store_conversation_history(cr)
+    return result
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_auth)) -> dict[str, str]:
+def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_auth)) -> dict:
     """Delete a file from the sessions database.
 
     Parameters
@@ -729,10 +733,22 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
 
     """
     logger.info("api_key %s deleting file %s", api_key, filename)
-    return delete_expr(
-        SESSION_DATA,
-        f"metadata['source']=='{filename}' and session_id=='{session_id}'",
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    expr = (
+        f"metadata['filename']=='{filename}' and "
+        f"metadata['session_id']=='{session_id}'"
     )
+    result = delete_expr(
+        SESSION_DATA,
+        expr,
+        session_id,
+    )
+    if result["delete_count"] == 0:
+        logger.warning("session %s file %s not found", session_id, filename)
+    if result["message"] == "Success":
+        cr.file_count -= 1
+        store_conversation_history(cr)
+    return result
 
 
 @api.post("/delete_files", tags=["Vector Database"])
@@ -755,9 +771,17 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
 
     """
     logger.info("api_key %s deleting files", api_key)
+    results = []
+    fail_occurred = False
     for filename in filenames:
-        delete_file(filename, session_id)
-    return {"message": f"Success: deleted {len(filenames)} files"}
+        result = delete_file(filename, session_id, api_key)
+        results.append(result)
+        if result["message"] != "Success":
+            fail_occurred = True
+    message = "Success"
+    if fail_occurred:
+        message = "Failure: not all files were deleted successfully"
+    return {"message": message, "results": results}
 
 
 @api.post("/get_session_files", tags=["Vector Database"])
@@ -778,27 +802,60 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
 
     """
     logger.info("api_key %s getting session files for session %s", api_key, session_id)
-
-    files = fetch_session_data_files(session_id=session_id)
-    return {"message": f"Success: found {len(files)} files", "result": files}
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    result = get_expr(
+        collection_name=SESSION_DATA,
+        expr = f"metadata['session_id']=='{session_id}'",
+    )
+    if result["message"] != "Success":
+        return {"message": "Failure: unable to get session files from Milvus"}
+    files = list({data["metadata"]["filename"] for data in result["result"]})
+    num_files = len(files)
+    message = "Success"
+    if cr.file_count != num_files:
+        message = (
+            f"Warning: file_count is {cr.file_count} "
+            f"but {num_files} are in Milvus"
+        )
+        logger.error(
+            "Session %s file_count is %d but %d are in Milvus",
+            session_id,
+            cr.file_count,
+            num_files,
+        )
+    return {"message": message, "file_count": num_files, "results": files}
 
 
 @api.post("/delete_session_files", tags=["Vector Database"])
-def delete_session_files(session_id: str, api_key: str = Security(api_key_auth)):
+def delete_session_files(session_id: str, api_key: str = Security(api_key_auth)) -> dict:
     """Delete all files associated with a session.
 
     Parameters
     ----------
     session_id : str
-        _description_
+        session to delete files from.
+    api_key : str
+        api key
 
     Returns
     -------
-    _type_
-        _description_
+    dict
+        Success message with delete count
+
     """
     logger.info("api_key %s deleting session files for session %s", api_key, session_id)
-    return delete_expr(SESSION_DATA, f'metadata["session_id"] in ["{session_id}"]')
+    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    result = delete_expr(
+        SESSION_DATA,
+        f"metadata['session_id']=='{session_id}'",
+        session_id,
+    )
+    if result["message"] == "Success":
+        cr.file_count = 0
+        store_conversation_history(cr)
+    else:
+        logger.error("Unable to delete files in Milvus for session %s", session_id)
+    return result
 
 
 @api.post("/upload_site", tags=["Admin Upload"])
@@ -806,7 +863,10 @@ def vectordb_upload_site(site: str, collection_name: str,
         description: str, api_key: str = Security(api_key_auth)):
     if not admin_check(api_key):
         return {"message": "Failure: API key invalid"}
-    return crawl_upload_site(collection_name, description, site)
+    urls = crawl_upload_site(collection_name, description, site)
+    if urls:
+        return {"message": "Success", "results": urls}
+    return {"message": "Failure"}
 
 
 @api.post("/search_opinions", tags=["Opinion Search"])
@@ -860,5 +920,4 @@ def opinion_feedback(
         api_key: str = Security(api_key_auth))  -> dict:
     """Submit feedback to a specific session."""
     request.api_key = api_key
-
     return {"message": "Success" if store_opinion_feedback(request) else "Failure"}

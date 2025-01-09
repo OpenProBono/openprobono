@@ -46,7 +46,36 @@ def partition_uploadfile(file: UploadFile) -> list[Element]:
         The extracted elements.
 
     """
-    return partition(file=file.file, metadata_filename=file.filename)
+    elements = []
+    if file.filename.endswith(".pdf") or b"%PDF" in file.file.read(1024):
+        # try PyPDF first
+        logger.info("Reading PDF: %s", file.filename)
+        reader = PdfReader(file.file)
+        for i, page in enumerate(reader.pages, start=1):
+            e = Element(metadata=ElementMetadata(filename=file.filename, page_number=i))
+            e.text = page.extract_text()
+            elements.append(e)
+        # PyPDF can't do OCR. If the elements are all blank,
+        # we probably need OCR (unstructured).
+        if not any(e.text for e in elements):
+            logger.info("pypdf didnt work, trying partition_pdf: %s", file.filename)
+            elements = partition_pdf(file=file.file, metadata_filename=file.filename)
+    elif file.filename.endswith(".rtf"):
+        logger.info("Reading .rtf: %s", file.filename)
+        ensure_pandoc_installed()
+        elements = partition_rtf(file=file.file, metadata_filename=file.filename)
+    elif b"<!DOCTYPE" in file.file.read(100) or b"<html" in file.file.read(100):
+        logger.info("Reading html w beautifulsoup: %s", file.filename)
+        # it's HTML, use BeautifulSoup
+        soup = BeautifulSoup(file.file, "html.parser")
+        e = Element(metadata=ElementMetadata(filename=file.filename))
+        e.text = soup.get_text()
+        elements.append(e)
+    else:
+        logger.info("scraping fallback to unstructured: %s", file.filename)
+        # fall back to unstructured
+        elements = partition(file=file.file, metadata_filename=file.filename)
+    return elements
 
 
 @observe(capture_output=False)
@@ -84,10 +113,14 @@ def scrape(site: str) -> list[Element]:
             if not any(e.text for e in elements):
                 logger.info("pypdf didnt work, trying partition_pdf: %s", site)
                 elements = partition_pdf(file=io.BytesIO(r.content))
+                for e in elements:
+                    e.metadata.url = site
         elif site.endswith(".rtf"):
             logger.info("scraping .rtf: %s", site)
             ensure_pandoc_installed()
             elements = partition_rtf(file=io.BytesIO(r.content))
+            for e in elements:
+                e.metadata.url = site
         elif b"<!DOCTYPE" in r.content[:100] or b"<html" in r.content[:100]:
             logger.info("scraping html w beautifulsoup: %s", site)
             # it's HTML, use BeautifulSoup
@@ -96,9 +129,11 @@ def scrape(site: str) -> list[Element]:
             e.text = soup.get_text()
             elements.append(e)
         else:
-            logger.info("scraping fallback to unstructed: %s", site)
+            logger.info("scraping fallback to unstructured: %s", site)
             # fall back to unstructured
             elements = partition(file=io.BytesIO(r.content))
+            for e in elements:
+                e.metadata.url = site
     except (
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,
@@ -195,19 +230,6 @@ def quickstart_ocr(file: UploadFile) -> str:
     project_id = "h2o-gpt"
     location = "us"  # Format is "us" or "eu"
     processor_id = "c99e554bb49cf45d"
-    if not file.filename.endswith(".pdf"):
-        process_options = documentai.ProcessOptions(
-            ocr_config=documentai.OcrConfig(
-                language_code="en",
-                enable_native_pdf_parsing=True,
-            ),
-        )
-    else:
-        process_options = documentai.ProcessOptions(
-            ocr_config=documentai.OcrConfig(
-                language_code="en",
-            ),
-        )
 
     # You must set the `api_endpoint`if you use a location other than "us".
     opts = ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com")
@@ -232,7 +254,6 @@ def quickstart_ocr(file: UploadFile) -> str:
     # `projects/{project_id}/locations/{location}/processors/{processor_id}`
     request = documentai.ProcessRequest(
         name=processor_name, raw_document=raw_document,
-        process_options=process_options,
     )
 
     result = client.process_document(request=request)

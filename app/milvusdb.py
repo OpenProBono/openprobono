@@ -27,7 +27,13 @@ from app.loaders import (
     scrape_with_links,
 )
 from app.logger import setup_logger
-from app.models import EncoderParams, MilvusMetadataEnum, SearchTool
+from app.models import (
+    ChatModelParams,
+    EncoderParams,
+    MilvusMetadataEnum,
+    SearchTool,
+    SummaryMethodEnum,
+)
 from app.splitters import chunk_elements_by_title, chunk_str
 from app.summarization import summarize
 
@@ -131,18 +137,12 @@ def create_collection(
     Returns
     -------
     pymilvus.Collection
-        The created collection. Must call load() before query/search.
-
-    Raises
-    ------
-    ValueError
-        If the collection name already exists
+        The collection. Must call load() before query/search.
 
     """
     if utility.has_collection(name):
-        already_exists = f"collection named {name} already exists"
-        logger.error(already_exists)
-        raise ValueError(already_exists)
+        logger.warning("Tried to create collection that already exists %s", name)
+        return Collection(name)
     encoder = encoder if encoder is not None else EncoderParams()
     db_fields = None
 
@@ -536,7 +536,11 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
 
 
 @observe()
-def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
+def delete_expr(
+    collection_name: str,
+    expr: str,
+    session_id: str | None = None,
+) -> dict[str, str]:
     """Delete database entries according to a boolean expression.
 
     Parameters
@@ -545,6 +549,8 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
         The name of a pymilvus.Collection
     expr : str
         A boolean expression to filter database entries
+    session_id : str, optional
+        The session ID for tracing, by default None
 
     Returns
     -------
@@ -556,6 +562,8 @@ def delete_expr(collection_name: str, expr: str) -> dict[str, str]:
     ids = coll.delete(expr=expr)
     coll.flush()
     logger.info("Collection deleted expression: %s", collection_name)
+    if session_id is not None:
+        langfuse_context.update_current_observation(session_id=session_id)
     return {"message": "Success", "delete_count": ids.delete_count}
 
 
@@ -650,12 +658,41 @@ def query_iterator(
 
 # application level features
 
-def crawl_upload_site(collection_name: str, description: str, url: str, search_tool: SearchTool) -> list[str]:
-    create_collection(collection_name, description=description)
+def crawl_upload_site(
+    collection_name: str,
+    description: str,
+    url: str,
+    summary_method: SummaryMethodEnum = SummaryMethodEnum.stuff_reduce,
+    summary_chatmodel: ChatModelParams | None = None,
+) -> list[str]:
+    """Crawl and scrape a website and add its content to Milvus.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection
+    description : str
+        The description of the website
+    url : str
+        The website URL
+    summary_method : SummaryMethodEnum, optional
+        The method to summarize content, by default SummaryMethodEnum.stuff_reduce
+    summary_chatmodel : ChatModelParams | None, optional
+        The chat model to summarize content, by default None
+
+    Returns
+    -------
+    list[str]
+        The list of all URLs that were crawled and scraped
+
+    """
+    if summary_chatmodel is None:
+        summary_chatmodel = ChatModelParams()
+    _ = create_collection(collection_name, description=description)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
     texts, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
-    ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
+    ai_summary = summarize(texts, summary_method, summary_chatmodel)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
     encoder = load_vdb_param(collection_name, "encoder")
@@ -676,7 +713,7 @@ def crawl_upload_site(collection_name: str, description: str, url: str, search_t
                 element for element in cur_elements if element not in prev_elements
             ]
             strs, metadatas = chunk_elements_by_title(new_elements, 3000, 1000, 300)
-            ai_summary = summarize(strs, search_tool.summary_method, search_tool.chat_model)
+            ai_summary = summarize(strs, summary_method, summary_chatmodel)
             for metadata in metadatas:
                 metadata["ai_summary"] = ai_summary
             vectors = embed_strs(strs, encoder)
@@ -834,6 +871,7 @@ def file_upload(
         With a `message` indicating success or failure
 
     """
+    logger.info("Uploading file %s to session %s", file.filename, session_id)
     # tracing
     langfuse_context.update_current_trace(input=file.filename, session_id=session_id)
     # extract text
@@ -853,35 +891,3 @@ def file_upload(
         "text": texts[i],
     } for i in range(len(texts))]
     return upload_data(collection_name, data)
-
-def check_session_data(session_id: str) -> bool:
-    """Check if user uploaded a file in a specific session.
-
-    Parameters
-    ----------
-    session_id : str
-        the session id
-
-    Returns
-    -------
-    bool
-        true if file was uploaded, false if it is empty
-
-    """
-    expr = f'metadata["session_id"] == "{session_id}"'
-    data = get_expr(SESSION_DATA, expr, 1)
-    return len(data["result"]) != 0
-
-def fetch_session_data_files(
-    session_id: str,
-    batch_size: int = 1000,
-) -> dict[str, dict[str, str]]:
-    coll = Collection(SESSION_DATA)
-    coll.load()
-    query = coll.query(
-        expr=f'metadata["session_id"] in ["{session_id}"]',
-        output_fields=["metadata"],
-        batch_size=batch_size,
-    )
-    files = [data["metadata"]["filename"] for data in query]
-    return set(files)

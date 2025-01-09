@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from json import loads
-from typing import Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -12,7 +11,6 @@ from langfuse.decorators import observe
 
 from app.models import (
     BotRequest,
-    ChatBySession,
     ChatRequest,
     EncoderParams,
     FetchSession,
@@ -21,11 +19,6 @@ from app.models import (
     SessionFeedback,
     get_uuid_id,
 )
-
-# langfuse = Langfuse()
-
-# sdvlp session
-# 1076cca8-a1fa-415a-b5f8-c11da178d224
 
 # which version of db we are using
 DB_VERSION = "_vj1"
@@ -93,17 +86,14 @@ def store_conversation_history(r: ChatRequest) -> bool:
 
     data = r.model_dump()
     data["num_msg"] = len(r.history)
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
 
-    t = firestore.SERVER_TIMESTAMP
-    data["timestamp"] = t
-
-    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(data)
-
-    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(
-        {"last_message_timestamp": t}, merge=True)
+    session = db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id)
+    session.set(data, merge=True)
 
     return True
 
+@observe()
 def store_session_feedback(r: SessionFeedback) -> bool:
     """Store session feedback from consumers. Overwrites the current feedback if there is.
 
@@ -123,7 +113,10 @@ def store_session_feedback(r: SessionFeedback) -> bool:
     data.pop("session_id", None)
     if not data["categories"]:
         del data["categories"]
-    db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id).set(
+    session = db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(r.session_id)
+    if not session.get().exists:
+        return False
+    session.set(
         {"feedback": firestore.ArrayUnion([data])},
         merge=True,
     )
@@ -150,6 +143,8 @@ def store_opinion_feedback(r: OpinionFeedback) -> bool:
     milvus_coll = milvus.document(collection_name)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     source = coll_sources.document(str(r.opinion_id))
+    if not source.get().exists:
+        return False
     source.set(
         {"feedback_list": firestore.ArrayUnion([r.feedback_text])},
         merge=True,
@@ -173,36 +168,6 @@ def set_session_to_bot(session_id: str, bot_id: str) -> bool:
     db.collection(CONVERSATION_COLLECTION + DB_VERSION).document(session_id).set(
         {"bot_id": bot_id}, merge=True)
     return True
-
-
-def load_session(r: ChatBySession) -> ChatRequest:
-    """Load the associated session to continue the conversation.
-
-    Args:
-    ----
-        r (ChatBySession): Obj containing the session id and message from user
-
-    Returns:
-    -------
-        ChatRequest: The chat request object with appended user message
-
-    """
-    session_data = (
-        db.collection(CONVERSATION_COLLECTION + DB_VERSION)
-        .document(r.session_id).get()
-    )
-
-    session_data = session_data.to_dict()
-    history = session_data.get("history", [])
-
-    return ChatRequest(
-        history=history,
-        bot_id=session_data["bot_id"],
-        session_id=r.session_id,
-        api_key=r.api_key,
-        last_modified=str(session_data.get("last_message_timestamp", "")),
-        title=session_data.get("title", ""),
-    )
 
 
 def fetch_session(r: FetchSession) -> ChatRequest:
@@ -229,8 +194,9 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
-        last_modified=str(session_data.get("last_message_timestamp", "")),
+        last_modified=str(session_data.get("timestamp", "")),
         title=session_data.get("title", ""),
+        file_count=session_data.get("file_count", 0),
     )
 
 def store_bot(r: BotRequest, bot_id: str) -> bool:
@@ -321,7 +287,7 @@ def store_vdb(
     collection_name: str,
     encoder: EncoderParams,
     metadata_format: MilvusMetadataEnum,
-    fields: Optional[list] = None,
+    fields: list | None = None,
 ) -> bool:
     """Store the configuration of a Milvus collection in the database.
 
