@@ -745,7 +745,7 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
     )
     if result["delete_count"] == 0:
         logger.warning("session %s file %s not found", session_id, filename)
-    if result["message"] == "Success":
+    elif result["message"] == "Success":
         cr.file_count -= 1
         store_conversation_history(cr)
     return result
