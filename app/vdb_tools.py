@@ -4,9 +4,17 @@ from __future__ import annotations
 from pymilvus import Collection
 
 from app.courtlistener import courtlistener_collection
+from app.db import fetch_session
 from app.logger import setup_logger
-from app.milvusdb import SESSION_DATA, check_session_data, get_expr, query
-from app.models import BotRequest, EngineEnum, SearchMethodEnum, VDBMethodEnum, VDBTool
+from app.milvusdb import SESSION_DATA, get_expr, query
+from app.models import (
+    BotRequest,
+    EngineEnum,
+    FetchSession,
+    SearchMethodEnum,
+    VDBMethodEnum,
+    VDBTool,
+)
 from app.prompts import VDB_QUERY_PROMPT, VDB_SOURCE_PROMPT
 from app.search_tools import search_collection
 
@@ -217,14 +225,26 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
     # add the source lookup tools to vdb tool list so we can call them for LLM
     bot.vdb_tools += search_src_tools + query_src_tools
     # add the session query tool, if necessary
-    if session_id and check_session_data(session_id):
-        bot.vdb_tools.append(VDBTool(
-            name="session_data",
-            collection_name=SESSION_DATA,
-            k=5,
-            prompt="Use to search user uploaded files. ALWAYS use this tool if its available.",
-            session_id=session_id,
-        ))
+    session = FetchSession(api_key=bot.api_key, session_id=session_id)
+    session_info = fetch_session(session)
+    if session_info.file_count > 0:
+        bot.vdb_tools += [
+            VDBTool(
+                name="session_data",
+                collection_name=SESSION_DATA,
+                k=5,
+                prompt="Use to search user uploaded files. ALWAYS use this tool if its available.",
+                session_id=session_id,
+            ),
+            VDBTool(
+                name="session_data-get-source",
+                collection_name=SESSION_DATA,
+                method=VDBMethodEnum.get_source,
+                bot_id=bot_id,
+                prompt="This tool gets all of the text chunks comprising a user uploaded file in their original order. The source ID is always the filename.",
+                session_id=session_id,
+            ),
+        ]
     match bot.chat_model.engine:
         case EngineEnum.openai:
             toolset += [openai_tool(t) for t in bot.vdb_tools]
@@ -284,13 +304,12 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
             entity["pk"] = str(hit["id"])
             entities.append(entity)
     else:
-        # get_source uses get_expr which returns vectors, we don't need them here
         entities = tool_output["result"]
         for hit in entities:
-            del hit["vector"]
+            if "vector" in hit:
+                del hit["vector"]
             # pks need to be strings to handle in JavaScript front end
-            hit["pk"] = str(hit["id"])
-            del hit["id"]
+            hit["pk"] = str(hit["pk"])
 
     if tool.collection_name == courtlistener_collection:
         entity_type = "opinion"
