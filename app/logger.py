@@ -40,7 +40,7 @@ def setup_logger():
 
         # Create a formatter that includes git info
         formatter = GitInfoFormatter(
-            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s [commit: %(git_hash)s, tag: %(git_tag)s]',
+            fmt='%(asctime)s - %(levelname)s - %(funcName)s - %(message)s [commit: %(git_hash)s, tag: %(git_tag)s]',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 

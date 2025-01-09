@@ -194,7 +194,7 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
         api_key=r.api_key,
-        last_modified=str(session_data.get("timestamp", "")),
+        timestamp=str(session_data.get("timestamp", "")),
         title=session_data.get("title", ""),
         file_count=session_data.get("file_count", 0),
     )
