@@ -391,14 +391,24 @@ def openai_tools(
         messages.append(response_message.model_dump())
         with ThreadPoolExecutor() as executor:
             futures = []
+            # map tool ids to tool name
+            tool_id_name = {}
             for tool_call in tool_calls:
                 ctx = copy_context()
+                function_name = tool_call.function.name
+                tool_id_name[tool_call.id] = function_name
                 def task(tc=tool_call, context=ctx):  # noqa: ANN001, ANN202
                     return context.run(openai_tool_call, tc, bot)
                 futures.append(executor.submit(task))
             for future in as_completed(futures):
-                result = future.result()
-                messages.append(result)
+                tool_call_id, tool_response, formatted_results = future.result()
+                # extend conversation with function response
+                messages.append({
+                    "tool_call_id": tool_call_id,
+                    "role": "tool",
+                    "name": tool_id_name[tool_call_id],
+                    "content": tool_response,
+                })
                 tools_used += 1
         # Step 4: send the function responses to the model
         response: ChatCompletion = chat(messages, bot.chat_model, **kwargs)
