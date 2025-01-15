@@ -88,10 +88,13 @@ def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
                         logger.error("Site not found in collection, add to failed URLs: %s", url)
                         with failed_urls_lock:
                             failed_urls.add(url)
+                else:
+                    with failed_urls_lock:
+                        failed_urls.add(url)
             else:
                 logger.info("Site already uploaded: %s", url)
         except Exception:
-            logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", url)
+            logger.exception("Failed to upload site for dynamic serpapi: %s", url)
             with failed_urls_lock:
                 failed_urls.add(url)
 

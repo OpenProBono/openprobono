@@ -21,7 +21,7 @@ from app.classifiers import url_jurisdictions
 from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
-    partition_uploadfile,
+    extract_elements,
     quickstart_ocr,
     scrape,
     scrape_with_links,
@@ -745,7 +745,7 @@ def upload_site(
         Where the chunks will be uploaded.
     search_result : dict
         The search result of the site to scrape and upload.
-    tool: SearchTool
+    search_tool: SearchTool
         The search tool which this function is being used for
     max_chars : int, optional
         Maximum characters per chunk, by default 10000
@@ -875,7 +875,7 @@ def file_upload(
     # tracing
     langfuse_context.update_current_trace(input=file.filename, session_id=session_id)
     # extract text
-    elements = partition_uploadfile(file)
+    elements = extract_elements(file.file, file.filename)
     # chunk text
     texts, metadatas = chunk_elements_by_title(elements)
     vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))

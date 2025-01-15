@@ -6,7 +6,7 @@ import mimetypes
 import os
 import pathlib
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 import requests
 import urllib3
@@ -31,14 +31,16 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
-
-def partition_uploadfile(file: UploadFile) -> list[Element]:
-    """Partition an uploaded file into elements.
+@observe(capture_input=False, capture_output=False)
+def extract_elements(file: BinaryIO, filename_or_url: str) -> list[Element]:
+    """Partition a file or web content into elements.
 
     Parameters
     ----------
-    file : UploadFile
-        The file to partition.
+    file : BinaryIO
+        The file object to partition.
+    filename_or_url : str
+        Either the filename (for files) or URL (for web scraping).
 
     Returns
     -------
@@ -46,41 +48,50 @@ def partition_uploadfile(file: UploadFile) -> list[Element]:
         The extracted elements.
 
     """
-    elements = []
-    if file.filename.endswith(".pdf") or b"%PDF" in file.file.read(1024):
-        # try PyPDF first
-        logger.info("Reading PDF: %s", file.filename)
-        reader = PdfReader(file.file)
+    langfuse_context.update_current_observation(input=filename_or_url)
+    elements: list[Element] = []
+    is_file = "://" not in filename_or_url
+    metadata_key = "filename" if is_file else "url"
+    metadata = ElementMetadata(**{metadata_key: filename_or_url})
+    if filename_or_url.endswith(".pdf") or b"%PDF" in file.read(1024):
+        logger.info("Reading PDF: %s", filename_or_url)
+        reader = PdfReader(file)
         for i, page in enumerate(reader.pages, start=1):
-            e = Element(metadata=ElementMetadata(filename=file.filename, page_number=i))
+            e = Element(metadata=ElementMetadata(page_number=i))
+            e.metadata.update(metadata)
             e.text = page.extract_text()
             elements.append(e)
         # PyPDF can't do OCR. If the elements are all blank,
         # we probably need OCR (unstructured).
         if not any(e.text for e in elements):
-            logger.info("pypdf didnt work, trying partition_pdf: %s", file.filename)
-            elements = partition_pdf(file=file.file, metadata_filename=file.filename)
-    elif file.filename.endswith(".rtf"):
-        logger.info("Reading .rtf: %s", file.filename)
+            logger.info("pypdf didn't work, trying partition_pdf: %s", filename_or_url)
+            elements = partition_pdf(file=file)
+            for e in elements:
+                e.metadata.update(metadata)
+    elif filename_or_url.endswith(".rtf"):
+        logger.info("Reading .rtf: %s", filename_or_url)
         ensure_pandoc_installed()
-        elements = partition_rtf(file=file.file, metadata_filename=file.filename)
-    elif b"<!DOCTYPE" in file.file.read(100) or b"<html" in file.file.read(100):
-        logger.info("Reading html w beautifulsoup: %s", file.filename)
-        # it's HTML, use BeautifulSoup
-        soup = BeautifulSoup(file.file, "html.parser")
-        e = Element(metadata=ElementMetadata(filename=file.filename))
+        elements = partition_rtf(file=file)
+        for e in elements:
+            e.metadata.update(metadata)
+    elif b"<!DOCTYPE" in file.read(100) or b"<html" in file.read(100):
+        logger.info("Reading HTML with beautifulsoup: %s", filename_or_url)
+        soup = BeautifulSoup(file, "html.parser")
+        e = Element(metadata=metadata)
         e.text = soup.get_text()
         elements.append(e)
     else:
-        logger.info("scraping fallback to unstructured: %s", file.filename)
-        # fall back to unstructured
-        elements = partition(file=file.file, metadata_filename=file.filename)
+        logger.info("Falling back to unstructured: %s", filename_or_url)
+        elements = partition(file=file)
+        for e in elements:
+            e.metadata.update(metadata)
+    langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
 
 
 @observe(capture_output=False)
-def scrape(site: str) -> list[Element]:
-    """Scrape a site for text and partition it into elements.
+def handle_request(site: str) -> BinaryIO:
+    """Handle HTTP request for scraping.
 
     Parameters
     ----------
@@ -89,51 +100,20 @@ def scrape(site: str) -> list[Element]:
 
     Returns
     -------
-    list[Element]
-        The scraped elements.
+    BinaryIO
+        The response content as a binary stream.
 
     """
-    elements = []
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) Gecko/20100101 Firefox/131.0"
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) "
+            "Gecko/20100101 Firefox/131.0"
+        ),
     }
     try:
-        r = requests.get(site, timeout=10, headers=headers)
-        r.raise_for_status()
-        if site.endswith(".pdf") or b"%PDF" in r.content[:1024]:
-            # try PyPDF first
-            logger.info("scraping PDF: %s", site)
-            reader = PdfReader(io.BytesIO(r.content))
-            for i, page in enumerate(reader.pages, start=1):
-                e = Element(metadata=ElementMetadata(url=site, page_number=i))
-                e.text = page.extract_text()
-                elements.append(e)
-            # PyPDF can't do OCR. If the elements are all blank,
-            # we probably need OCR (unstructured).
-            if not any(e.text for e in elements):
-                logger.info("pypdf didnt work, trying partition_pdf: %s", site)
-                elements = partition_pdf(file=io.BytesIO(r.content))
-                for e in elements:
-                    e.metadata.url = site
-        elif site.endswith(".rtf"):
-            logger.info("scraping .rtf: %s", site)
-            ensure_pandoc_installed()
-            elements = partition_rtf(file=io.BytesIO(r.content))
-            for e in elements:
-                e.metadata.url = site
-        elif b"<!DOCTYPE" in r.content[:100] or b"<html" in r.content[:100]:
-            logger.info("scraping html w beautifulsoup: %s", site)
-            # it's HTML, use BeautifulSoup
-            soup = BeautifulSoup(r.content, "html.parser")
-            e = Element(metadata=ElementMetadata(url=site))
-            e.text = soup.get_text()
-            elements.append(e)
-        else:
-            logger.info("scraping fallback to unstructured: %s", site)
-            # fall back to unstructured
-            elements = partition(file=io.BytesIO(r.content))
-            for e in elements:
-                e.metadata.url = site
+        response = requests.get(site, timeout=10, headers=headers)
+        response.raise_for_status()
+        return io.BytesIO(response.content)
     except (
         requests.exceptions.Timeout,
         urllib3.exceptions.ConnectTimeoutError,
@@ -160,8 +140,32 @@ def scrape(site: str) -> list[Element]:
         )
     except Exception as error:
         logger.exception("Unexpected error: %s", site)
-        langfuse_context.update_current_observation(level="ERROR", status_message=str(error))
+        langfuse_context.update_current_observation(
+            level="ERROR",
+            status_message=str(error),
+        )
+    return None
 
+
+@observe(capture_output=False)
+def scrape(site: str) -> list[Element]:
+    """Scrape a web site and partition the content into elements.
+
+    Parameters
+    ----------
+    site : str
+        The URL to scrape
+
+    Returns
+    -------
+    list[Element]
+        The extracted elements.
+
+    """
+    file_content = handle_request(site)
+    if not file_content:
+        return []
+    elements = extract_elements(file_content, site)
     langfuse_context.update_current_observation(output=f"{len(elements)} elements")
     return elements
 

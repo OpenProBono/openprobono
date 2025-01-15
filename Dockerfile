@@ -5,8 +5,16 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /api
 
 RUN apt-get update && \
-    apt-get install ffmpeg git libsm6 libmagic1 libxext6 poppler-utils tesseract-ocr -y && \
-    apt-get clean && \
+    apt-get install -y \
+    ffmpeg \
+    git \
+    libsm6 \
+    libmagic1 \
+    libxext6 \
+    poppler-utils \
+    tesseract-ocr \
+    libreoffice \
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /api/requirements.txt
