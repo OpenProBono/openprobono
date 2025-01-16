@@ -89,6 +89,7 @@ def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
                         with failed_urls_lock:
                             failed_urls.add(url)
                 else:
+                    logger.error("Failed to upload site for dynamic serpapi, no exception thrown: %s", url)
                     with failed_urls_lock:
                         failed_urls.add(url)
             else:

@@ -20,11 +20,10 @@ from langfuse.decorators import langfuse_context, observe
 from app.bot import (
     anthropic_bot,
     anthropic_bot_stream,
-    format_session_history,
     openai_bot,
     openai_bot_stream,
-    title_chat,
 )
+from app.bot_helper import format_session_history, title_chat
 from app.db import (
     admin_check,
     api_key_check,
@@ -178,10 +177,6 @@ def process_chat(r: ChatRequest, message: str) -> dict:
         langfuse_context.update_current_observation(level="ERROR", status_message=error)
         return {"message": error}
 
-    # set conversation history
-    system_prompt_msg = {"role": "system", "content": bot.system_prompt}
-    if not r.history or system_prompt_msg not in r.history:
-        r.history.insert(0, system_prompt_msg)
     if not message:
         # invoke bot does not pass a new message, so get it from history
         user_messages = [
@@ -369,7 +364,7 @@ def init_session_chat_stream(
     )
 
     async def stream_response():
-        yield cr.session_id #return the session id first (only in init)
+        yield cr.session_id + "\n" #return the session id first (only in init)
         async for chunk in process_chat_stream(cr, request.message):
             yield json.dumps(chunk) + "\n"
 

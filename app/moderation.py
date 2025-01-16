@@ -13,7 +13,7 @@ DEFAULT_MODERATOR = ChatModelParams(
     model=OpenAIModelEnum.mod_latest,
 )
 
-def moderate(message: str, chatmodel: ChatModelParams = DEFAULT_MODERATOR) -> bool:
+def moderate(message: str, chatmodel: ChatModelParams | None = None) -> bool:
     """Moderate a message using the specified engine and model.
 
     Parameters
@@ -35,6 +35,8 @@ def moderate(message: str, chatmodel: ChatModelParams = DEFAULT_MODERATOR) -> bo
         If chatmodel.engine is not `openai` or `anthropic`.
 
     """
+    if chatmodel is None:
+        chatmodel = DEFAULT_MODERATOR
     match chatmodel.engine:
         case EngineEnum.openai:
             moderators = {OpenAIModelEnum.mod_latest, OpenAIModelEnum.mod_stable}

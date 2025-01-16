@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from io import BytesIO
+from json import loads
 
 import pytest
 from fastapi.testclient import TestClient
@@ -132,6 +133,40 @@ def test_init_session_chat(bot_id: str, message: str) -> None:
     assert isinstance(response_json["output"], str), f"'output' unexpected data type: expected str, got {type(response_json['output'])}"
     assert "session_id" in response_json, "'session_id' not found in response"
     assert isinstance(response_json["session_id"], str), f"'session_id' unexpected data type: expected str, got {type(response_json['session_id'])}"
+
+
+@pytest.mark.parametrize(("bot_id", "message"), [(test_bot_id, test_message)])
+def test_init_session_chat_stream(bot_id: str, message: str) -> None:
+    """Tests initializing a streaming session with a message.
+
+    Parameters
+    ----------
+    bot_id : str
+        The bot for this session
+    message : str
+        The initial message for this session
+
+    """
+    from app.models import InitializeSessionChat
+    test_initialize_session = InitializeSessionChat(bot_id=bot_id, message=message)
+    response = client.post(
+        "/initialize_session_chat_stream",
+        json=test_initialize_session.model_dump(),
+    )
+    logger.info(response.text)
+    assert response.status_code == http_ok
+    lines = response.text.strip().split("\n")
+    expected_num_lines = 2
+    assert len(lines) == expected_num_lines, "Line 1: session ID, Line 2: response"
+    session_id = lines[0]
+    assert session_id, "Session ID not found in response"
+    response_msg = lines[1]
+    assert response_msg
+    try:
+        response_dict = loads(response_msg)
+        assert isinstance(response_dict, dict), f"Response message unexpected data type: expected dict, got {type(response_dict)}"
+    except Exception as e:
+        pytest.fail(f"Response dictionary validation failed: {e}")
 
 
 @pytest.mark.parametrize(("session_id", "message"), [(test_session_id, test_message)])
