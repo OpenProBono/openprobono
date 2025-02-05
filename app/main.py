@@ -56,10 +56,13 @@ from app.models import (
     InitializeSessionChat,
     OpinionFeedback,
     OpinionSearchRequest,
+    ResourceSearchRequest,
     SessionFeedback,
+    VDBTool,
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
+from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 
 langfuse_context.configure(release=get_git_hash())
 logger = setup_logger()
@@ -875,6 +878,17 @@ def search_opinions(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "results": results}
+
+
+@api.post("/search_resources", tags=["Resource Search"])
+def search_resources(
+    req: ResourceSearchRequest,
+    api_key: str = Security(api_key_auth),
+) -> dict:
+    vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
+    tool_response = run_vdb_tool(vdb_tool, req.model_dump())
+    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    return {"message": "Success", "results": formatted_results}
 
 
 @api.get("/get_opinion_summary", tags=["Opinion Search"])

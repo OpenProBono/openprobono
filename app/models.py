@@ -207,6 +207,27 @@ class OpinionSearchRequest(BaseModel):
     after_date: str | None = None
     before_date: str | None = None
 
+class ResourceSearchRequest(BaseModel):
+    """Model class representing a resource search request.
+
+    Attributes
+    ----------
+    resource_group : str
+        The resource group (aka collection name right now)
+    query : str
+        The query
+    k : int, optional
+        The number of results to return, by default 5
+    keyword_query: str | None, optional
+        The users keyword query, by default None
+
+    """
+
+    resource_group: str
+    query: str
+    k: int = 5
+    keyword_query: str | None = None
+
 class OpinionFeedback(BaseModel):
     """Model class representing an opinion feedback request.
 

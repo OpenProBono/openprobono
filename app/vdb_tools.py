@@ -6,7 +6,7 @@ from pymilvus import Collection
 from app.courtlistener import courtlistener_collection
 from app.db import fetch_session
 from app.logger import setup_logger
-from app.milvusdb import SESSION_DATA, get_expr, query
+from app.milvusdb import SESSION_DATA, fuzzy_keyword_query, get_expr, query
 from app.models import (
     BotRequest,
     EngineEnum,
@@ -154,15 +154,21 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
     match t.method:
         case VDBMethodEnum.query:
             tool_query = function_args["query"]
+            expr = ""
+            if "keyword_query" in function_args:
+                tool_keyword_query = function_args["keyword_query"]
+                keyword_query = fuzzy_keyword_query(tool_keyword_query)
+                expr += f"text like '% {keyword_query} %'"
             if collection_name == SESSION_DATA:
                 function_response = query(
                     collection_name,
                     tool_query,
                     k,
+                    expr=expr,
                     session_id=t.session_id,
                 )
             else:
-                function_response = query(collection_name, tool_query, k)
+                function_response = query(collection_name, tool_query, k, expr)
         case VDBMethodEnum.get_source:
             tool_source = function_args["source_id"]
             if collection_name == SESSION_DATA:

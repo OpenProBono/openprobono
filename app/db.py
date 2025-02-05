@@ -69,6 +69,7 @@ def admin_check(api_key: str) -> bool:
         return result.to_dict()["admin"]
     return False
 
+@observe(capture_input=False, capture_output=False)
 def store_conversation_history(r: ChatRequest) -> bool:
     """Store the conversation history in the database.
 
