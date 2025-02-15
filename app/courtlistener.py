@@ -8,7 +8,7 @@ import requests
 import urllib3
 from langfuse.decorators import langfuse_context, observe
 
-from app.milvusdb import fuzzy_keyword_query, get_expr, query
+from app.milvusdb import get_expr, query
 
 if TYPE_CHECKING:
     from app.models import OpinionSearchRequest
@@ -17,7 +17,7 @@ courtlistener_token = os.environ["COURTLISTENER_API_KEY"]
 courtlistener_header = {"Authorization": "Token " + courtlistener_token}
 base_url = "https://www.courtlistener.com/api/rest/v3"
 courtlistener_timeout = 10
-courtlistener_collection = "courtlistener_bulk"
+courtlistener_collection = "courtlistener"
 courtlistener_tool_args = {
     "jurisdictions": {
         "type": "array",
@@ -196,7 +196,7 @@ def get_opinion_ids(search_result: dict, num_cases: int = 5) -> list[int]:
 @observe()
 def courtlistener_get_opinion(opinion_id: int) -> dict:
     """Get the chunks in Milvus for a given opinion, if it's available."""
-    expr = f"opinion_id=={opinion_id}"
+    expr = f"source_id=={opinion_id}"
     result = get_expr(courtlistener_collection, expr)
     if "result" in result and len(result["result"]) > 0:
         # the opinion is in the database
@@ -221,7 +221,11 @@ def courtlistener_query(request: OpinionSearchRequest) -> dict:
 
     """
     expr = ""
-    # copy keyword query to semantic if not given
+    if request.keyword_query:
+        expr += " and ".join([
+            f"TEXT_MATCH(text, '{word}')"
+            for word in request.keyword_query.split()
+        ])
     if request.jurisdictions:
         valid_jurisdics = []
         # look up each str in dictionary, append matches as lists
@@ -230,22 +234,19 @@ def courtlistener_query(request: OpinionSearchRequest) -> dict:
                 valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
         # clear duplicate federal district jurisdictions if they exist
         valid_jurisdics = list(set(valid_jurisdics))
-        expr = f"metadata['court_id'] in {valid_jurisdics}"
+        expr += (" and " if expr else "")
+        expr += f"metadata['court_id'] in {valid_jurisdics}"
     if request.after_date:
         expr += (" and " if expr else "")
         expr += f"metadata['date_filed']>'{request.after_date}'"
     if request.before_date:
         expr += (" and " if expr else "")
         expr += f"metadata['date_filed']<'{request.before_date}'"
-    if request.keyword_query:
-        keyword_query = fuzzy_keyword_query(request.keyword_query)
-        expr += (" and " if expr else "")
-        expr += f"text like '% {keyword_query} %'"
     result = query(courtlistener_collection, request.query, request.k, expr)
     if "result" in result:
         # tracing
         chunk_ids = [
-            f"{hit['entity']['opinion_id']}-{hit['entity']['chunk_index']}"
+            f"{hit['entity']['source_id']}-{hit['entity']['chunk_index']}"
             for hit in result["result"]
         ]
         langfuse_context.update_current_observation(output=chunk_ids)

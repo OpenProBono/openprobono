@@ -8,11 +8,15 @@ from typing import TYPE_CHECKING
 
 from langfuse.decorators import langfuse_context, observe
 from pymilvus import (
+    AnnSearchRequest,
     Collection,
     CollectionSchema,
     DataType,
     FieldSchema,
+    Function,
+    FunctionType,
     MilvusException,
+    RRFRanker,
     connections,
     utility,
 )
@@ -159,12 +163,21 @@ def create_collection(
         dtype=DataType.VARCHAR,
         description="The source text",
         max_length=65535,
+        enable_analyzer=True,
+        enable_match=True,
     )
     embedding_field = FieldSchema(
         name="vector",
         dtype=DataType.FLOAT_VECTOR,
         dim=encoder.dim,
         description="The embedded text",
+    )
+    sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR, description="The sparse vector for full text search")
+    bm25_function = Function(
+        name="text_bm25_emb",
+        input_field_names=["text"],
+        output_field_names=["sparse"],
+        function_type=FunctionType.BM25,
     )
 
     # keep track of how the collection stores metadata
@@ -188,9 +201,8 @@ def create_collection(
                 db_fields = [field.name for field in extra_fields]
 
     schema = CollectionSchema(
-        fields=[pk_field, embedding_field, text_field, *extra_fields],
-        auto_id=True,
-        enable_dynamic_field=True,
+        fields=[pk_field, text_field, embedding_field, sparse_field, *extra_fields],
+        functions=[bm25_function],
         description=description,
     )
 
@@ -203,6 +215,9 @@ def create_collection(
         "metric_type": "IP",
     }
     coll.create_index("vector", index_params=auto_index, index_name="auto_index")
+    auto_index["metric_type"] = "BM25"
+    # create index for full text search
+    coll.create_index(field_name="sparse", index_params=auto_index, metric_type="BM25")
 
     # save params in firebase
     store_vdb(name, encoder, metadata_format, db_fields)
@@ -266,7 +281,18 @@ def query(
         expr += (" and " if expr else "") + f"metadata[\"session_id\"]=='{session_id}'"
     if expr:
         search_params["expr"] = expr
-    res = coll.search(**search_params)
+    if coll.has_index(index_name="sparse"):
+        # do a hybrid search that combines and reranks dense + sparse vector searches
+        output_fields = search_params["output_fields"]
+        del search_params["output_fields"]
+        req1 = AnnSearchRequest(**search_params)
+        search_params["anns_field"] = "sparse"
+        search_params["data"] = [query]
+        req2 = AnnSearchRequest(**search_params)
+        reqs = [req1, req2]
+        res = coll.hybrid_search(reqs, RRFRanker(), k, output_fields=output_fields)
+    else:
+        res = coll.search(**search_params)
     logger.info("Collection queried: %s", collection_name)
     if res:
         # on success, returns a list containing a single inner list containing
@@ -278,7 +304,7 @@ def query(
                 key=lambda h: h["distance"],
             )
             # format output for tracing
-            pks = [str(hit["id"]) for hit in hits]
+            pks = [str(hit["pk"]) for hit in hits]
             langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
@@ -365,6 +391,24 @@ def source_exists(collection_name: str, search_result: dict, bot_id: str, tool_n
     if q and upsert_required:
         _ = upsert_data(collection_name, q)
     return len(q) > 0
+
+
+def count_resources(collection_name: str) -> int:
+    """Count the number of resources in a collection.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection
+
+    Returns
+    -------
+    int
+        The number of resources in the collection
+
+    """
+    # entity count for now
+    return Collection(collection_name).num_entities
 
 
 @observe()

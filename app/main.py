@@ -40,6 +40,7 @@ from app.db import (
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
+    count_resources,
     crawl_upload_site,
     delete_expr,
     file_upload,
@@ -50,18 +51,18 @@ from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    CollectionSearchRequest,
     EngineEnum,
     FetchSession,
     InitializeSession,
     InitializeSessionChat,
     OpinionFeedback,
     OpinionSearchRequest,
-    ResourceSearchRequest,
     SessionFeedback,
     VDBTool,
     get_uuid_id,
 )
-from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
+from app.opinion_search import add_opinion_summary, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 
 langfuse_context.configure(release=get_git_hash())
@@ -880,17 +881,6 @@ def search_opinions(
         return {"message": "Success", "results": results}
 
 
-@api.post("/search_resources", tags=["Resource Search"])
-def search_resources(
-    req: ResourceSearchRequest,
-    api_key: str = Security(api_key_auth),
-) -> dict:
-    vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
-    tool_response = run_vdb_tool(vdb_tool, req.model_dump())
-    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
-    return {"message": "Success", "results": formatted_results}
-
-
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
@@ -902,11 +892,6 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
-
-
-@api.get("/get_opinion_count", tags=["Opinion Search"])
-def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
-    return {"message": "Success", "opinion_count": count_opinions()}
 
 
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
@@ -930,3 +915,22 @@ def opinion_feedback(
     """Submit feedback to a specific session."""
     request.api_key = api_key
     return {"message": "Success" if store_opinion_feedback(request) else "Failure"}
+
+
+@api.post("/search_collection", tags=["Resource Search"])
+def search_collection(
+    req: CollectionSearchRequest,
+    api_key: str = Security(api_key_auth),
+) -> dict:
+    vdb_tool = VDBTool(name="test-tool", collection_name=req.collection, k=req.k)
+    tool_response = run_vdb_tool(vdb_tool, req.model_dump(exclude_unset=True))
+    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    return {"message": "Success", "results": formatted_results}
+
+
+@api.get("/resource_count/{collection_name}", tags=["Resource Search"])
+def get_resource_count(
+    collection_name: str,
+    api_key: str = Security(api_key_auth),
+) -> dict:
+    return {"message": "Success", "resource_count": count_resources(collection_name)}

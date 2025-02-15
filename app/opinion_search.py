@@ -44,7 +44,7 @@ def add_opinion_summary(opinion_id: int) -> str:
         The opinion summary
 
     """
-    res = get_expr(courtlistener_collection, f"opinion_id=={opinion_id}")
+    res = get_expr(courtlistener_collection, f"source_id=={opinion_id}")
     hits = res["result"]
     if len(hits) > 0 and "ai_summary" in hits[0]["metadata"]:
         return hits[0]["metadata"]["ai_summary"]
@@ -56,8 +56,3 @@ def add_opinion_summary(opinion_id: int) -> str:
     # save the summary to Milvus for future searches
     upsert_data(courtlistener_collection, hits)
     return summary
-
-
-def count_opinions() -> int:
-    # hardcoded for now
-    return 1546990

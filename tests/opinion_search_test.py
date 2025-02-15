@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app import main
 from app.courtlistener import jurisdiction_codes
 from app.models import OpinionSearchRequest
-from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
+from app.opinion_search import add_opinion_summary, opinion_search
 
 if TYPE_CHECKING:
     import requests
@@ -174,7 +174,3 @@ def test_query_filtered(
 
 def test_summary() -> None:
     pass
-
-def test_count_opinions() -> None:
-    opinion_count = count_opinions()
-    assert opinion_count > 0

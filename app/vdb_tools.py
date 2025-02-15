@@ -1,9 +1,16 @@
 """Vector database functions and toolset creation."""
 from __future__ import annotations
 
+from datetime import datetime
+
+from langfuse.decorators import observe
 from pymilvus import Collection
 
-from app.courtlistener import courtlistener_collection
+from app.courtlistener import (
+    courtlistener_collection,
+    courtlistener_query,
+    jurisdiction_codes,
+)
 from app.db import fetch_session
 from app.logger import setup_logger
 from app.milvusdb import SESSION_DATA, fuzzy_keyword_query, get_expr, query
@@ -11,6 +18,7 @@ from app.models import (
     BotRequest,
     EngineEnum,
     FetchSession,
+    OpinionSearchRequest,
     SearchMethodEnum,
     VDBMethodEnum,
     VDBTool,
@@ -131,7 +139,7 @@ def anthropic_tool(tool: VDBTool) -> dict:
         },
     }
 
-
+@observe(capture_output=False)
 def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
     """Run a tool on a vector database.
 
@@ -155,11 +163,39 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
         case VDBMethodEnum.query:
             tool_query = function_args["query"]
             expr = ""
-            if "keyword_query" in function_args:
-                tool_keyword_query = function_args["keyword_query"]
-                keyword_query = fuzzy_keyword_query(tool_keyword_query)
-                expr += f"text like '% {keyword_query} %'"
-            if collection_name == SESSION_DATA:
+            if collection_name == courtlistener_collection:
+                req = OpinionSearchRequest(**function_args)
+                function_response = courtlistener_query(req)
+            else:
+                if "keyword_query" in function_args:
+                    tool_keyword_query = function_args["keyword_query"]
+                    keyword_query = fuzzy_keyword_query(tool_keyword_query)
+                    expr += f"text like '% {keyword_query} %'"
+                if "jurisdictions" in function_args:
+                    valid_jurisdics = []
+                    # look up each str in dictionary, append matches as lists
+                    for juris in function_args["jurisdictions"]:
+                        if juris.lower() in jurisdiction_codes:
+                            valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+                    # clear duplicate federal district jurisdictions if they exist
+                    valid_jurisdics = list(set(valid_jurisdics))
+                    expr = f"ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {valid_jurisdics})"
+                if "after_date" in function_args:
+                    expr += (" and " if expr else "")
+                    # convert YYYY-MM-DD to epoch time
+                    after_date = datetime.strptime(
+                        function_args["after_date"],
+                        "%Y-%m-%d",
+                    ).replace(tzinfo=datetime.UTC)
+                    expr += f"metadata['timestamp']>'{after_date.timestamp()}'"
+                if "before_date" in function_args:
+                    expr += (" and " if expr else "")
+                    # convert YYYY-MM-DD to epoch time
+                    before_date = datetime.strptime(
+                        function_args["before_date"],
+                        "%Y-%m-%d",
+                    ).replace(tzinfo=datetime.UTC)
+                    expr += f"metadata['timestamp']<'{before_date.timestamp()}'"
                 function_response = query(
                     collection_name,
                     tool_query,
@@ -167,8 +203,6 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
                     expr=expr,
                     session_id=t.session_id,
                 )
-            else:
-                function_response = query(collection_name, tool_query, k, expr)
         case VDBMethodEnum.get_source:
             tool_source = function_args["source_id"]
             if collection_name == SESSION_DATA:
@@ -179,7 +213,7 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
                 )
             elif collection_name == courtlistener_collection:
                 # source id is an opinion id
-                expr = f"opinion_id=={tool_source}"
+                expr = f"source_id=={tool_source}"
             else:
                 # probably search_collection, assume source id is a URL
                 expr = f"metadata['url']=='{tool_source}'"
@@ -307,7 +341,8 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
         for hit in tool_output["result"]:
             entity = hit["entity"]
             # pks need to be strings to handle in JavaScript front end
-            entity["pk"] = str(hit["id"])
+            entity["pk"] = str(hit["pk"])
+            entity["distance"] = hit["distance"]
             entities.append(entity)
     else:
         entities = tool_output["result"]

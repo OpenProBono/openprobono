@@ -412,6 +412,7 @@ def anthropic_tool(t: SearchTool) -> dict:
     return body
 
 
+@observe(capture_output=False)
 def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
     """Create a search tool for an openai agent.
 
@@ -530,10 +531,10 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
         if "entity" in result:
             entity = result["entity"]
             # pks need to be strings to handle in JavaScript front end
-            entity["pk"] = str(result["id"])
+            entity["pk"] = str(result["pk"])
         if tool.method == SearchMethodEnum.courtlistener:
             entity_type = "opinion"
-            entity_id = entity["opinion_id"]
+            entity_id = entity["source_id"]
         elif tool.method in (
             SearchMethodEnum.dynamic_serpapi,
             SearchMethodEnum.dynamic_courtroom5,
