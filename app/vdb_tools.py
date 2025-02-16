@@ -231,7 +231,7 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
     # add the source lookup tools to vdb tool list so we can call them for LLM
     bot.vdb_tools += search_src_tools + query_src_tools
     # add the session query tool, if necessary
-    session = FetchSession(api_key=bot.api_key, session_id=session_id)
+    session = FetchSession(user=bot.user, session_id=session_id)
     session_info = fetch_session(session)
     if session_info.file_count > 0:
         bot.vdb_tools += [

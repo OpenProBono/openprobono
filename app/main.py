@@ -25,8 +25,6 @@ from app.bot import (
 )
 from app.bot_helper import format_session_history, title_chat
 from app.db import (
-    admin_check,
-    api_key_check,
     browse_bots,
     fetch_session,
     get_cached_response,
@@ -58,39 +56,16 @@ from app.models import (
     OpinionSearchRequest,
     ResourceSearchRequest,
     SessionFeedback,
+    User,
     VDBTool,
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
+from app.user_auth import get_current_user
 
 langfuse_context.configure(release=get_git_hash())
 logger = setup_logger()
-
-X_API_KEY = APIKeyHeader(name="X-API-Key")
-
-
-def api_key_auth(x_api_key: str = Depends(X_API_KEY)) -> str:
-    """Authenticate API key. Source: https://stackoverflow.com/questions/67942766/fastapi-api-key-as-parameter-secure-enough.
-
-    Parameters
-    ----------
-    x_api_key : str, optional
-        api key string, by default Depends(X_API_KEY)
-
-    Raises
-    ------
-    HTTPException
-        if the API key is invalid
-
-    """
-    if not api_key_check(x_api_key):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API Key. Check that you are passing a 'X-API-Key' on your header.",
-        )
-    return x_api_key
-
 
 @observe(capture_input=False, capture_output=False)
 async def process_chat_stream(r: ChatRequest, message: str):
@@ -202,7 +177,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
     #  - the same bot id
     #  - the same API key
     #  - only 1 user message with the same content as the message here
-    cached_response = get_cached_response(r.bot_id, r.api_key, message)
+    cached_response = get_cached_response(r.bot_id, r.user.firebase_uid, message)
     if cached_response is not None:
         output = cached_response
     else:
@@ -219,7 +194,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
                 )
                 return {"message": error}
 
-    # store conversation (and also log the api_key)
+    # store conversation
     r.history.append({"role": "assistant", "content": output})
     store_conversation_history(r)
     # trace session id and output
@@ -228,7 +203,9 @@ def process_chat(r: ChatRequest, message: str) -> dict:
     return {"message": "Success", "output": output, "bot_id": r.bot_id}
 
 
-api = FastAPI()
+api = FastAPI(
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @api.get("/", tags=["General"])
@@ -250,15 +227,16 @@ def chat(
                         "value": {
                             "history": [{"role": "user", "content": "hi"}],
                             "bot_id": "custom_4o_dynamic",
-                            "api_key": "xyz",
                         },
                     },
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth)) -> dict:
+        user: User = Depends(get_current_user)) -> dict:
     """Call a bot with history (only for backwards compat, could be deprecated)."""
-    request.api_key = api_key
+    print(user)
+    print("asvlakjlk")
+    request.user = user
     return process_chat(request, "")
 
 
@@ -279,9 +257,11 @@ def init_session(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth)) -> dict:
+        user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    request.api_key = api_key
+    print(user)
+    print("asvlakjlk")
+    request.user = user
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -310,9 +290,11 @@ def init_session_chat(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth)) -> dict:
+        user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    request.api_key = api_key
+    print(user)
+    print("asvlakjlk")
+    request.user = user
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -320,7 +302,7 @@ def init_session_chat(
         history=[],
         bot_id=request.bot_id,
         session_id=session_id,
-        api_key=request.api_key,
+        user=request.user,
     )
     response = process_chat(cr, request.message)
     try:
@@ -347,15 +329,16 @@ def init_session_chat_stream(
                         "value": {
                             "message": "hi",
                             "bot_id": "custom_4o_dynamic",
-                            "api_key": "xyz",
                         },
                     },
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth)) -> dict:
+        user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    request.api_key = api_key
+    print(user)
+    print("asvlakjlk")
+    request.user = user
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -363,7 +346,7 @@ def init_session_chat_stream(
         history=[],
         bot_id=request.bot_id,
         session_id=session_id,
-        api_key=request.api_key,
+        user=request.user
     )
 
     async def stream_response():
@@ -392,11 +375,13 @@ def chat_session(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth))  -> dict:
+        user: User = Depends(get_current_user))  -> dict:
     """Continue a chat session with a message."""
-    request.api_key = api_key
+    print(user)
+    print("asvlakjlk")
+    request.user = user
 
-    session_obj = FetchSession(session_id=request.session_id, api_key=request.api_key)
+    session_obj = FetchSession(session_id=request.session_id, user=request.user)
     cr = fetch_session(session_obj)
     response = process_chat(cr, request.message)
     try:
@@ -428,11 +413,11 @@ def chat_session_stream(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth))  -> StreamingResponse:
+        user: User = Depends(get_current_user))  -> StreamingResponse:
     """Continue a chat session with a message."""
-    request.api_key = api_key
+    request.user = user
 
-    session_obj = FetchSession(session_id=request.session_id, api_key=request.api_key)
+    session_obj = FetchSession(session_id=request.session_id, user=request.user)
     cr = fetch_session(session_obj)
 
     async def stream_response():
@@ -459,9 +444,9 @@ def get_session(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth))  -> dict:
+        user: User = Depends(get_current_user))  -> dict:
     """Fetch the chat history and details of a session."""
-    request.api_key = api_key
+    request.user = user
 
     cr = fetch_session(request)
     return {"message": "Success"} | cr.model_dump()
@@ -483,11 +468,11 @@ def get_formatted_session_history(
             },
         ),
     ],
-    api_key: str = Security(api_key_auth),
+    user: User = Depends(get_current_user),
 )  -> dict:
     """Fetch the formatted history of a session for front end display."""
-    request.api_key = api_key
-    logger.info("api_key %s getting session %s history", api_key, request.session_id)
+    request.user = user
+    logger.info("user firebase uid %s getting session %s history", user.firebase_uid, request.session_id)
     cr = fetch_session(request)
     bot = load_bot(cr.bot_id)
     history = format_session_history(cr, bot)
@@ -511,9 +496,9 @@ def session_feedback(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth))  -> dict:
+        user: User = Depends(get_current_user))  -> dict:
     """Submit feedback to a specific session."""
-    request.api_key = api_key
+    request.user = user
 
     return {"message": "Success" if store_session_feedback(request) else "Failure"}
 
@@ -585,10 +570,8 @@ def create_bot(
                     },
                 },
             ),
-        ],
-        api_key: str = Security(api_key_auth)) -> dict:
+        ]) -> dict:
     """Create a new bot."""
-    request.api_key = api_key
 
     bot_id = get_uuid_id()
     store_bot(request, bot_id)
@@ -596,20 +579,20 @@ def create_bot(
     return {"message": "Success", "bot_id": bot_id}
 
 
-@api.get("/view_bot", tags=["Bot"])
-def view_bot(bot_id: str, api_key: str = Security(api_key_auth)) -> dict:
-    logger.info("api_key %s viewing bot", api_key)
+@api.post("/view_bot", tags=["Bot"])
+def view_bot(bot_id: str, user: User = Depends(get_current_user)) -> dict:
+    logger.info("User %s viewing bot", user.firebase_uid)
     return {"message": "Success", "data": load_bot(bot_id)}
 
 
 @api.post("/view_bots", tags=["Bot"])
-def view_bots(api_key: str = Security(api_key_auth)) -> dict:
-    return {"message": "Success", "data": browse_bots(api_key)}
+def view_bots(user: User = Depends(get_current_user)) -> dict:
+    return {"message": "Success", "data": browse_bots(user)}
 
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
-                api_key: str = Security(api_key_auth)) -> dict:
+                user: User = Depends(get_current_user)) -> dict:
     """File upload by user.
 
     Parameters
@@ -620,8 +603,8 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
         the session to associate the file with.
     summary: str, optional
         A summary of the file written by the user, by default None.
-    api_key: str
-        The api key
+    user: User
+        The user obj.
 
     Returns
     -------
@@ -629,8 +612,8 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
         Success or failure message.
 
     """
-    logger.info("api_key %s uploading file", api_key)
-    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    logger.info("User %s uploading file", user.firebase_uid)
+    cr = fetch_session(FetchSession(session_id=session_id, user=user))
     result = file_upload(file, session_id, summary)
     if result["message"] == "Success":
         cr.file_count += 1
@@ -644,7 +627,7 @@ def upload_files(
     files: list[UploadFile],
     session_id: str,
     summaries: list[str] | None = None,
-    api_key: str = Security(api_key_auth),
+    user: User = Depends(get_current_user),
 ) -> dict:
     """Upload multiple files by user.
 
@@ -656,8 +639,8 @@ def upload_files(
         the session to associate the file with.
     summaries : list[str] | None, optional
         summaries given by the user, by default None
-    api_key: str
-        The api key
+    user: User
+        The user obj.
 
     Returns
     -------
@@ -665,7 +648,7 @@ def upload_files(
         Success or failure message.
 
     """
-    logger.info("api_key %s uploading files", api_key)
+    logger.info("User %s uploading files", user.firebase_uid)
     if not summaries:
         summaries = [None] * len(files)
     elif len(files) != len(summaries):
@@ -674,7 +657,7 @@ def upload_files(
                 f"instead found {len(files)} files and {len(summaries)} summaries.",
         }
 
-    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    cr = fetch_session(FetchSession(session_id=session_id, user=user))
     results = []
     fail_occurred = False
     success_occurred = False
@@ -705,10 +688,10 @@ def upload_files(
 @api.post("/upload_file_ocr", tags=["User Upload"])
 def vectordb_upload_ocr(file: UploadFile,
         session_id: str, summary: str | None = None,
-        api_key: str = Security(api_key_auth)) -> dict:
+        user: User = Depends(get_current_user)) -> dict:
     """Upload a file by user and use OCR to extract info."""
-    logger.info("api_key %s uploading file with OCR", api_key)
-    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    logger.info("User %s uploading file with OCR", user.firebase_uid)
+    cr = fetch_session(FetchSession(session_id=session_id, user=user))
     result = session_upload_ocr(file, session_id, summary if summary else None)
     if result["message"] == "Success":
         cr.file_count += 1
@@ -717,7 +700,7 @@ def vectordb_upload_ocr(file: UploadFile,
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_auth)) -> dict:
+def delete_file(filename: str, session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Delete a file from the sessions database.
 
     Parameters
@@ -726,12 +709,12 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
         filename to delete.
     session_id : str
         session to delete the file from.
-    api_key : str
-        api key
+    user: User
+        The user obj.
 
     """
-    logger.info("api_key %s deleting file %s", api_key, filename)
-    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    logger.info("User %s deleting file %s", user.firebase_uid, filename)
+    cr = fetch_session(FetchSession(session_id=session_id, user=user))
     expr = (
         f"metadata['filename']=='{filename}' and "
         f"metadata['session_id']=='{session_id}'"
@@ -750,7 +733,7 @@ def delete_file(filename: str, session_id: str, api_key: str = Security(api_key_
 
 
 @api.post("/delete_files", tags=["Vector Database"])
-def delete_files(filenames: list[str], session_id: str, api_key: str = Security(api_key_auth)) -> dict:
+def delete_files(filenames: list[str], session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Delete multiple files from the database.
 
     Parameters
@@ -758,9 +741,9 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
     filenames : list[str]
         filenames to delete.
     session_id : str
-        session to delete the file from
-    api_key : str
-        api key
+        session to delete the file from.
+    user: User
+        The user obj.
 
     Returns
     -------
@@ -768,11 +751,11 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
         Success message with number of files deleted.
 
     """
-    logger.info("api_key %s deleting files", api_key)
+    logger.info("User %s deleting files", user.firebase_uid)
     results = []
     fail_occurred = False
     for filename in filenames:
-        result = delete_file(filename, session_id, api_key)
+        result = delete_file(filename, session_id, user)
         results.append(result)
         if result["message"] != "Success":
             fail_occurred = True
@@ -783,15 +766,15 @@ def delete_files(filenames: list[str], session_id: str, api_key: str = Security(
 
 
 @api.post("/get_session_files", tags=["Vector Database"])
-def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) -> dict:
+def get_session_files(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Get names of all files associated with a session.
 
     Parameters
     ----------
     session_id : str
         session to get files from.
-    api_key : str
-        api key
+    user: User
+        The user obj.
 
     Returns
     -------
@@ -799,8 +782,8 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
         Success message with list of filenames.
 
     """
-    logger.info("api_key %s getting session files for session %s", api_key, session_id)
-    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    logger.info("User %s getting session files for session %s", user.firebase_uid, session_id)
+    cr = fetch_session(FetchSession(session_id=session_id, user=user))
     result = get_expr(
         collection_name=SESSION_DATA,
         expr = f"metadata['session_id']=='{session_id}'",
@@ -825,15 +808,15 @@ def get_session_files(session_id: str, api_key: str = Security(api_key_auth)) ->
 
 
 @api.post("/delete_session_files", tags=["Vector Database"])
-def delete_session_files(session_id: str, api_key: str = Security(api_key_auth)) -> dict:
+def delete_session_files(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Delete all files associated with a session.
 
     Parameters
     ----------
     session_id : str
         session to delete files from.
-    api_key : str
-        api key
+    user : User
+        user obj
 
     Returns
     -------
@@ -841,8 +824,8 @@ def delete_session_files(session_id: str, api_key: str = Security(api_key_auth))
         Success message with delete count
 
     """
-    logger.info("api_key %s deleting session files for session %s", api_key, session_id)
-    cr = fetch_session(FetchSession(session_id=session_id, api_key=api_key))
+    logger.info("user %s deleting session files for session %s", user.firebase_uid, session_id)
+    cr = fetch_session(FetchSession(session_id=session_id, user=user))
     result = delete_expr(
         SESSION_DATA,
         f"metadata['session_id']=='{session_id}'",
@@ -856,21 +839,10 @@ def delete_session_files(session_id: str, api_key: str = Security(api_key_auth))
     return result
 
 
-@api.post("/upload_site", tags=["Admin Upload"])
-def vectordb_upload_site(site: str, collection_name: str,
-        description: str, api_key: str = Security(api_key_auth)):
-    if not admin_check(api_key):
-        return {"message": "Failure: API key invalid"}
-    urls = crawl_upload_site(collection_name, description, site)
-    if urls:
-        return {"message": "Success", "results": urls}
-    return {"message": "Failure"}
-
-
 @api.post("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
     req: OpinionSearchRequest,
-    api_key: str = Security(api_key_auth),
+    user: User = Depends(get_current_user),
 ) -> dict:
     try:
         results = opinion_search(req)
@@ -883,7 +855,7 @@ def search_opinions(
 @api.post("/search_resources", tags=["Resource Search"])
 def search_resources(
     req: ResourceSearchRequest,
-    api_key: str = Security(api_key_auth),
+    user: User = Depends(get_current_user),
 ) -> dict:
     vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
     tool_response = run_vdb_tool(vdb_tool, req.model_dump())
@@ -894,7 +866,7 @@ def search_resources(
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
-    api_key: str = Security(api_key_auth),
+    user: User = Depends(get_current_user),
 ) -> dict:
     try:
         summary = add_opinion_summary(opinion_id)
@@ -905,7 +877,7 @@ def get_opinion_summary(
 
 
 @api.get("/get_opinion_count", tags=["Opinion Search"])
-def get_opinion_count(api_key: str = Security(api_key_auth)) -> dict:
+def get_opinion_count(user: User = Depends(get_current_user)) -> dict:
     return {"message": "Success", "opinion_count": count_opinions()}
 
 
@@ -926,7 +898,7 @@ def opinion_feedback(
                 },
             ),
         ],
-        api_key: str = Security(api_key_auth))  -> dict:
+        user: User = Depends(get_current_user))  -> dict:
     """Submit feedback to a specific session."""
-    request.api_key = api_key
+    request.user = user
     return {"message": "Success" if store_opinion_feedback(request) else "Failure"}
