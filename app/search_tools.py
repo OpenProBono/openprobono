@@ -528,13 +528,12 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
         return formatted_results
 
     for result in tool_output["result"]:
-        if "entity" in result:
-            entity = result["entity"]
-            # pks need to be strings to handle in JavaScript front end
-            entity["pk"] = str(result["pk"])
+        if "entity" not in result:
+            continue
+        entity = result["entity"]
         if tool.method == SearchMethodEnum.courtlistener:
             entity_type = "opinion"
-            entity_id = entity["source_id"]
+            entity_id = entity["metadata"]["id"]
         elif tool.method in (
             SearchMethodEnum.dynamic_serpapi,
             SearchMethodEnum.dynamic_courtroom5,
