@@ -1,7 +1,7 @@
 """Vector database functions and toolset creation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from langfuse.decorators import observe
 from pymilvus import Collection
@@ -186,16 +186,16 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
                     after_date = datetime.strptime(
                         function_args["after_date"],
                         "%Y-%m-%d",
-                    ).replace(tzinfo=datetime.UTC)
-                    expr += f"metadata['timestamp']>'{after_date.timestamp()}'"
+                    ).replace(tzinfo=UTC)
+                    expr += f"metadata['timestamp']>{after_date.timestamp()}"
                 if "before_date" in function_args:
                     expr += (" and " if expr else "")
                     # convert YYYY-MM-DD to epoch time
                     before_date = datetime.strptime(
                         function_args["before_date"],
                         "%Y-%m-%d",
-                    ).replace(tzinfo=datetime.UTC)
-                    expr += f"metadata['timestamp']<'{before_date.timestamp()}'"
+                    ).replace(tzinfo=UTC)
+                    expr += f"metadata['timestamp']<{before_date.timestamp()}"
                 function_response = query(
                     collection_name,
                     tool_query,

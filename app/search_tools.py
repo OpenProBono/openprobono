@@ -167,7 +167,7 @@ def dynamic_serpapi_tool(
         filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
-        pks = [str(hit["id"]) for hit in res["result"]]
+        pks = [hit["id"] for hit in res["result"]]
         langfuse_context.update_current_observation(output=pks)
     return res
 

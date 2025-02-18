@@ -304,7 +304,7 @@ def query(
                 key=lambda h: h["distance"],
             )
             # format output for tracing
-            pks = [str(hit["pk"]) for hit in hits]
+            pks = [hit["pk"] for hit in hits]
             langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
@@ -573,7 +573,7 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         logger.exception("Collection failed to get expression: %s", collection_name)
         langfuse_context.update_current_observation(level="ERROR", status_message=str(e))
         return {"message": "Failure"}
-    pks = [str(hit["pk"]) for hit in hits]
+    pks = [hit["pk"] for hit in hits]
     langfuse_context.update_current_observation(output=pks)
     logger.info("Collection got expression: %s", collection_name)
     return {"message": "Success", "result": hits}
@@ -824,7 +824,7 @@ def upload_site(
     bot_id = search_tool.bot_id
     tool_name = search_tool.name
     for metadata in metadatas:
-        metadata["timestamp"] = str(time.time())
+        metadata["timestamp"] = time.time()
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
         metadata["bot_and_tool_id"] = [bot_id + tool_name]
