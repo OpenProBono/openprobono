@@ -231,6 +231,28 @@ def create_collection(
     logger.info("Collection Created: %s", name)
     return coll
 
+def metadata_fields(collection_name: str) -> list[str]:
+    """Get the metadata fields for a collection.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection.
+
+    Returns
+    -------
+    list[str]
+        The metadata fields for the collection.
+
+    """
+    metadata_format = load_vdb_param(collection_name, "metadata_format")
+    match metadata_format:
+        case MilvusMetadataEnum.json:
+            return ["metadata"]
+        case MilvusMetadataEnum.field:
+            return load_vdb_param(collection_name, "fields")
+    # MilvusMetadataEnum.no_field does not have metadata fields
+    return []
 
 @observe()
 def query(
@@ -267,16 +289,10 @@ def query(
     search_params = {
         "anns_field": "vector",
         "param": {}, # can customize index params assuming you know index type
-        "output_fields": ["text"],
+        "output_fields": ["text", *metadata_fields(collection_name)],
         "data": data,
         "limit": k,
     }
-    metadata_format = load_vdb_param(collection_name, "metadata_format")
-    match metadata_format:
-        case MilvusMetadataEnum.json:
-            search_params["output_fields"] += ["metadata"]
-        case MilvusMetadataEnum.field:
-            search_params["output_fields"] += load_vdb_param(collection_name, "fields")
     if session_id:
         expr += (" and " if expr else "") + f"metadata[\"session_id\"]=='{session_id}'"
     if expr:
@@ -550,13 +566,7 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
 
     """
     coll = Collection(collection_name)
-    collection_format = load_vdb_param(collection_name, "metadata_format")
-    output_fields = ["text", "vector"]
-    match collection_format:
-        case MilvusMetadataEnum.field:
-            output_fields += [*load_vdb_param(collection_name, "fields")]
-        case MilvusMetadataEnum.json:
-            output_fields += ["metadata"]
+    output_fields = ["text", "vector", *metadata_fields(collection_name)]
     hits = []
     try:
         q_iter = coll.query_iterator(
@@ -928,6 +938,7 @@ def file_upload(
         metadatas[i]["session_id"] = session_id
         if summary:
             metadatas[i]["user_summary"] = summary
+        metadatas[i]["timestamp"] = time.time()
     # upload
     data = [{
         "vector": vectors[i],

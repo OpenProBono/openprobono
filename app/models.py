@@ -240,6 +240,33 @@ class CollectionSearchRequest(BaseModel):
     after_date: str | None = None
     before_date: str | None = None
 
+class CollectionManageRequest(BaseModel):
+    """Model class representing a collection management request.
+
+    Attributes
+    ----------
+    collection : str
+        The collection name
+    keyword_query: str | None, optional
+        The users keyword query, by default None
+    jurisdictions : list[str] | None, optional
+        The two-letter abbreviations of a state or territory, e.g. 'NJ' or 'TX',
+        to filter query results by state. Use 'us-app' for federal appellate,
+        'us-dis' for federal district, 'us-sup' for supreme court, 'us-misc'
+        for federal special. By default None.
+    after_date : str | None, optional
+        The after date for the query date range in YYYY-MM-DD format, by default None
+    before_date : str | None, optional
+        The before date for the query date range in YYYY-MM-DD format, by default None
+
+    """
+
+    collection: str
+    keyword_query: str | None = None
+    jurisdictions: list[str] | None = None
+    after_date: str | None = None
+    before_date: str | None = None
+
 class OpinionFeedback(BaseModel):
     """Model class representing an opinion feedback request.
 

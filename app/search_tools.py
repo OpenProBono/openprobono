@@ -167,7 +167,7 @@ def dynamic_serpapi_tool(
         filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
-        pks = [hit["id"] for hit in res["result"]]
+        pks = [hit["pk"] for hit in res["result"]]
         langfuse_context.update_current_observation(output=pks)
     return res
 
@@ -531,6 +531,14 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
         if "entity" not in result:
             continue
         entity = result["entity"]
+        # if tool ended with VDB query, include pks/distance in the output
+        if "pk" in result:
+            entity["pk"] = str(result["pk"])
+        elif "id" in result:
+            entity["pk"] = str(result["id"])
+        if "distance" in result:
+            entity["distance"] = result["distance"]
+
         if tool.method == SearchMethodEnum.courtlistener:
             entity_type = "opinion"
             entity_id = entity["metadata"]["id"]

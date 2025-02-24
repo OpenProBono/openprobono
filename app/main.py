@@ -45,12 +45,15 @@ from app.milvusdb import (
     delete_expr,
     file_upload,
     get_expr,
+    metadata_fields,
+    query_iterator,
     session_upload_ocr,
 )
 from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    CollectionManageRequest,
     CollectionSearchRequest,
     EngineEnum,
     FetchSession,
@@ -934,3 +937,101 @@ def get_resource_count(
     api_key: str = Security(api_key_auth),
 ) -> dict:
     return {"message": "Success", "resource_count": count_resources(collection_name)}
+
+
+@api.post("/browse_collection", tags=["Resource Search"])
+def browse_collection(
+        req: CollectionManageRequest,
+        page: int = 1,
+        per_page: int = 200,
+        api_key: str = Security(api_key_auth),
+):
+    """Browse a collection."""
+    from datetime import UTC, datetime
+
+    from app.courtlistener import courtlistener_collection, jurisdiction_codes
+    from app.milvusdb import fuzzy_keyword_query
+    from app.models import VDBMethodEnum
+
+    expr = ""
+    output_fields = ["text", *metadata_fields(req.collection)]
+    if req.collection == courtlistener_collection:
+        if req.keyword_query:
+            expr += " and ".join([
+                f"TEXT_MATCH(text, '{word}')"
+                for word in req.keyword_query.split()
+            ])
+        if req.jurisdictions:
+            valid_jurisdics = []
+            # look up each str in dictionary, append matches as lists
+            for juris in req.jurisdictions:
+                if juris.lower() in jurisdiction_codes:
+                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+            # clear duplicate federal district jurisdictions if they exist
+            valid_jurisdics = list(set(valid_jurisdics))
+            expr += (" and " if expr else "")
+            expr += f"metadata['court_id'] in {valid_jurisdics}"
+        if req.after_date:
+            expr += (" and " if expr else "")
+            expr += f"metadata['date_filed']>'{req.after_date}'"
+        if req.before_date:
+            expr += (" and " if expr else "")
+            expr += f"metadata['date_filed']<'{req.before_date}'"
+    else:
+        if req.keyword_query:
+            tool_keyword_query = req.keyword_query
+            keyword_query = fuzzy_keyword_query(tool_keyword_query)
+            expr = f"text like '% {keyword_query} %'"
+        if req.jurisdictions:
+            valid_jurisdics = [j.upper() for j in req.jurisdictions]
+            # look up each str in dictionary, append matches as lists
+            for juris in req.jurisdictions:
+                if juris.lower() in jurisdiction_codes:
+                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+            # clear duplicate federal district jurisdictions if they exist
+            valid_jurisdics = list(set(valid_jurisdics))
+            expr += (" and " if expr else "")
+            expr += f"ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {valid_jurisdics})"
+        if req.after_date:
+            # convert YYYY-MM-DD to epoch time
+            after_date = datetime.strptime(
+                req.after_date,
+                "%Y-%m-%d",
+            ).replace(tzinfo=UTC)
+            expr += (" and " if expr else "")
+            expr += f"metadata['timestamp']>{after_date.timestamp()}"
+        if req.before_date:
+            # convert YYYY-MM-DD to epoch time
+            before_date = datetime.strptime(
+                req.before_date,
+                "%Y-%m-%d",
+            ).replace(tzinfo=UTC)
+            expr += (" and " if expr else "")
+            expr += f"metadata['timestamp']<{before_date.timestamp()}"
+    q_iter = query_iterator(req.collection, expr, output_fields, per_page)
+    res = q_iter.next()
+    count = 0
+    leftovers = []
+    if req.collection in {"search_collection_vj1", "search_collection_gemini"}:
+        entity_id_key = "url"
+    elif req.collection == SESSION_DATA:
+        entity_id_key = "filename"
+    else:
+        entity_id_key = "id"
+    while count < page - 1:
+        res = leftovers + q_iter.next()
+        if len(res) == 0:
+            break
+        count += 1
+        last_id = res[-1]["metadata"][entity_id_key]
+        leftovers = [r for r in res if r["metadata"][entity_id_key] == last_id]
+        res = [r for r in res if r not in leftovers]
+    q_iter.close()
+    tool_output = {"message": "Success", "result": leftovers + res}
+    vdb_tool = VDBTool(
+        name="test-tool",
+        collection_name=req.collection,
+        method=VDBMethodEnum.get_source,
+    )
+    formatted_results = format_vdb_tool_results(tool_output, vdb_tool)
+    return {"message": "Success", "results": formatted_results}

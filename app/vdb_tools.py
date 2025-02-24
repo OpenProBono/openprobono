@@ -341,21 +341,22 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
         for hit in tool_output["result"]:
             entity = hit["entity"]
             # pks need to be strings to handle in JavaScript front end
-            entity["pk"] = str(hit["pk"])
+            entity["pk"] = str(hit["pk" if "pk" in hit else "id"])
             entity["distance"] = hit["distance"]
             entities.append(entity)
     else:
+        # get expression results contain 'pk' and 'vector' keys
         entities = tool_output["result"]
         for hit in entities:
             if "vector" in hit:
                 del hit["vector"]
             # pks need to be strings to handle in JavaScript front end
-            hit["pk"] = str(hit["pk"])
+            hit["pk"] = str(hit["pk" if "pk" in hit else "id"])
 
     if tool.collection_name == courtlistener_collection:
         entity_type = "opinion"
         entity_id_key = "id"
-    elif tool.collection_name == search_collection:
+    elif tool.collection_name in {search_collection, "search_collection_gemini"}:
         entity_type = "url"
         entity_id_key = "url"
     elif tool.collection_name == SESSION_DATA:
