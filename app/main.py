@@ -955,8 +955,17 @@ def browse_collection(
 
     expr = ""
     output_fields = ["text", *metadata_fields(req.collection)]
+    if req.collection in {"search_collection_vj1", "search_collection_gemini"}:
+        entity_id_key = "url"
+    elif req.collection == SESSION_DATA:
+        entity_id_key = "filename"
+    else:
+        entity_id_key = "id"
     if req.collection == courtlistener_collection:
+        if req.source:
+            expr = f"metadata['case_name'] like '%{req.source}%'"
         if req.keyword_query:
+            expr += (" and " if expr else "")
             expr += " and ".join([
                 f"TEXT_MATCH(text, '{word}')"
                 for word in req.keyword_query.split()
@@ -978,10 +987,13 @@ def browse_collection(
             expr += (" and " if expr else "")
             expr += f"metadata['date_filed']<'{req.before_date}'"
     else:
+        if req.source:
+            expr = f"metadata['{entity_id_key}'] like '%{req.source}%'"
         if req.keyword_query:
             tool_keyword_query = req.keyword_query
             keyword_query = fuzzy_keyword_query(tool_keyword_query)
-            expr = f"text like '% {keyword_query} %'"
+            expr += (" and " if expr else "")
+            expr += f"text like '% {keyword_query} %'"
         if req.jurisdictions:
             valid_jurisdics = [j.upper() for j in req.jurisdictions]
             # look up each str in dictionary, append matches as lists
@@ -1012,12 +1024,6 @@ def browse_collection(
     res = q_iter.next()
     count = 0
     leftovers = []
-    if req.collection in {"search_collection_vj1", "search_collection_gemini"}:
-        entity_id_key = "url"
-    elif req.collection == SESSION_DATA:
-        entity_id_key = "filename"
-    else:
-        entity_id_key = "id"
     while count < page - 1:
         res = leftovers + q_iter.next()
         if len(res) == 0:

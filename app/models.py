@@ -247,6 +247,8 @@ class CollectionManageRequest(BaseModel):
     ----------
     collection : str
         The collection name
+    source : str | None, optional
+        The source ID to lookup in the collection, by default None
     keyword_query: str | None, optional
         The users keyword query, by default None
     jurisdictions : list[str] | None, optional
@@ -262,6 +264,7 @@ class CollectionManageRequest(BaseModel):
     """
 
     collection: str
+    source: str | None = None
     keyword_query: str | None = None
     jurisdictions: list[str] | None = None
     after_date: str | None = None
