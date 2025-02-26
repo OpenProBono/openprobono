@@ -1020,24 +1020,57 @@ def browse_collection(
             ).replace(tzinfo=UTC)
             expr += (" and " if expr else "")
             expr += f"metadata['timestamp']<{before_date.timestamp()}"
-    q_iter = query_iterator(req.collection, expr, output_fields, per_page)
-    res = q_iter.next()
-    count = 0
-    leftovers = []
-    while count < page - 1:
-        res = leftovers + q_iter.next()
-        if len(res) == 0:
+    q_iter = query_iterator(req.collection, expr, output_fields, 1000)
+    source_ids = set()
+    res = []
+    has_next = True
+    # skip the first (page - 1) * per_page sources
+    while len(source_ids) < (page - 1) * per_page:
+        res = q_iter.next()
+        if not res:
+            has_next = False
             break
-        count += 1
-        last_id = res[-1]["metadata"][entity_id_key]
-        leftovers = [r for r in res if r["metadata"][entity_id_key] == last_id]
-        res = [r for r in res if r not in leftovers]
+        for hit in res:
+            source_id = hit["metadata"][entity_id_key]
+            if source_id not in source_ids:
+                source_ids.add(source_id)
+                if len(source_ids) == (page - 1) * per_page:
+                    break
+    if not has_next:
+        return {"message": "Success", "has_next": False, "results": []}
+    last_id = None
+    res = [hit for hit in res if hit["metadata"][entity_id_key] not in source_ids]
+    page_results = []
+    while len(source_ids) < page * per_page:
+        if not res:
+            res = q_iter.next()
+            if not res:
+                has_next = False
+                break
+        for hit in res:
+            source_id = hit["metadata"][entity_id_key]
+            if source_id not in source_ids:
+                last_id = source_id
+                source_ids.add(source_id)
+                if len(source_ids) == page * per_page:
+                    break
+            page_results.append(hit)
+        res = []
     q_iter.close()
-    tool_output = {"message": "Success", "result": leftovers + res}
+    last_id_expr = last_id if isinstance(last_id, int) else f"'{last_id}'"
+    expr = f"metadata['{entity_id_key}']=={last_id_expr}"
+    last_id_res = get_expr(req.collection, expr, 16384)
+    last_id_chunks = []
+    if last_id_res["message"] != "Success":
+        logger.error("Error getting last_id chunks: %s", expr)
+    else:
+        last_id_chunks = last_id_res["result"]
+    page_results = [hit for hit in page_results if hit["metadata"][entity_id_key] != last_id]
+    tool_output = {"message": "Success", "result": page_results + last_id_chunks}
     vdb_tool = VDBTool(
         name="test-tool",
         collection_name=req.collection,
         method=VDBMethodEnum.get_source,
     )
     formatted_results = format_vdb_tool_results(tool_output, vdb_tool)
-    return {"message": "Success", "results": formatted_results}
+    return {"message": "Success", "has_next": has_next, "results": formatted_results}
