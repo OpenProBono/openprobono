@@ -20,6 +20,7 @@ test_session_id = "test_session"
 test_session_files_id = "test_session_with_files"
 test_message = "hi"
 test_history = [{"role":"user", "content":"hi"}]
+test_collection = "DevTest"
 test_opinion_id = 1
 test_site = "https://www.openprobono.com/"
 test_query = "foo"
@@ -617,14 +618,15 @@ def test_get_opinion_summary(opinion_id: int) -> None:
     assert isinstance(response_json["result"], str), f"'result' unexpected data type: expected str, got {type(response_json['result'])}"
 
 
-def test_get_opinion_count() -> None:
-    """Tests getting the current opinion count."""
-    response = client.get("/get_opinion_count")
+@pytest.mark.parametrize("collection", [test_collection])
+def test_resource_count(collection: str) -> None:
+    """Tests getting the current resource count from a collection (courtlistener)."""
+    response = client.get(f"/resource_count/{collection}")
     response_json = response.json()
     logger.info(response_json)
     response_test(response.status_code, response_json)
-    assert "opinion_count" in response_json, "'opinion_count' not found in response"
-    assert isinstance(response_json["opinion_count"], int), f"'opinion_count' unexpected data type: expected int, got {type(response_json['opinion_count'])}"
+    assert "resource_count" in response_json, "'resource_count' not found in response"
+    assert isinstance(response_json["resource_count"], int), f"'resource_count' unexpected data type: expected int, got {type(response_json['resource_count'])}"
 
 
 @pytest.mark.parametrize("opinion_id", [test_opinion_id])

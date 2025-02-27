@@ -7,7 +7,7 @@ import json
 import pathlib
 import re
 
-from langfuse.decorators import observe
+from langfuse.decorators import langfuse_context, observe
 
 from app.chat_models import chat_str
 from app.logger import setup_logger
@@ -62,7 +62,7 @@ def print_hierarchy(term: LISTTerm, level: int = 0) -> None:
     for child in term.children:
         print_hierarchy(child, level + 1)
 
-@observe()
+@observe(capture_input=False)
 def get_probs(
     message: str,
     terms: list[LISTTerm],
@@ -96,6 +96,12 @@ def get_probs(
     """
     if chatmodel is None:
         chatmodel = ChatModelParams(model=OpenAIModelEnum.gpt_4o)
+    langfuse_context.update_current_observation(input={
+        "message": message,
+        "terms": [t.title for t in terms],
+        "chatmodel": chatmodel,
+        **kwargs,
+    })
     terms_str = "\n".join([
         f"{i}. {t.title}: {t.definition}"
         for i, t in enumerate(terms, start=1)
@@ -115,13 +121,15 @@ def get_probs(
     ]
 
 
+@observe(capture_output=False)
 def tree_search(
-    root: LISTTerm,
     message: str,
     llm: ChatModelParams | None = None,
     threshold: float = 0.5,
     max_depth: int | None = None,
 ) -> list[LISTTerm]:
+    taxonomy = read_taxonomy()
+    root = build_hierarchy(taxonomy)
     current_terms = [root]
     selected_terms = []
     depth = 0
@@ -152,6 +160,10 @@ def tree_search(
         current_terms = next_selected_terms
         depth += 1
 
+    langfuse_context.update_current_observation(output={
+        "selected_terms": [term.title for term in selected_terms],
+        "depth": depth,
+    })
     return selected_terms
 
 
