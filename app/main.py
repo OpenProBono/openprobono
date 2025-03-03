@@ -38,29 +38,33 @@ from app.db import (
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
+    count_resources,
     crawl_upload_site,
     delete_expr,
     file_upload,
     get_expr,
+    metadata_fields,
+    query_iterator,
     session_upload_ocr,
 )
 from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    CollectionManageRequest,
+    CollectionSearchRequest,
     EngineEnum,
     FetchSession,
     InitializeSession,
     InitializeSessionChat,
     OpinionFeedback,
     OpinionSearchRequest,
-    ResourceSearchRequest,
     SessionFeedback,
     User,
     VDBTool,
     get_uuid_id,
 )
-from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
+from app.opinion_search import add_opinion_summary, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 from app.user_auth import get_current_user
 
@@ -851,18 +855,6 @@ def search_opinions(
     else:
         return {"message": "Success", "results": results}
 
-
-@api.post("/search_resources", tags=["Resource Search"])
-def search_resources(
-    req: ResourceSearchRequest,
-    user: User = Depends(get_current_user),
-) -> dict:
-    vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
-    tool_response = run_vdb_tool(vdb_tool, req.model_dump())
-    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
-    return {"message": "Success", "results": formatted_results}
-
-
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
@@ -874,12 +866,6 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
-
-
-@api.get("/get_opinion_count", tags=["Opinion Search"])
-def get_opinion_count(user: User = Depends(get_current_user)) -> dict:
-    return {"message": "Success", "opinion_count": count_opinions()}
-
 
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
 def opinion_feedback(
@@ -902,3 +888,157 @@ def opinion_feedback(
     """Submit feedback to a specific session."""
     request.user = user
     return {"message": "Success" if store_opinion_feedback(request) else "Failure"}
+
+
+@api.post("/search_collection", tags=["Resource Search"])
+def search_collection(
+    req: CollectionSearchRequest,
+) -> dict:
+    vdb_tool = VDBTool(name="test-tool", collection_name=req.collection, k=req.k)
+    tool_response = run_vdb_tool(vdb_tool, req.model_dump(exclude_unset=True))
+    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    return {"message": "Success", "results": formatted_results}
+
+
+@api.get("/resource_count/{collection_name}", tags=["Resource Search"])
+def get_resource_count(
+    collection_name: str,
+) -> dict:
+    return {"message": "Success", "resource_count": count_resources(collection_name)}
+
+
+@api.post("/browse_collection", tags=["Resource Search"])
+def browse_collection(
+        req: CollectionManageRequest,
+        page: int = 1,
+        per_page: int = 200,
+        user: User = Depends(get_current_user)
+):
+    """Browse a collection."""
+    from datetime import UTC, datetime
+
+    from app.courtlistener import courtlistener_collection, jurisdiction_codes
+    from app.milvusdb import fuzzy_keyword_query
+    from app.models import VDBMethodEnum
+
+    expr = ""
+    output_fields = ["text", *metadata_fields(req.collection)]
+    if req.collection in {"search_collection_vj1", "search_collection_gemini"}:
+        entity_id_key = "url"
+    elif req.collection == SESSION_DATA:
+        entity_id_key = "filename"
+    else:
+        entity_id_key = "id"
+    if req.collection == courtlistener_collection:
+        if req.source:
+            expr = f"metadata['case_name'] like '%{req.source}%'"
+        if req.keyword_query:
+            expr += (" and " if expr else "")
+            expr += " and ".join([
+                f"TEXT_MATCH(text, '{word}')"
+                for word in req.keyword_query.split()
+            ])
+        if req.jurisdictions:
+            valid_jurisdics = []
+            # look up each str in dictionary, append matches as lists
+            for juris in req.jurisdictions:
+                if juris.lower() in jurisdiction_codes:
+                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+            # clear duplicate federal district jurisdictions if they exist
+            valid_jurisdics = list(set(valid_jurisdics))
+            expr += (" and " if expr else "")
+            expr += f"metadata['court_id'] in {valid_jurisdics}"
+        if req.after_date:
+            expr += (" and " if expr else "")
+            expr += f"metadata['date_filed']>'{req.after_date}'"
+        if req.before_date:
+            expr += (" and " if expr else "")
+            expr += f"metadata['date_filed']<'{req.before_date}'"
+    else:
+        if req.source:
+            expr = f"metadata['{entity_id_key}'] like '%{req.source}%'"
+        if req.keyword_query:
+            tool_keyword_query = req.keyword_query
+            keyword_query = fuzzy_keyword_query(tool_keyword_query)
+            expr += (" and " if expr else "")
+            expr += f"text like '% {keyword_query} %'"
+        if req.jurisdictions:
+            valid_jurisdics = [j.upper() for j in req.jurisdictions]
+            # look up each str in dictionary, append matches as lists
+            for juris in req.jurisdictions:
+                if juris.lower() in jurisdiction_codes:
+                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+            # clear duplicate federal district jurisdictions if they exist
+            valid_jurisdics = list(set(valid_jurisdics))
+            expr += (" and " if expr else "")
+            expr += f"ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {valid_jurisdics})"
+        if req.after_date:
+            # convert YYYY-MM-DD to epoch time
+            after_date = datetime.strptime(
+                req.after_date,
+                "%Y-%m-%d",
+            ).replace(tzinfo=UTC)
+            expr += (" and " if expr else "")
+            expr += f"metadata['timestamp']>{after_date.timestamp()}"
+        if req.before_date:
+            # convert YYYY-MM-DD to epoch time
+            before_date = datetime.strptime(
+                req.before_date,
+                "%Y-%m-%d",
+            ).replace(tzinfo=UTC)
+            expr += (" and " if expr else "")
+            expr += f"metadata['timestamp']<{before_date.timestamp()}"
+    q_iter = query_iterator(req.collection, expr, output_fields, 1000)
+    source_ids = set()
+    res = []
+    has_next = True
+    # skip the first (page - 1) * per_page sources
+    while len(source_ids) < (page - 1) * per_page:
+        res = q_iter.next()
+        if not res:
+            has_next = False
+            break
+        for hit in res:
+            source_id = hit["metadata"][entity_id_key]
+            if source_id not in source_ids:
+                source_ids.add(source_id)
+                if len(source_ids) == (page - 1) * per_page:
+                    break
+    if not has_next:
+        return {"message": "Success", "has_next": False, "results": []}
+    last_id = None
+    res = [hit for hit in res if hit["metadata"][entity_id_key] not in source_ids]
+    page_results = []
+    while len(source_ids) < page * per_page:
+        if not res:
+            res = q_iter.next()
+            if not res:
+                has_next = False
+                break
+        for hit in res:
+            source_id = hit["metadata"][entity_id_key]
+            if source_id not in source_ids:
+                last_id = source_id
+                source_ids.add(source_id)
+                if len(source_ids) == page * per_page:
+                    break
+            page_results.append(hit)
+        res = []
+    q_iter.close()
+    last_id_expr = last_id if isinstance(last_id, int) else f"'{last_id}'"
+    expr = f"metadata['{entity_id_key}']=={last_id_expr}"
+    last_id_res = get_expr(req.collection, expr, 16384)
+    last_id_chunks = []
+    if last_id_res["message"] != "Success":
+        logger.error("Error getting last_id chunks: %s", expr)
+    else:
+        last_id_chunks = last_id_res["result"]
+    page_results = [hit for hit in page_results if hit["metadata"][entity_id_key] != last_id]
+    tool_output = {"message": "Success", "result": page_results + last_id_chunks}
+    vdb_tool = VDBTool(
+        name="test-tool",
+        collection_name=req.collection,
+        method=VDBMethodEnum.get_source,
+    )
+    formatted_results = format_vdb_tool_results(tool_output, vdb_tool)
+    return {"message": "Success", "has_next": has_next, "results": formatted_results}

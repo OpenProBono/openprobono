@@ -167,7 +167,7 @@ def dynamic_serpapi_tool(
         filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
-        pks = [str(hit["id"]) for hit in res["result"]]
+        pks = [hit["pk"] for hit in res["result"]]
         langfuse_context.update_current_observation(output=pks)
     return res
 
@@ -412,6 +412,7 @@ def anthropic_tool(t: SearchTool) -> dict:
     return body
 
 
+@observe(capture_output=False)
 def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
     """Create a search tool for an openai agent.
 
@@ -527,13 +528,20 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
         return formatted_results
 
     for result in tool_output["result"]:
-        if "entity" in result:
-            entity = result["entity"]
-            # pks need to be strings to handle in JavaScript front end
+        if "entity" not in result:
+            continue
+        entity = result["entity"]
+        # if tool ended with VDB query, include pks/distance in the output
+        if "pk" in result:
+            entity["pk"] = str(result["pk"])
+        elif "id" in result:
             entity["pk"] = str(result["id"])
+        if "distance" in result:
+            entity["distance"] = result["distance"]
+
         if tool.method == SearchMethodEnum.courtlistener:
             entity_type = "opinion"
-            entity_id = entity["opinion_id"]
+            entity_id = entity["metadata"]["id"]
         elif tool.method in (
             SearchMethodEnum.dynamic_serpapi,
             SearchMethodEnum.dynamic_courtroom5,
