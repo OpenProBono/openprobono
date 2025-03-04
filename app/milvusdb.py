@@ -116,7 +116,7 @@ def create_collection(
     description: str = "",
     extra_fields: list[FieldSchema] | None = None,
     metadata_format: MilvusMetadataEnum = MilvusMetadataEnum.json,
-) -> Collection:
+) -> Collection | None:
     """Create a collection with a given name and other parameters.
 
     Parameters
@@ -142,11 +142,12 @@ def create_collection(
     -------
     pymilvus.Collection
         The collection. Must call load() before query/search.
-
+    None
+        If collection with the same name already exists
     """
     if utility.has_collection(name):
         logger.warning("Tried to create collection that already exists %s", name)
-        return Collection(name)
+        return None
     encoder = encoder if encoder is not None else EncoderParams()
     db_fields = None
 
