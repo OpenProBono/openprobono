@@ -585,7 +585,7 @@ def create_bot(
 
 @api.post("/view_bot", tags=["Bot"])
 def view_bot(bot_id: str, user: User = Depends(get_current_user)) -> dict:
-    logger.info("User %s viewing bot", user.firebase_uid)
+    logger.info("User %s viewing bot %s", user.firebase_uid, bot_id)
     return {"message": "Success", "data": load_bot(bot_id)}
 
 
@@ -1027,13 +1027,17 @@ def browse_collection(
     q_iter.close()
     last_id_expr = last_id if isinstance(last_id, int) else f"'{last_id}'"
     expr = f"metadata['{entity_id_key}']=={last_id_expr}"
-    last_id_res = get_expr(req.collection, expr, 16384)
+    q_iter = query_iterator(req.collection, expr, output_fields, 1000)
     last_id_chunks = []
-    if last_id_res["message"] != "Success":
-        logger.error("Error getting last_id chunks: %s", expr)
-    else:
-        last_id_chunks = last_id_res["result"]
-    page_results = [hit for hit in page_results if hit["metadata"][entity_id_key] != last_id]
+    res = q_iter.next()
+    while len(res) > 0:
+        last_id_chunks += res
+        res = q_iter.next()
+    q_iter.close()
+    page_results = [
+        hit for hit in page_results
+        if hit["metadata"][entity_id_key] != last_id
+    ]
     tool_output = {"message": "Success", "result": page_results + last_id_chunks}
     vdb_tool = VDBTool(
         name="test-tool",
