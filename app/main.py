@@ -9,12 +9,9 @@ from fastapi import (
     Body,
     Depends,
     FastAPI,
-    HTTPException,
-    Security,
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
-from fastapi.security import APIKeyHeader
 from langfuse.decorators import langfuse_context, observe
 
 from app.bot import (
@@ -27,6 +24,7 @@ from app.bot_helper import format_session_history, title_chat
 from app.db import (
     browse_bots,
     fetch_session,
+    fetch_sessions_by,
     get_cached_response,
     load_bot,
     set_session_to_bot,
@@ -38,33 +36,29 @@ from app.db import (
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
-    count_resources,
-    crawl_upload_site,
     delete_expr,
     file_upload,
     get_expr,
-    metadata_fields,
-    query_iterator,
     session_upload_ocr,
 )
 from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
-    CollectionManageRequest,
-    CollectionSearchRequest,
     EngineEnum,
     FetchSession,
+    FetchSessions,
     InitializeSession,
     InitializeSessionChat,
     OpinionFeedback,
     OpinionSearchRequest,
+    ResourceSearchRequest,
     SessionFeedback,
     User,
     VDBTool,
     get_uuid_id,
 )
-from app.opinion_search import add_opinion_summary, opinion_search
+from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 from app.user_auth import get_current_user
 
@@ -260,12 +254,9 @@ def init_session(
                     },
                 },
             ),
-        ],
-        user: User = Depends(get_current_user)) -> dict:
+        ]) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
-    request.user = user
+    print(request.user)
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -454,6 +445,37 @@ def get_session(
 
     cr = fetch_session(request)
     return {"message": "Success"} | cr.model_dump()
+
+@api.post("/fetch_sessions", tags=["Session Chat"])
+def fetch_sessions(
+    request: FetchSessions = Body(
+        ...,
+        openapi_examples={
+            "fetch sessions": {
+                "summary": "Fetch sessions by criteria",
+                "description": "Returns all sessions associated with a bot, a user, or both. If bot_id is provided, sessions "
+                               "will be filtered by that bot; otherwise, all sessions for the authenticated user are returned.",
+                "value": {
+                    "bot_id": "default_bot"  # optional field
+                },
+            },
+        },
+    ),
+    user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Fetch all sessions associated with a bot, a user, or both at once.
+    
+    The endpoint uses the Firebase UID from the authenticated user and optionally filters by bot ID.
+    If a bot_id is provided, only the bot creator can see all sessions - other users will only see their own sessions.
+    
+    Returns
+    -------
+    dict
+        A dictionary with a "message" and the list of matching "sessions".
+    """
+    sessions = fetch_sessions_by(bot_id=request.bot_id, firebase_uid=user.firebase_uid, user=user)
+    return {"message": "Success", "sessions": sessions}
 
 
 @api.post("/fetch_session_formatted_history", tags=["Session Chat"])
@@ -855,6 +877,18 @@ def search_opinions(
     else:
         return {"message": "Success", "results": results}
 
+
+@api.post("/search_resources", tags=["Resource Search"])
+def search_resources(
+    req: ResourceSearchRequest,
+    user: User = Depends(get_current_user),
+) -> dict:
+    vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
+    tool_response = run_vdb_tool(vdb_tool, req.model_dump())
+    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    return {"message": "Success", "results": formatted_results}
+
+
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
@@ -866,6 +900,12 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
+
+
+@api.get("/get_opinion_count", tags=["Opinion Search"])
+def get_opinion_count(user: User = Depends(get_current_user)) -> dict:
+    return {"message": "Success", "opinion_count": count_opinions()}
+
 
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
 def opinion_feedback(

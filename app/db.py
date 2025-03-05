@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from json import loads
+from typing import List, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -201,6 +202,49 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         file_count=session_data.get("file_count", 0),
     )
 
+def fetch_sessions_by(bot_id: Optional[str], firebase_uid: Optional[str], user: User) -> List[dict]:
+    """
+    Fetch sessions from Firebase that match the given criteria.
+    
+    Parameters
+    ----------
+    bot_id : Optional[str]
+        The bot ID to filter sessions by. If None, returns sessions for the user regardless of bot.
+    firebase_uid : Optional[str]
+        The Firebase UID of the user whose sessions are being fetched.
+    user : User
+        The authenticated user making the request.
+    
+    Returns
+    -------
+    List[dict]
+        A list of session dicts that match the criteria.
+    """
+    if(bot_id is None and firebase_uid is None):
+        return []
+    
+    sessions_ref = db.collection(CONVERSATION_COLLECTION + DB_VERSION)
+    
+    # Start with base query
+    query = sessions_ref
+    
+    if bot_id:
+        # Get the bot to check ownership
+        bot = load_bot(bot_id)
+        if not bot or bot.user.firebase_uid != user.firebase_uid:
+            # If not bot owner, only return sessions for this user and bot
+            query = query.where("bot_id", "==", bot_id).where("firebase_uid", "==", user.firebase_uid)
+        else:
+            # Bot owner can see all sessions for their bot
+            query = query.where("bot_id", "==", bot_id)
+    else:
+        # No bot specified, only return user's sessions
+        query = query.where("firebase_uid", "==", user.firebase_uid)
+
+    docs = query.get()
+    sessions = [doc.to_dict() for doc in docs]
+    return sessions
+
 def store_bot(r: BotRequest, bot_id: str) -> bool:
     """Store the bot in the database.
 
@@ -257,7 +301,7 @@ def browse_bots(user: User) -> dict:
 
     """
     bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
-    query = bot_ref.where(filter=FieldFilter("public", "==", True))
+    query = bot_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
     data = query.get()
     data_dict = {}
     for datum in data:
