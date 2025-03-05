@@ -24,6 +24,7 @@ def test_bot_operations() -> None:
     
     # Create test bots for each user
     bot1 = BotRequest(
+        name="User1's First Bot",
         system_prompt="Test bot 1 for user 1",
         chat_model=ChatModelParams(
             engine=EngineEnum.openai,
@@ -33,6 +34,7 @@ def test_bot_operations() -> None:
     )
     
     bot2 = BotRequest(
+        name="User1's Second Bot",
         system_prompt="Test bot 2 for user 1",
         chat_model=ChatModelParams(
             engine=EngineEnum.openai,
@@ -42,6 +44,7 @@ def test_bot_operations() -> None:
     )
     
     bot3 = BotRequest(
+        name="User2's Bot",
         system_prompt="Test bot 3 for user 2",
         chat_model=ChatModelParams(
             engine=EngineEnum.openai,
@@ -203,11 +206,32 @@ def test_bot_operations() -> None:
         
         assert user1_sessions_count == 2, "User1 should see exactly their 2 sessions"
         
+        # Test 7: Test bot deletion functionality
+        
+        # Test 7.1: User cannot delete a non-existent bot
+        non_existent_bot_id = f"test_bot_{uuid.uuid4()}"
+        assert db.delete_bot(non_existent_bot_id, user1) is False, "Should not be able to delete non-existent bot"
+        
+        # Test 7.2: User cannot delete another user's bot
+        assert db.delete_bot(bot3_id, user1) is False, "User1 should not be able to delete User2's bot"
+        # Verify bot3 still exists
+        assert db.load_bot(bot3_id) is not None, "Bot3 should still exist after failed deletion attempt"
+        
+        # Test 7.3: User can delete their own bot
+        assert db.delete_bot(bot2_id, user1) is True, "User1 should be able to delete their own bot"
+        # Verify bot2 no longer exists
+        assert db.load_bot(bot2_id) is None, "Bot2 should no longer exist after deletion"
+        
+        # Test 7.4: Verify bot is removed from browse results after deletion
+        user1_bots_after_delete = db.browse_bots(user1)
+        assert bot1_id in user1_bots_after_delete, "Bot1 should still be in browse results"
+        assert bot2_id not in user1_bots_after_delete, "Bot2 should not be in browse results after deletion"
+        
     finally:
         
         # Clean up test data
         db.db.collection(db.BOT_COLLECTION + db.DB_VERSION).document(bot1_id).delete()
-        db.db.collection(db.BOT_COLLECTION + db.DB_VERSION).document(bot2_id).delete()
+        # bot2_id already deleted in test
         db.db.collection(db.BOT_COLLECTION + db.DB_VERSION).document(bot3_id).delete()
         
         # Clean up test sessions

@@ -32,19 +32,25 @@ from app.db import (
     store_conversation_history,
     store_opinion_feedback,
     store_session_feedback,
+    delete_bot,
 )
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
+    count_resources,
     delete_expr,
     file_upload,
     get_expr,
+    metadata_fields,
+    query_iterator,
     session_upload_ocr,
 )
 from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
+    CollectionManageRequest,
+    CollectionSearchRequest,
     EngineEnum,
     FetchSession,
     FetchSessions,
@@ -52,13 +58,12 @@ from app.models import (
     InitializeSessionChat,
     OpinionFeedback,
     OpinionSearchRequest,
-    ResourceSearchRequest,
     SessionFeedback,
     User,
     VDBTool,
     get_uuid_id,
 )
-from app.opinion_search import add_opinion_summary, count_opinions, opinion_search
+from app.opinion_search import add_opinion_summary, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 from app.user_auth import get_current_user
 
@@ -539,6 +544,7 @@ def create_bot(
                         "summary": "create opb bot",
                         "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",  # noqa: E501
                         "value": {
+                            "name": "Legal Research Assistant",
                             "search_tools": [
                                 {
                                     "name": "government-search",
@@ -566,6 +572,7 @@ def create_bot(
                         "summary": "Description and Tips",
                         "description": "full descriptions",
                         "value": {
+                            "name": "My Custom Bot",
                             "system_prompt": "prompt to use for the bot, replaces the default prompt",
                             "message_prompt": "prompt to use for the bot, this is appended for each message, default is none",  # noqa: E501
                             "search_tools": [
@@ -602,7 +609,7 @@ def create_bot(
     bot_id = get_uuid_id()
     store_bot(request, bot_id)
 
-    return {"message": "Success", "bot_id": bot_id}
+    return {"message": "Success", "bot_id": bot_id, "name": request.name}
 
 
 @api.post("/view_bot", tags=["Bot"])
@@ -613,7 +620,9 @@ def view_bot(bot_id: str, user: User = Depends(get_current_user)) -> dict:
 
 @api.post("/view_bots", tags=["Bot"])
 def view_bots(user: User = Depends(get_current_user)) -> dict:
-    return {"message": "Success", "data": browse_bots(user)}
+    logger.info("User %s viewing bots", user.firebase_uid)
+    bots = browse_bots(user)
+    return {"message": "Success", "data": bots}
 
 
 @api.post("/upload_file", tags=["User Upload"])
@@ -880,7 +889,7 @@ def search_opinions(
 
 @api.post("/search_resources", tags=["Resource Search"])
 def search_resources(
-    req: ResourceSearchRequest,
+    req: CollectionSearchRequest,
     user: User = Depends(get_current_user),
 ) -> dict:
     vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
@@ -900,11 +909,6 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
-
-
-@api.get("/get_opinion_count", tags=["Opinion Search"])
-def get_opinion_count(user: User = Depends(get_current_user)) -> dict:
-    return {"message": "Success", "opinion_count": count_opinions()}
 
 
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
@@ -1086,3 +1090,36 @@ def browse_collection(
     )
     formatted_results = format_vdb_tool_results(tool_output, vdb_tool)
     return {"message": "Success", "has_next": has_next, "results": formatted_results}
+
+
+@api.delete("/delete_bot/{bot_id}", tags=["Bot"])
+def delete_bot_endpoint(
+    bot_id: str,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Delete a bot.
+    
+    Only the creator of the bot can delete it.
+    
+    Parameters
+    ----------
+    bot_id : str
+        The ID of the bot to delete
+    user : User
+        The authenticated user making the request
+        
+    Returns
+    -------
+    dict
+        Success or failure message
+    """
+    logger.info("User %s attempting to delete bot %s", user.firebase_uid, bot_id)
+    
+    # Call the delete_bot function from db.py
+    success = delete_bot(bot_id, user)
+    
+    if success:
+        return {"message": "Success", "bot_id": bot_id}
+    else:
+        return {"message": "Failure: Bot not found or you don't have permission to delete it"}

@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from enum import Enum, unique
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -159,16 +160,17 @@ class BotRequest(BaseModel):
 
     Attributes
     ----------
+        name (str): The display name of the bot.
         system_prompt (str): The system prompt.
         message_prompt (str): The message prompt.
-        model (str): The model to be used.
         search_tools (list[SearchTool]): The list of search tools.
         vdb_tools (list[VDBTool]): The list of VDB tools.
-        engine (EngineEnum): The engine to be used.
+        chat_model (ChatModelParams): The chat model parameters.
         user (User): The user obj.
 
     """
 
+    name: str = "Untitled Bot"
     system_prompt: str = BOT_PROMPT
     message_prompt: str = ""
     search_tools: list[SearchTool] = []
@@ -479,3 +481,26 @@ class SessionFeedback(BaseModel):
     message_index: int = -1
     categories: list[str] = []
     user: User
+
+class FetchSessions(BaseModel):
+    """
+    Model for fetching sessions by either bot or user.
+    
+    At least one of bot_id or firebase_uid must be provided.
+    
+    Parameters
+    ----------
+    bot_id : Optional[str]
+        If provided, sessions associated with this bot will be returned.
+        If the user is the bot owner, all sessions for this bot will be returned.
+        Otherwise, only the user's sessions with this bot will be returned.
+    firebase_uid : Optional[str]
+        If provided, only sessions associated with this Firebase UID will be returned.
+    """
+    bot_id: Optional[str] = None
+    firebase_uid: Optional[str] = None
+    
+    def model_post_init(self, __context):
+        """Validate that at least one of bot_id or firebase_uid is provided."""
+        if self.bot_id is None and self.firebase_uid is None:
+            raise ValueError("At least one of bot_id or firebase_uid must be provided")

@@ -367,7 +367,7 @@ def chat_stream_anthropic(
 
 
 def chat_str_anthropic(messages: list[dict], model: str, **kwargs: dict) -> str:
-    """Chat with an LLM using the openai engine and get a string response."""
+    """Chat with an LLM using the anthropic engine and get a string response."""
     response = chat_anthropic(messages, model, **kwargs)
     return "\n".join([
         block.text for block in response.content if block.type == "text"

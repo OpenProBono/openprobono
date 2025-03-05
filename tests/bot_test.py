@@ -19,7 +19,7 @@ def test_openai_bot() -> None:
         "method": "courtlistener",
         "prompt": "",
     }
-    bot = BotRequest(search_tools=[search_tool])
+    bot = BotRequest(name="Copyright Search Bot", search_tools=[search_tool])
     sys_msg = {"role": "system", "content": bot.system_prompt}
     user_msg = {
         "role": "user",

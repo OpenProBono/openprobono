@@ -7,9 +7,12 @@ from typing import List, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from google.cloud.firestore_v1.base_query import FieldFilter
+from google.cloud.firestore_v1.query_results import QueryResultsList
 from langfuse.decorators import observe
 
+from app.logger import setup_logger
 from app.models import (
     BotRequest,
     ChatRequest,
@@ -21,6 +24,9 @@ from app.models import (
     User,
     get_uuid_id,
 )
+
+# Set up logger
+logger = setup_logger()
 
 # which version of db we are using
 DB_VERSION = "_vf16"
@@ -301,8 +307,13 @@ def browse_bots(user: User) -> dict:
 
     """
     bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
+    
+    # Filter bots by the user's firebase_uid
+    logger.debug("Filtering bots for firebase_uid: %s", user.firebase_uid)
     query = bot_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
-    data = query.get()
+    
+    data: QueryResultsList[DocumentSnapshot] = query.get()
+    logger.debug("Found %d bots for user %s", len(data), user.firebase_uid)
     data_dict = {}
     for datum in data:
         data_dict[datum.id] = datum.to_dict()
@@ -472,3 +483,45 @@ def get_cached_response(bot_id: str, firebase_uid: str, message: str) -> str | N
         if len(user_messages) == 1 and user_messages[0]["content"] == message:
             return d["history"][-1]["content"]
     return None
+
+def delete_bot(bot_id: str, user: User) -> bool:
+    """Delete a bot from the database.
+    
+    Only the user who created the bot can delete it.
+
+    Parameters
+    ----------
+    bot_id : str
+        The ID of the bot to delete
+    user : User
+        The user requesting the deletion
+
+    Returns
+    -------
+    bool
+        True if deletion was successful, False otherwise
+    """
+    # First, load the bot to check ownership
+    bot = load_bot(bot_id)
+    
+    # If bot doesn't exist, return False
+    if not bot:
+        logger.warning("Attempted to delete non-existent bot %s by user %s", 
+                      bot_id, user.firebase_uid)
+        return False
+    
+    # Check if the requesting user is the bot creator
+    if bot.user.firebase_uid != user.firebase_uid:
+        logger.warning("Unauthorized deletion attempt of bot %s by user %s", 
+                      bot_id, user.firebase_uid)
+        return False
+    
+    # Delete the bot
+    try:
+        db.collection(BOT_COLLECTION + DB_VERSION).document(bot_id).delete()
+        logger.info("Bot %s successfully deleted by user %s", 
+                   bot_id, user.firebase_uid)
+        return True
+    except Exception as e:
+        logger.error("Error deleting bot %s: %s", bot_id, str(e))
+        return False
