@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from enum import Enum, unique
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -504,3 +504,21 @@ class FetchSessions(BaseModel):
         """Validate that at least one of bot_id or firebase_uid is provided."""
         if self.bot_id is None and self.firebase_uid is None:
             raise ValueError("At least one of bot_id or firebase_uid must be provided")
+
+class EvalSession(BaseModel):
+    """Model for a session in an evaluation dataset."""
+    input_idx: int
+    bot_idx: int
+    input_text: str
+    output_text: str
+    bot_id: str
+    session_id: str
+
+class EvalDataset(BaseModel):
+    """Model for an evaluation dataset."""
+    name: str
+    description: str = ""
+    inputs: List[str]
+    bot_ids: List[str]
+    sessions: List[EvalSession] = []  # Flattened list of sessions
+    user: User

@@ -26,6 +26,7 @@ from app.db import (
     fetch_session,
     fetch_sessions_by,
     get_cached_response,
+    get_dataset,
     load_bot,
     set_session_to_bot,
     store_bot,
@@ -33,6 +34,8 @@ from app.db import (
     store_opinion_feedback,
     store_session_feedback,
     delete_bot,
+    store_eval_dataset,
+    get_user_datasets,
 )
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
@@ -62,6 +65,8 @@ from app.models import (
     User,
     VDBTool,
     get_uuid_id,
+    EvalDataset,
+    EvalSession,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
@@ -1115,3 +1120,160 @@ def delete_bot_endpoint(
         return {"message": "Success", "bot_id": bot_id}
     else:
         return {"message": "Failure: Bot not found or you don't have permission to delete it"}
+
+
+@api.post("/run_eval_dataset", tags=["Evaluation"])
+def run_eval_dataset(
+    dataset: Annotated[
+        EvalDataset,
+        Body(
+            openapi_examples={
+                "create dataset": {
+                    "summary": "Create an evaluation dataset",
+                    "description": "Creates a dataset with inputs and bots for evaluation",
+                    "value": {
+                        "name": "Test Dataset",
+                        "description": "A dataset for testing bot performance",
+                        "inputs": ["What is the capital of France?", "Explain quantum computing"],
+                        "bot_ids": ["bot_id_1", "bot_id_2"]
+                    },
+                },
+            },
+        ),
+    ],
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Create a new evaluation dataset with inputs and bots.
+    
+    This endpoint creates a dataset that can be used to evaluate multiple bots
+    against the same set of inputs. It initializes sessions for each input-bot pair,
+    runs the bots on the inputs, and stores the results.
+    
+    Parameters
+    ----------
+    dataset : EvalDataset
+        The dataset to create, containing inputs and bot IDs
+    user : User
+        The authenticated user creating the dataset
+        
+    Returns
+    -------
+    dict
+        Success message with the dataset ID and session count
+    """
+    # Set the user
+    dataset.user = user
+    
+    # Generate dataset ID
+    dataset_id = get_uuid_id()
+    
+    # Initialize sessions list
+    sessions = []
+
+    store_eval_dataset(dataset, dataset_id)
+    
+    # Create sessions for each input-bot pair
+    for input_idx, input_text in enumerate(dataset.inputs):
+        for bot_idx, bot_id in enumerate(dataset.bot_ids):
+            # Check if bot exists and user has access
+            bot = load_bot(bot_id)
+            if not bot:
+                return {"message": f"Failure: Bot {bot_id} not found"}
+            
+            # Create a new session for this input-bot pair
+            session_id = get_uuid_id()
+            set_session_to_bot(session_id, bot_id)
+            
+            # Initialize the session with the input
+            cr = ChatRequest(
+                history=[{"role": "user", "content": input_text}],
+                bot_id=bot_id,
+                session_id=session_id,
+                user=user,
+            )
+            
+            # Call the bot to get the output
+            response = process_chat(cr, input_text)
+            output_text = response.get("output", "Error: No output generated")
+            
+            # Create and store the session
+            eval_session = EvalSession(
+                input_idx=input_idx,
+                bot_idx=bot_idx,
+                input_text=input_text,
+                output_text=output_text,
+                bot_id=bot_id,
+                session_id=session_id
+            )
+            sessions.append(eval_session)
+            # Store the sessions in the dataset
+            dataset.sessions = sessions
+            # Store the conversation history with the bot's response
+            store_conversation_history(cr)
+        
+            store_eval_dataset(dataset, dataset_id)
+    
+    # Store the dataset
+    store_eval_dataset(dataset, dataset_id)
+    
+    return {
+        "message": "Success",
+        "dataset_id": dataset_id,
+        "session_count": len(sessions)
+    }
+
+@api.get("/get_user_datasets", tags=["Evaluation"])
+def get_datasets(user: User = Depends(get_current_user)) -> dict:
+    """Get all evaluation datasets for the authenticated user.
+    
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message with the datasets
+    """
+    datasets = get_user_datasets(user)
+    return {"message": "Success", "datasets": datasets}
+
+@api.get("/get_dataset_sessions/{dataset_id}", tags=["Evaluation"])
+def get_dataset_sessions(dataset_id: str, user: User = Depends(get_current_user)) -> dict:
+    """Get all sessions for a specific dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message with the sessions
+    """
+    dataset = get_dataset(dataset_id)
+    if not dataset:
+        return {"message": "Failure: Dataset not found"}
+    
+    if dataset.user.firebase_uid != user.firebase_uid:
+        return {"message": "Failure: You don't have permission to access this dataset"}
+    
+    # Create a more structured view of the sessions
+    structured_sessions = {}
+    for session in dataset.sessions:
+        structured_sessions[session.session_id] = session
+
+    return {
+        "message": "Success", 
+        "dataset": {
+            "name": dataset.name,
+            "description": dataset.description,
+            "inputs": dataset.inputs,
+            "bot_ids": dataset.bot_ids,
+            "sessions": structured_sessions
+        }
+    }

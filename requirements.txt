@@ -14,7 +14,7 @@ openai==1.55.3
 pandas==2.2.3
 pandoc==2.4
 poppler-utils==0.1.0
-pymilvus==2.5.4
+pymilvus[model]==2.5.4
 pydantic[email]
 PyPDF2==3.0.1
 serpapi==0.1.5

@@ -2,7 +2,7 @@ import os
 import uuid
 
 from app import db
-from app.models import BotRequest, ChatModelParams, EngineEnum, OpenAIModelEnum, User
+from app.models import BotRequest, ChatModelParams, EngineEnum, OpenAIModelEnum, User, EvalDataset, EvalSession
 
 TEST_API_KEY = os.environ["OPB_TEST_API_KEY"]
 
@@ -239,3 +239,181 @@ def test_bot_operations() -> None:
         db.db.collection(db.CONVERSATION_COLLECTION + db.DB_VERSION).document(session2_id).delete()
         db.db.collection(db.CONVERSATION_COLLECTION + db.DB_VERSION).document(session3_id).delete()
         db.db.collection(db.CONVERSATION_COLLECTION + db.DB_VERSION).document(session4_id).delete()
+
+def test_eval_dataset_operations() -> None:
+    """Test storing and retrieving evaluation datasets."""
+    # Create test users
+    user1 = User(firebase_uid="test_user_1", email="test1@example.com")
+    user2 = User(firebase_uid="test_user_2", email="test2@example.com")
+    
+    # Create test bots for each user
+    bot1 = BotRequest(
+        name="User1's First Bot",
+        system_prompt="Test bot 1 for user 1",
+        chat_model=ChatModelParams(
+            engine=EngineEnum.openai,
+            model=OpenAIModelEnum.gpt_4o_mini.value
+        ),
+        user=user1
+    )
+    
+    bot2 = BotRequest(
+        name="User1's Second Bot",
+        system_prompt="Test bot 2 for user 1",
+        chat_model=ChatModelParams(
+            engine=EngineEnum.openai,
+            model=OpenAIModelEnum.gpt_4o_mini.value
+        ),
+        user=user1
+    )
+    
+    # Generate unique IDs for the bots
+    bot1_id = f"test_bot_{uuid.uuid4()}"
+    bot2_id = f"test_bot_{uuid.uuid4()}"
+    
+    # Generate dataset IDs upfront
+    dataset1_id = f"test_dataset_{uuid.uuid4()}"
+    dataset2_id = f"test_dataset_{uuid.uuid4()}"
+    dataset3_id = f"test_dataset_{uuid.uuid4()}"
+    dataset_with_sessions_id = f"test_dataset_{uuid.uuid4()}"
+    
+    try:
+        # Store the bots
+        db.store_bot(bot1, bot1_id)
+        db.store_bot(bot2, bot2_id)
+        
+        # Create test datasets
+        dataset1 = EvalDataset(
+            name="Test Dataset 1",
+            description="A test dataset for user 1",
+            inputs=["What is the capital of France?", "Explain quantum computing"],
+            bot_ids=[bot1_id, bot2_id],
+            user=user1
+        )
+        
+        dataset2 = EvalDataset(
+            name="Test Dataset 2",
+            description="Another test dataset for user 1",
+            inputs=["How does a car engine work?", "What is the theory of relativity?"],
+            bot_ids=[bot1_id],
+            user=user1
+        )
+        
+        dataset3 = EvalDataset(
+            name="Test Dataset 3",
+            description="A test dataset for user 2",
+            inputs=["What is machine learning?"],
+            bot_ids=[bot1_id],
+            user=user2
+        )
+        
+        # Store the datasets
+        db.store_eval_dataset(dataset1, dataset1_id)
+        db.store_eval_dataset(dataset2, dataset2_id)
+        db.store_eval_dataset(dataset3, dataset3_id)
+        
+        # Test retrieving datasets for user1
+        user1_datasets = db.get_user_datasets(user1)
+        assert dataset1_id in user1_datasets
+        assert dataset2_id in user1_datasets
+        assert dataset3_id not in user1_datasets
+        
+        # Test retrieving datasets for user2
+        user2_datasets = db.get_user_datasets(user2)
+        assert dataset1_id not in user2_datasets
+        assert dataset2_id not in user2_datasets
+        assert dataset3_id in user2_datasets
+        
+        # Test retrieving a specific dataset
+        retrieved_dataset = db.get_dataset(dataset1_id)
+        assert retrieved_dataset is not None
+        assert retrieved_dataset.name == dataset1.name
+        assert retrieved_dataset.description == dataset1.description
+        assert retrieved_dataset.inputs == dataset1.inputs
+        assert retrieved_dataset.bot_ids == dataset1.bot_ids
+        assert retrieved_dataset.user.firebase_uid == user1.firebase_uid
+        
+        # Test sessions functionality
+        # Create a dataset with sessions
+        sessions = [
+            EvalSession(
+                input_idx=0,
+                bot_idx=0,
+                input_text="Question 1",
+                output_text="Answer 1 from bot 1",
+                bot_id=bot1_id,
+                session_id="session1_1"
+            ),
+            EvalSession(
+                input_idx=0,
+                bot_idx=1,
+                input_text="Question 1",
+                output_text="Answer 1 from bot 2",
+                bot_id=bot2_id,
+                session_id="session1_2"
+            ),
+            EvalSession(
+                input_idx=1,
+                bot_idx=0,
+                input_text="Question 2",
+                output_text="Answer 2 from bot 1",
+                bot_id=bot1_id,
+                session_id="session2_1"
+            ),
+            EvalSession(
+                input_idx=1,
+                bot_idx=1,
+                input_text="Question 2",
+                output_text="Answer 2 from bot 2",
+                bot_id=bot2_id,
+                session_id="session2_2"
+            )
+        ]
+        
+        dataset_with_sessions = EvalDataset(
+            name="Dataset with Sessions",
+            description="A test dataset with sessions",
+            inputs=["Question 1", "Question 2"],
+            bot_ids=[bot1_id, bot2_id],
+            sessions=sessions,
+            user=user1
+        )
+        
+        db.store_eval_dataset(dataset_with_sessions, dataset_with_sessions_id)
+        
+        # Retrieve and verify sessions
+        retrieved_dataset_with_sessions = db.get_dataset(dataset_with_sessions_id)
+        assert retrieved_dataset_with_sessions is not None
+        assert len(retrieved_dataset_with_sessions.sessions) == 4
+        
+        # Check that all sessions are present
+        session_ids = [s.session_id for s in retrieved_dataset_with_sessions.sessions]
+        assert "session1_1" in session_ids
+        assert "session1_2" in session_ids
+        assert "session2_1" in session_ids
+        assert "session2_2" in session_ids
+        
+        # Check that the input_idx and bot_idx are correct
+        for session in retrieved_dataset_with_sessions.sessions:
+            if session.session_id == "session1_1":
+                assert session.input_idx == 0
+                assert session.bot_idx == 0
+                assert session.input_text == "Question 1"
+                assert session.output_text == "Answer 1 from bot 1"
+                assert session.bot_id == bot1_id
+            elif session.session_id == "session1_2":
+                assert session.input_idx == 0
+                assert session.bot_idx == 1
+                assert session.input_text == "Question 1"
+                assert session.output_text == "Answer 1 from bot 2"
+                assert session.bot_id == bot2_id
+        
+    finally:
+        # Clean up test data
+        db.db.collection(db.BOT_COLLECTION + db.DB_VERSION).document(bot1_id).delete()
+        # db.db.collection(db.BOT_COLLECTION + db.DB_VERSION).document(bot2_id).delete()
+        
+        # db.db.collection(db.EVAL_DATASET_COLLECTION + db.DB_VERSION).document(dataset1_id).delete()
+        # db.db.collection(db.EVAL_DATASET_COLLECTION + db.DB_VERSION).document(dataset2_id).delete()
+        # db.db.collection(db.EVAL_DATASET_COLLECTION + db.DB_VERSION).document(dataset3_id).delete()
+        # db.db.collection(db.EVAL_DATASET_COLLECTION + db.DB_VERSION).document(dataset_with_sessions_id).delete()

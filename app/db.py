@@ -23,6 +23,7 @@ from app.models import (
     SessionFeedback,
     User,
     get_uuid_id,
+    EvalDataset,
 )
 
 # Set up logger
@@ -35,6 +36,7 @@ MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
+EVAL_DATASET_COLLECTION = "eval_datasets"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -527,3 +529,68 @@ def delete_bot(bot_id: str, user: User) -> bool:
     except Exception as e:
         logger.error("Error deleting bot %s: %s", bot_id, str(e))
         return False
+
+def store_eval_dataset(dataset: EvalDataset, dataset_id: str) -> bool:
+    """Store an evaluation dataset in the database.
+
+    Parameters
+    ----------
+    dataset : EvalDataset
+        The dataset object to store.
+    dataset_id : str
+        The dataset id to use.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    data = dataset.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+    db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    return True
+
+def get_user_datasets(user: User) -> dict:
+    """Get all evaluation datasets for a user.
+
+    Parameters
+    ----------
+    user : User
+        The user whose datasets to retrieve.
+
+    Returns
+    -------
+    dict
+        Dictionary of datasets indexed by dataset_id.
+    """
+    dataset_ref = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION)
+    
+    # Filter datasets by the user's firebase_uid
+    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    data = query.get()
+    logger.debug("Found %d datasets for user %s", len(data), user.firebase_uid)
+    
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    
+    return data_dict
+
+def get_dataset(dataset_id: str) -> Optional[EvalDataset]:
+    """Get a specific evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to retrieve.
+
+    Returns
+    -------
+    Optional[EvalDataset]
+        The dataset if found, None otherwise.
+    """
+    dataset = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
+    if dataset.exists:
+        return EvalDataset(**dataset.to_dict())
+    return None
