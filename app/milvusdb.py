@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from json import loads
 from typing import TYPE_CHECKING
 
@@ -218,6 +219,8 @@ def create_collection(
     auto_index["metric_type"] = "BM25"
     # create index for full text search
     coll.create_index(field_name="sparse", index_params=auto_index, metric_type="BM25")
+    # add created_at property
+    coll.set_properties({"created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d")})
 
     # save params in firebase
     store_vdb(name, encoder, metadata_format, db_fields)
@@ -425,6 +428,25 @@ def count_resources(collection_name: str) -> int:
     """
     # entity count for now
     return Collection(collection_name).num_entities
+
+
+def collection_created_at(collection_name: str) -> str:
+    """Get the creation date of a collection.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection
+
+    Returns
+    -------
+    str
+        The creation date of the collection in ISO 8601 (YYYY-MM-DD) format.
+
+    """
+    description = Collection(collection_name).describe()
+    properties = description["properties"]
+    return properties.get("created_at", "")
 
 
 @observe()
