@@ -186,11 +186,11 @@ JURISDICTION_SUMMARY_PROMPT = """Use the following summary of the URL to inform 
 
 {ai_summary}"""
 
-JURISDICTION_PROMPT = """Your task is to classify a URL into state and/or federal jurisdictions. Your output must be a list in the following format:
+JURISDICTION_PROMPT = """Your task is to classify a URL into state, federal, and/or UK jurisdictions. Your output must be a list in the following format:
 
 [
   {{
-    "name": a two letter code of a state or "US" if the jurisdiction is federal,
+    "name": a two-letter code of a U.S. state, "US" if the jurisdiction is federal, or "UK" if the jurisdiction is the United Kingdom,
     "confidence": a number between 0 and 1
   }}
 ]
