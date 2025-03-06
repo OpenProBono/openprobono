@@ -236,16 +236,18 @@ def fetch_sessions_by(bot_id: Optional[str], firebase_uid: Optional[str], user: 
     
     if bot_id:
         # Get the bot to check ownership
+        
         bot = load_bot(bot_id)
         if not bot or bot.user.firebase_uid != user.firebase_uid:
             # If not bot owner, only return sessions for this user and bot
-            query = query.where("bot_id", "==", bot_id).where("firebase_uid", "==", user.firebase_uid)
+            query = query.where("bot_id", "==", bot_id).where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
         else:
             # Bot owner can see all sessions for their bot
             query = query.where("bot_id", "==", bot_id)
     else:
         # No bot specified, only return user's sessions
-        query = query.where("firebase_uid", "==", user.firebase_uid)
+        query = query.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
 
     docs = query.get()
     sessions = [doc.to_dict() for doc in docs]

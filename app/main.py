@@ -237,8 +237,6 @@ def chat(
         ],
         user: User = Depends(get_current_user)) -> dict:
     """Call a bot with history (only for backwards compat, could be deprecated)."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
     return process_chat(request, "")
 
@@ -292,8 +290,6 @@ def init_session_chat(
         ],
         user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_id = get_uuid_id()
@@ -336,8 +332,6 @@ def init_session_chat_stream(
         ],
         user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_id = get_uuid_id()
@@ -377,8 +371,6 @@ def chat_session(
         ],
         user: User = Depends(get_current_user))  -> dict:
     """Continue a chat session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_obj = FetchSession(session_id=request.session_id, user=request.user)
@@ -479,7 +471,7 @@ def fetch_sessions(
     dict
         A dictionary with a "message" and the list of matching "sessions".
     """
-    sessions = fetch_sessions_by(bot_id=request.bot_id, firebase_uid=user.firebase_uid, user=user)
+    sessions = fetch_sessions_by(bot_id=request.bot_id, firebase_uid=request.firebase_uid, user=user)
     return {"message": "Success", "sessions": sessions}
 
 
