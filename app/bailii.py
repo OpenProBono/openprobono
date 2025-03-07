@@ -3,6 +3,7 @@
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
+from threading import Lock
 
 import requests
 import urllib3
@@ -108,19 +109,45 @@ def bailii_search(qr: str, tool: SearchTool) -> list[str]:
     return res
 
 
+# Global lock for URL processing
+url_locks = {}
+url_lock = Lock()
+
+# Set to keep track of failed URLs
+failed_urls = set()
+failed_urls_lock = Lock()
+
 def process_site(url: str, tool: SearchTool) -> None:
     num_attempts = 10
-    if not source_exists(BAILII_COLLECTION, url, tool.bot_id, tool.name):
-        logger.info("Uploading site: %s", url)
-        upload_site(BAILII_COLLECTION, url, tool)
-        # check to ensure site appears in collection before releasing URL lock
-        attempt = 0
-        while not source_exists(BAILII_COLLECTION, url, tool.bot_id, tool.name) and attempt < num_attempts:
-            attempt += 1
-        if attempt == num_attempts:
-            logger.error("Site not found in collection, add to failed URLs: %s", url)
-    else:
-        logger.info("Site already uploaded: %s", url)
+    with url_lock:
+        if url not in url_locks:
+            url_locks[url] = Lock()
+    with url_locks[url]:
+        logger.info("Site %s acquired lock", url)
+        # Check if URL has already failed before processing
+        with failed_urls_lock:
+            if url in failed_urls:
+                logger.info("Skipping previously failed URL: %s", url)
+                return
+        try:
+            if not source_exists(BAILII_COLLECTION, url, tool.bot_id, tool.name):
+                logger.info("Uploading site: %s", url)
+                upload_site(BAILII_COLLECTION, url, tool)
+                # check to ensure site appears in collection before releasing URL lock
+                attempt = 0
+                while not source_exists(BAILII_COLLECTION, url, tool.bot_id, tool.name) and attempt < num_attempts:
+                    attempt += 1
+                if attempt == num_attempts:
+                    logger.error("Site not found in collection, add to failed URLs: %s", url)
+                    with failed_urls_lock:
+                        failed_urls.add(url)
+            else:
+                logger.info("Site already uploaded: %s", url)
+        except Exception:
+            logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", url)
+            with failed_urls_lock:
+                failed_urls.add(url)
+        logger.info("Site %s releasing lock", url)
 
 
 def format_advanced_query(query: str) -> str:
