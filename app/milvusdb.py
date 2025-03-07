@@ -3,15 +3,21 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from json import loads
 from typing import TYPE_CHECKING
 
 from langfuse.decorators import langfuse_context, observe
 from pymilvus import (
+    AnnSearchRequest,
     Collection,
     CollectionSchema,
     DataType,
     FieldSchema,
+    Function,
+    FunctionType,
+    MilvusException,
+    RRFRanker,
     connections,
     utility,
 )
@@ -130,18 +136,12 @@ def create_collection(
     Returns
     -------
     pymilvus.Collection
-        The created collection. Must call load() before query/search.
-
-    Raises
-    ------
-    ValueError
-        If the collection name already exists
+        The collection. Must call load() before query/search.
 
     """
     if utility.has_collection(name):
-        already_exists = f"collection named {name} already exists"
-        logger.error(already_exists)
-        raise ValueError(already_exists)
+        logger.warning("Tried to create collection that already exists %s", name)
+        return Collection(name)
     encoder = encoder if encoder is not None else EncoderParams()
     db_fields = None
 
@@ -158,12 +158,21 @@ def create_collection(
         dtype=DataType.VARCHAR,
         description="The source text",
         max_length=65535,
+        enable_analyzer=True,
+        enable_match=True,
     )
     embedding_field = FieldSchema(
         name="vector",
         dtype=DataType.FLOAT_VECTOR,
         dim=encoder.dim,
         description="The embedded text",
+    )
+    sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR, description="The sparse vector for full text search")
+    bm25_function = Function(
+        name="text_bm25_emb",
+        input_field_names=["text"],
+        output_field_names=["sparse"],
+        function_type=FunctionType.BM25,
     )
 
     # keep track of how the collection stores metadata
@@ -187,9 +196,8 @@ def create_collection(
                 db_fields = [field.name for field in extra_fields]
 
     schema = CollectionSchema(
-        fields=[pk_field, embedding_field, text_field, *extra_fields],
-        auto_id=True,
-        enable_dynamic_field=True,
+        fields=[pk_field, text_field, embedding_field, sparse_field, *extra_fields],
+        functions=[bm25_function],
         description=description,
     )
 
@@ -202,6 +210,11 @@ def create_collection(
         "metric_type": "IP",
     }
     coll.create_index("vector", index_params=auto_index, index_name="auto_index")
+    auto_index["metric_type"] = "BM25"
+    # create index for full text search
+    coll.create_index(field_name="sparse", index_params=auto_index, metric_type="BM25")
+    # add created_at property
+    coll.set_properties({"created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d")})
 
     # save params in firebase
     store_vdb(name, encoder, metadata_format, db_fields)
@@ -214,6 +227,30 @@ def create_collection(
         COLLECTION_PARAMS[name]["fields"] = db_fields
     logger.info("Collection Created: %s", name)
     return coll
+
+
+def metadata_fields(collection_name: str) -> list[str]:
+    """Get the metadata fields for a collection.
+
+    Parameters
+    ----------
+    collection_name : str
+        The name of the collection.
+
+    Returns
+    -------
+    list[str]
+        The metadata fields for the collection.
+
+    """
+    metadata_format = load_vdb_param(collection_name, "metadata_format")
+    match metadata_format:
+        case MilvusMetadataEnum.json:
+            return ["metadata"]
+        case MilvusMetadataEnum.field:
+            return load_vdb_param(collection_name, "fields")
+    # MilvusMetadataEnum.no_field does not have metadata fields
+    return []
 
 
 @observe()
@@ -251,21 +288,27 @@ def query(
     search_params = {
         "anns_field": "vector",
         "param": {}, # can customize index params assuming you know index type
-        "output_fields": ["text"],
+        "output_fields": ["text", *metadata_fields(collection_name)],
         "data": data,
         "limit": k,
     }
-    metadata_format = load_vdb_param(collection_name, "metadata_format")
-    match metadata_format:
-        case MilvusMetadataEnum.json:
-            search_params["output_fields"] += ["metadata"]
-        case MilvusMetadataEnum.field:
-            search_params["output_fields"] += load_vdb_param(collection_name, "fields")
     if session_id:
         expr += (" and " if expr else "") + f"metadata[\"session_id\"]=='{session_id}'"
     if expr:
         search_params["expr"] = expr
-    res = coll.search(**search_params)
+    if coll.has_index(index_name="sparse"):
+        # do a hybrid search that combines and reranks dense + sparse vector searches
+        output_fields = search_params["output_fields"]
+        del search_params["output_fields"]
+        req1 = AnnSearchRequest(**search_params)
+        search_params["anns_field"] = "sparse"
+        search_params["data"] = [query]
+        req2 = AnnSearchRequest(**search_params)
+        reqs = [req1, req2]
+        res = coll.hybrid_search(reqs, RRFRanker(), k, output_fields=output_fields)
+    else:
+        res = coll.search(**search_params)
+    logger.info("Collection queried: %s", collection_name)
     if res:
         # on success, returns a list containing a single inner list containing
         # result objects
@@ -276,11 +319,10 @@ def query(
                 key=lambda h: h["distance"],
             )
             # format output for tracing
-            pks = [str(hit["id"]) for hit in hits]
+            pks = [hit["pk"] for hit in hits]
             langfuse_context.update_current_observation(output=pks)
             return {"message": "Success", "result": hits}
         return {"message": "Success", "result": res}
-    logger.info("Collection queried: %s", collection_name)
     return {"message": "Failure: unable to complete search"}
 
 
@@ -510,25 +552,25 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
 
     """
     coll = Collection(collection_name)
-    collection_format = load_vdb_param(collection_name, "metadata_format")
-    output_fields = ["text", "vector"]
-    match collection_format:
-        case MilvusMetadataEnum.field:
-            output_fields += [*load_vdb_param(collection_name, "fields")]
-        case MilvusMetadataEnum.json:
-            output_fields += ["metadata"]
-    q_iter = coll.query_iterator(
-        expr=expr,
-        output_fields=output_fields,
-        batch_size=batch_size,
-    )
+    output_fields = ["text", "vector", *metadata_fields(collection_name)]
     hits = []
-    res = q_iter.next()
-    while len(res) > 0:
-        hits += res
+    try:
+        q_iter = coll.query_iterator(
+            expr=expr,
+            output_fields=output_fields,
+            batch_size=batch_size,
+        )
         res = q_iter.next()
-    q_iter.close()
-    langfuse_context.update_current_observation(output=f"{len(hits)} hits")
+        while len(res) > 0:
+            hits += res
+            res = q_iter.next()
+        q_iter.close()
+    except MilvusException as e:
+        logger.exception("Collection failed to get expression: %s", collection_name)
+        langfuse_context.update_current_observation(level="ERROR", status_message=str(e))
+        return {"message": "Failure"}
+    pks = [hit["pk"] for hit in hits]
+    langfuse_context.update_current_observation(output=pks)
     logger.info("Collection got expression: %s", collection_name)
     return {"message": "Success", "result": hits}
 
@@ -747,7 +789,7 @@ def upload_site(
     bot_id = search_tool.bot_id
     tool_name = search_tool.name
     for metadata in metadatas:
-        metadata["timestamp"] = str(time.time())
+        metadata["timestamp"] = time.time()
         metadata["url"] = url
         metadata["ai_summary"] = ai_summary
         metadata["bot_and_tool_id"] = [bot_id + tool_name]

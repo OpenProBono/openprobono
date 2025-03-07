@@ -8,6 +8,7 @@ import requests
 from langfuse.decorators import langfuse_context, observe
 from serpapi.google_search import GoogleSearch
 
+from app.bailii import ADVANCED_SEARCH_DESC, bailii_search
 from app.courtlistener import courtlistener_query, courtlistener_tool_args
 from app.logger import setup_logger
 from app.milvusdb import query, source_exists, upload_site
@@ -162,7 +163,7 @@ def dynamic_serpapi_tool(
         filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
-        pks = [str(hit["id"]) for hit in res["result"]]
+        pks = [str(hit["pk"]) for hit in res["result"]]
         langfuse_context.update_current_observation(output=pks)
     return res
 
@@ -366,6 +367,14 @@ def openai_tool(t: SearchTool) -> dict:
         body["function"]["parameters"]["properties"]["qr"]["description"] = (
             "The search text. Include the jurisdiction here as well, if provided."
         )
+    if t.method == SearchMethodEnum.bailii:
+        # replace query description with advanced search description
+        body["function"]["parameters"]["properties"]["qr"]["description"] = (
+            "The search text, formatted as an advanced search. "
+        )
+        body["function"]["parameters"]["properties"]["qr"]["description"] += (
+            ADVANCED_SEARCH_DESC
+        )
     return body
 
 def anthropic_tool(t: SearchTool) -> dict:
@@ -406,6 +415,23 @@ def anthropic_tool(t: SearchTool) -> dict:
         # default tool definition
         if not t.prompt:
             body["description"] = FILTERED_CASELAW_PROMPT
+    if t.method == SearchMethodEnum.dynamic_serpapi:
+        # add jurisdictions argument
+        body["input_schema"]["properties"].update({
+            "jurisdictions": courtlistener_tool_args["jurisdictions"],
+        })
+        # modify query text to include jurisdiction in both args
+        body["input_schema"]["properties"]["qr"]["description"] = (
+            "The search text. Include the jurisdiction here as well, if provided."
+        )
+    if t.method == SearchMethodEnum.bailii:
+        # replace query description with advanced search description
+        body["function"]["parameters"]["properties"]["qr"]["description"] = (
+            "The search text, formatted as an advanced search. "
+        )
+        body["function"]["parameters"]["properties"]["qr"]["description"] += (
+            ADVANCED_SEARCH_DESC
+        )
     return body
 
 
@@ -465,6 +491,8 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> str:
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
             function_response = dynamic_courtroom5_search_tool(qr, prf, tool)
+        case SearchMethodEnum.bailii:
+            function_response = bailii_search(qr, tool)
     return str(function_response)
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
