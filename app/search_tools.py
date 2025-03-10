@@ -573,6 +573,7 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
         elif tool.method in (
             SearchMethodEnum.dynamic_serpapi,
             SearchMethodEnum.dynamic_courtroom5,
+            SearchMethodEnum.bailii,
         ):
             entity_type = "url"
             entity_id = entity["metadata"]["url"]
