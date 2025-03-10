@@ -17,11 +17,12 @@ from app.models import (
     MilvusMetadataEnum,
     OpinionFeedback,
     SessionFeedback,
+    User,
     get_uuid_id,
 )
 
 # which version of db we are using
-DB_VERSION = "_vj1"
+DB_VERSION = "_vf16"
 BOT_COLLECTION = "bots"
 MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
@@ -194,7 +195,7 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         history=session_data.get("history", []),
         bot_id=session_data["bot_id"],
         session_id=r.session_id,
-        api_key=r.api_key,
+        user=r.user,
         timestamp=str(session_data.get("timestamp", "")),
         title=session_data.get("title", ""),
         file_count=session_data.get("file_count", 0),
@@ -241,13 +242,13 @@ def load_bot(bot_id: str) -> BotRequest:
 
     return None
 
-def browse_bots(api_key: str) -> dict:
+def browse_bots(user: User) -> dict:
     """Browse Bots by api key.
 
     Parameters
     ----------
-    api_key : str
-        api_key
+    user : User
+        The user obj.
 
     Returns
     -------
@@ -261,7 +262,6 @@ def browse_bots(api_key: str) -> dict:
     data_dict = {}
     for datum in data:
         data_dict[datum.id] = datum.to_dict()
-        data_dict[datum.id].pop("api_key")
     return data_dict
 
 def load_vdb(collection_name: str) -> dict:
@@ -392,15 +392,15 @@ def get_batch() -> firestore.firestore.WriteBatch:
 
 
 @observe()
-def get_cached_response(bot_id: str, api_key: str, message: str) -> str | None:
+def get_cached_response(bot_id: str, firebase_uid: str, message: str) -> str | None:
     """If a conversation is already in the database, return the LLM response.
 
     Parameters
     ----------
     bot_id : str
         The bot id for the cached response
-    api_key : str
-        The API key for the cached response
+    firebase_uid : str
+        The user key for the cached response
     message : str
         The message for the cached response
 
@@ -413,7 +413,7 @@ def get_cached_response(bot_id: str, api_key: str, message: str) -> str | None:
     sessions = db.collection(CONVERSATION_COLLECTION + DB_VERSION)
     matched_sessions = (
         sessions
-        .where(filter=FieldFilter("api_key", "==", api_key))
+        .where(filter=FieldFilter("firebase_uid", "==", firebase_uid))
         .where(filter=FieldFilter("bot_id", "==", bot_id))
         .get()
     )

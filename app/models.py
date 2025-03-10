@@ -1,10 +1,11 @@
 """Written by Arman Aydemir. This file contains the main models/classes."""
 from __future__ import annotations
 
+import datetime
 import uuid
 from enum import Enum, unique
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 from app.prompts import BOT_PROMPT
 
@@ -138,7 +139,6 @@ class FeedbackType(str, Enum):
     dislike = "dislike"
     generic = "generic"
 
-
 class ChatModelParams(BaseModel):
     """Define a chat model for RAG."""
 
@@ -166,7 +166,7 @@ class BotRequest(BaseModel):
         search_tools (list[SearchTool]): The list of search tools.
         vdb_tools (list[VDBTool]): The list of VDB tools.
         engine (EngineEnum): The engine to be used.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
@@ -175,7 +175,7 @@ class BotRequest(BaseModel):
     search_tools: list[SearchTool] = []
     vdb_tools: list[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
-    api_key: str = ""
+    user: User
 
 
 class OpinionSearchRequest(BaseModel):
@@ -278,13 +278,13 @@ class OpinionFeedback(BaseModel):
     ----------
         feedback_text (str): The feedback text
         opinion_id (int): The opinion ID.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
     feedback_text: str
     opinion_id: int
-    api_key: str = ""
+    user: User
 
 class LISTTerm(BaseModel):
     """Model class representing a term in the LIST taxonomy.
@@ -367,6 +367,17 @@ class VDBTool(BaseModel):
     method: VDBMethodEnum = VDBMethodEnum.query
     bot_id: str = ""
 
+class User(BaseModel):
+    """Model class representing a user account.
+
+    Attributes
+    ----------
+    firebase_uid (str): The unique identifier provided by Firebase.
+    email (EmailStr): The user's email address.
+    """
+    
+    firebase_uid: str
+    email: EmailStr
 
 class ChatRequest(BaseModel):
     """Model class representing a chat request.
@@ -376,7 +387,7 @@ class ChatRequest(BaseModel):
         history (list): The chat history.
         bot_id (str): The ID of the bot.
         session_id (str): The session ID.
-        api_key (str): The API key.
+        user (User): The user obj.
         timestamp (str): The timestamp of the last change to the session.
         title (str): The AI-generated title of the chat.
         file_count (int): The number of files uploaded by the user.
@@ -386,7 +397,7 @@ class ChatRequest(BaseModel):
     history: list
     bot_id: str
     session_id: str = None
-    api_key: str = ""
+    user: User
     timestamp: str = ""
     title: str = ""
     file_count: int = 0
@@ -399,13 +410,13 @@ class ChatBySession(BaseModel):
     ----------
         message (str): The chat message.
         session_id (str): The session ID.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
     message: str
     session_id: str
-    api_key: str = ""
+    user: User
 
 class InitializeSession(BaseModel):
     """Model class representing an initialize session request.
@@ -413,12 +424,12 @@ class InitializeSession(BaseModel):
     Attributes
     ----------
         bot_id (str): The ID of the bot.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
     bot_id: str
-    api_key: str = ""
+    user: User
 
 class InitializeSessionChat(BaseModel):
     """Model class representing an initialize session request with a message.
@@ -427,13 +438,13 @@ class InitializeSessionChat(BaseModel):
     ----------
         message (str): The initialization message.
         bot_id (str): The ID of the bot.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
     message: str
     bot_id: str
-    api_key: str = ""
+    user: User
 
 
 class FetchSession(BaseModel):
@@ -442,12 +453,12 @@ class FetchSession(BaseModel):
     Attributes
     ----------
         session_id (str): The session ID.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
     session_id: str
-    api_key: str = ""
+    user: User
 
 class SessionFeedback(BaseModel):
     """Model class representing a session feedback request.
@@ -459,7 +470,7 @@ class SessionFeedback(BaseModel):
         feedback_type (FeedbackType): Like, dislike, or generic feedback.
         message_index (int): The index corresponding to the bots response.
         categories (list[str]): The categories for dislike feedback.
-        api_key (str): The API key.
+        user (User): The user obj.
 
     """
 
@@ -468,4 +479,4 @@ class SessionFeedback(BaseModel):
     feedback_type: FeedbackType = FeedbackType.generic
     message_index: int = -1
     categories: list[str] = []
-    api_key: str = ""
+    user: User

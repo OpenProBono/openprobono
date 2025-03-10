@@ -266,7 +266,7 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
     bot.vdb_tools += search_src_tools + query_src_tools
     # add the session query tool, if necessary
     if session_id:
-        session = FetchSession(api_key=bot.api_key, session_id=session_id)
+        session = FetchSession(user=bot.user, session_id=session_id)
         session_info = fetch_session(session)
         file_count = session_info.file_count
     else:
