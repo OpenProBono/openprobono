@@ -29,6 +29,7 @@ class SearchMethodEnum(str, Enum):
     courtlistener = "courtlistener"
     courtroom5 = "courtroom5"
     dynamic_courtroom5 = "dynamic_courtroom5"
+    bailii = "bailii"
 
 @unique
 class SummaryMethodEnum(str, Enum):
