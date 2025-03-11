@@ -429,10 +429,10 @@ def anthropic_tool(t: SearchTool) -> dict:
         )
     if t.method == SearchMethodEnum.bailii:
         # replace query description with advanced search description
-        body["function"]["parameters"]["properties"]["qr"]["description"] = (
+        body["input_schema"]["properties"]["qr"]["description"] = (
             "The search text, formatted as an advanced search. "
         )
-        body["function"]["parameters"]["properties"]["qr"]["description"] += (
+        body["input_schema"]["properties"]["qr"]["description"] += (
             ADVANCED_SEARCH_DESC
         )
     return body
