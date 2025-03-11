@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 from json import loads
+from typing import List, Optional
+import datetime
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -13,12 +15,16 @@ from app.models import (
     BotRequest,
     ChatRequest,
     EncoderParams,
+    EvalDataset,
+    LabeledEvalDataset,
+    LabeledEvalSession,
     FetchSession,
     MilvusMetadataEnum,
     OpinionFeedback,
     SessionFeedback,
     User,
     get_uuid_id,
+    LabelingType,
 )
 
 # which version of db we are using
@@ -28,6 +34,7 @@ MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
+EVAL_DATASET_COLLECTION = "eval_datasets"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -201,6 +208,51 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         file_count=session_data.get("file_count", 0),
     )
 
+def fetch_sessions_by(bot_id: Optional[str], firebase_uid: Optional[str], user: User) -> List[dict]:
+    """
+    Fetch sessions from Firebase that match the given criteria.
+    
+    Parameters
+    ----------
+    bot_id : Optional[str]
+        The bot ID to filter sessions by. If None, returns sessions for the user regardless of bot.
+    firebase_uid : Optional[str]
+        The Firebase UID of the user whose sessions are being fetched.
+    user : User
+        The authenticated user making the request.
+    
+    Returns
+    -------
+    List[dict]
+        A list of session dicts that match the criteria.
+    """
+    if(bot_id is None and firebase_uid is None):
+        return []
+    
+    sessions_ref = db.collection(CONVERSATION_COLLECTION + DB_VERSION)
+    
+    # Start with base query
+    query = sessions_ref
+    
+    if bot_id:
+        # Get the bot to check ownership
+        
+        bot = load_bot(bot_id)
+        if not bot or bot.user.firebase_uid != user.firebase_uid:
+            # If not bot owner, only return sessions for this user and bot
+            query = query.where("bot_id", "==", bot_id).where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
+        else:
+            # Bot owner can see all sessions for their bot
+            query = query.where("bot_id", "==", bot_id)
+    else:
+        # No bot specified, only return user's sessions
+        query = query.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
+    docs = query.get()
+    sessions = [doc.to_dict() for doc in docs]
+    return sessions
+
 def store_bot(r: BotRequest, bot_id: str) -> bool:
     """Store the bot in the database.
 
@@ -257,8 +309,13 @@ def browse_bots(user: User) -> dict:
 
     """
     bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
-    query = bot_ref.where(filter=FieldFilter("public", "==", True))
-    data = query.get()
+    
+    # Filter bots by the user's firebase_uid
+    logger.debug("Filtering bots for firebase_uid: %s", user.firebase_uid)
+    query = bot_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    data: QueryResultsList[DocumentSnapshot] = query.get()
+    logger.debug("Found %d bots for user %s", len(data), user.firebase_uid)
     data_dict = {}
     for datum in data:
         data_dict[datum.id] = datum.to_dict()
@@ -428,3 +485,257 @@ def get_cached_response(bot_id: str, firebase_uid: str, message: str) -> str | N
         if len(user_messages) == 1 and user_messages[0]["content"] == message:
             return d["history"][-1]["content"]
     return None
+
+def delete_bot(bot_id: str, user: User) -> bool:
+    """Delete a bot from the database.
+    
+    Only the user who created the bot can delete it.
+
+    Parameters
+    ----------
+    bot_id : str
+        The ID of the bot to delete
+    user : User
+        The user requesting the deletion
+
+    Returns
+    -------
+    bool
+        True if deletion was successful, False otherwise
+    """
+    # First, load the bot to check ownership
+    bot = load_bot(bot_id)
+    
+    # If bot doesn't exist, return False
+    if not bot:
+        logger.warning("Attempted to delete non-existent bot %s by user %s", 
+                      bot_id, user.firebase_uid)
+        return False
+    
+    # Check if the requesting user is the bot creator
+    if bot.user.firebase_uid != user.firebase_uid:
+        logger.warning("Unauthorized deletion attempt of bot %s by user %s", 
+                      bot_id, user.firebase_uid)
+        return False
+    
+    # Delete the bot
+    try:
+        db.collection(BOT_COLLECTION + DB_VERSION).document(bot_id).delete()
+        logger.info("Bot %s successfully deleted by user %s", 
+                   bot_id, user.firebase_uid)
+        return True
+    except Exception as e:
+        logger.error("Error deleting bot %s: %s", bot_id, str(e))
+        return False
+
+def store_eval_dataset(dataset: EvalDataset, dataset_id: str) -> bool:
+    """Store an evaluation dataset in the database.
+
+    Parameters
+    ----------
+    dataset : EvalDataset
+        The dataset object to store.
+    dataset_id : str
+        The dataset id to use.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    data = dataset.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+    db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    return True
+
+def get_user_datasets(user: User) -> dict:
+    """Get all evaluation datasets for a user.
+
+    Parameters
+    ----------
+    user : User
+        The user whose datasets to retrieve.
+
+    Returns
+    -------
+    dict
+        Dictionary of datasets indexed by dataset_id.
+    """
+    dataset_ref = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION)
+    
+    # Filter datasets by the user's firebase_uid
+    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    data = query.get()
+    logger.debug("Found %d datasets for user %s", len(data), user.firebase_uid)
+    
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    
+    return data_dict
+
+def get_dataset(dataset_id: str) -> Optional[EvalDataset]:
+    """Get a specific evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to retrieve.
+
+    Returns
+    -------
+    Optional[EvalDataset]
+        The dataset if found, None otherwise.
+    """
+    dataset = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
+    if dataset.exists:
+        return EvalDataset(**dataset.to_dict())
+    return None
+
+# Constants for labeled evaluation datasets
+LABELED_EVAL_DATASET_COLLECTION = "labeled_eval_datasets_"
+
+def store_labeled_eval_dataset(dataset: LabeledEvalDataset, dataset_id: str) -> bool:
+    """Store a labeled evaluation dataset in the database.
+
+    Parameters
+    ----------
+    dataset : LabeledEvalDataset
+        The labeled dataset object to store.
+    dataset_id : str
+        The dataset id to use.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    # Update timestamps
+    dataset.updated_at = firestore.SERVER_TIMESTAMP
+    if not dataset.created_at:
+        dataset.created_at = firestore.SERVER_TIMESTAMP
+    
+    # Calculate progress
+    if dataset.sessions:
+        labeled_count = sum(1 for session in dataset.sessions if session.labeled)
+        total_count = len(dataset.sessions)
+        dataset.progress = (labeled_count / total_count) * 100
+        dataset.completed = labeled_count == total_count
+    
+    data = dataset.model_dump()
+    db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    return True
+
+def get_labeled_dataset(dataset_id: str) -> Optional[LabeledEvalDataset]:
+    """Get a specific labeled evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the labeled dataset to retrieve.
+
+    Returns
+    -------
+    Optional[LabeledEvalDataset]
+        The labeled dataset if found, None otherwise.
+    """
+    dataset = db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
+    if dataset.exists:
+        return LabeledEvalDataset(**dataset.to_dict())
+    return None
+
+def get_user_labeled_datasets(user: User) -> dict:
+    """Get all labeled evaluation datasets for a user.
+
+    Parameters
+    ----------
+    user : User
+        The user whose labeled datasets to retrieve.
+
+    Returns
+    -------
+    dict
+        Dictionary of labeled datasets indexed by dataset_id.
+    """
+    dataset_ref = db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION)
+    
+    # Filter datasets by the user's firebase_uid
+    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    data = query.get()
+    logger.debug("Found %d labeled datasets for user %s", len(data), user.firebase_uid)
+    
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    
+    return data_dict
+
+def update_labeled_session(dataset_id: str, session_id: str, 
+                          aspect_ratings: dict,
+                          notes: Optional[str] = None,
+                          user: User = None) -> bool:
+    """Update a labeled session within a labeled evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the labeled dataset.
+    session_id : str
+        The ID of the session to update.
+    aspect_ratings : dict
+        Dictionary mapping aspect_id to rating value (can be int for ranking, bool for thumbs, float for score)
+    notes : Optional[str], optional
+        Evaluation notes, by default None
+    user : User, optional
+        The user making the update, by default None
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    # Get the dataset
+    dataset = get_labeled_dataset(dataset_id)
+    if not dataset:
+        return False
+    
+    # Check user permission
+    if user and dataset.user.firebase_uid != user.firebase_uid:
+        return False
+    
+    # Find and update the session
+    for i, session in enumerate(dataset.sessions):
+        if session.session_id == session_id:
+            # Update ratings for each aspect
+            for aspect_id, rating in aspect_ratings.items():
+                # Find the aspect in the session's aspects list
+                for j, aspect in enumerate(session.aspects):
+                    if aspect.aspect_id == aspect_id:
+                        # Store the rating based on the aspect type
+                        if aspect.type == LabelingType.rank:
+                            dataset.sessions[i].aspects[j].rank_value = rating
+                        elif aspect.type == LabelingType.thumbs:
+                            dataset.sessions[i].aspects[j].thumbs_value = rating
+                        elif aspect.type == LabelingType.score:
+                            dataset.sessions[i].aspects[j].score_value = rating
+                        break
+            
+            # Update notes if provided
+            if notes is not None:
+                dataset.sessions[i].notes = notes
+            
+            # Mark as labeled
+            dataset.sessions[i].labeled = True
+            
+            # Update progress
+            labeled_count = sum(1 for s in dataset.sessions if s.labeled)
+            dataset.progress = (labeled_count / len(dataset.sessions)) * 100
+            dataset.completed = labeled_count == len(dataset.sessions)
+            dataset.updated_at = datetime.datetime.now()
+            
+            # Store the updated dataset
+            return store_labeled_eval_dataset(dataset, dataset_id)
+    
+    return False

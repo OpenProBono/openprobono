@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from enum import Enum, unique
+from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -160,12 +161,12 @@ class BotRequest(BaseModel):
 
     Attributes
     ----------
+        name (str): The display name of the bot.
         system_prompt (str): The system prompt.
         message_prompt (str): The message prompt.
-        model (str): The model to be used.
         search_tools (list[SearchTool]): The list of search tools.
         vdb_tools (list[VDBTool]): The list of VDB tools.
-        engine (EngineEnum): The engine to be used.
+        chat_model (ChatModelParams): The chat model parameters.
         user (User): The user obj.
 
     """
@@ -480,3 +481,108 @@ class SessionFeedback(BaseModel):
     message_index: int = -1
     categories: list[str] = []
     user: User
+
+class FetchSessions(BaseModel):
+    """
+    Model for fetching sessions by either bot or user.
+    
+    At least one of bot_id or firebase_uid must be provided.
+    
+    Parameters
+    ----------
+    bot_id : Optional[str]
+        If provided, sessions associated with this bot will be returned.
+        If the user is the bot owner, all sessions for this bot will be returned.
+        Otherwise, only the user's sessions with this bot will be returned.
+    firebase_uid : Optional[str]
+        If provided, only sessions associated with this Firebase UID will be returned.
+    """
+    bot_id: Optional[str] = None
+    firebase_uid: Optional[str] = None
+    
+    def model_post_init(self, __context):
+        """Validate that at least one of bot_id or firebase_uid is provided."""
+        if self.bot_id is None and self.firebase_uid is None:
+            raise ValueError("At least one of bot_id or firebase_uid must be provided")
+
+class EvalSession(BaseModel):
+    """Model for a session in an evaluation dataset."""
+    input_idx: int
+    bot_idx: int
+    input_text: str
+    output_text: str
+    bot_id: str
+    session_id: str
+
+class EvalDataset(BaseModel):
+    """Model for an evaluation dataset."""
+    name: str
+    description: str = ""
+    inputs: List[str]
+    bot_ids: List[str]
+    sessions: List[EvalSession] = []  # Flattened list of sessions
+    user: User
+
+@unique
+class LabelingType(str, Enum):
+    """Enumeration class representing different types of labeling for evaluation datasets."""
+    
+    rank = "rank"  # Rank responses in order of preference
+    thumbs = "thumbs"    # Thumbs up/down (binary)
+    score = "score"      # Numerical score (e.g., out of 10)
+
+class LabelingAspect(BaseModel):
+    """Model for a single labeling aspect"""
+    aspect_id: str
+    name: str
+    description: Optional[str] = None
+    type: LabelingType
+    
+    # Fields to store the rating values
+    rank_value: Optional[int] = None
+    thumbs_value: Optional[bool] = None
+    score_value: Optional[float] = None
+
+class LabeledEvalSession(BaseModel):
+    """Model for a labeled session in an evaluation dataset."""
+    session_id: str      # Reference to the original EvalSession
+    input_idx: int       # Index of the input in the dataset
+    bot_idx: int         # Index of the bot in the dataset
+    input_text: str      # The input text
+    output_text: str     # The output text
+    bot_id: str          # The bot ID
+    
+    # Labeling fields
+    aspects: List[LabelingAspect]
+    labeled: bool = False               # Whether this session has been labeled
+    notes: Optional[str] = None         # Optional notes about the evaluation
+
+class LabeledEvalDataset(BaseModel):
+    """Model for a labeled evaluation dataset."""
+    name: str
+    description: str = ""
+    labeling_aspects: List[LabelingAspect]
+    original_dataset_id: str            # Reference to the original EvalDataset
+    inputs: List[str]                   # Copy of inputs from original dataset
+    bot_ids: List[str]                  # Copy of bot_ids from original dataset
+    sessions: List[LabeledEvalSession] = []  # Labeled sessions
+    progress: float = 0.0               # Progress as percentage (0-100)
+    completed: bool = False             # Whether labeling is complete
+    created_at: Optional[datetime.datetime] = datetime.datetime.now()
+    updated_at: Optional[datetime.datetime] = None
+    user: User
+
+
+class InputGeneratorRequest(BaseModel):
+    """Model class representing an input generator request.
+
+    Attributes
+    ----------
+    prompt : str
+        The prompt to generate inputs from
+    user : User, optional
+        The user making the request, by default None
+    """
+    
+    prompt: str
+    user: Optional[User] = None

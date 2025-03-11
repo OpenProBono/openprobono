@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Annotated
+import re
+from typing import Annotated, Optional, List
 
 from fastapi import (
     Body,
@@ -24,16 +25,30 @@ from app.bot import (
     openai_bot_stream,
 )
 from app.bot_helper import format_session_history, title_chat
+from app.chat_models import chat_str_openai
 from app.db import (
+    admin_check,
+    api_key_check,
     browse_bots,
+    delete_bot,
     fetch_session,
+    fetch_sessions_by,
     get_cached_response,
+    get_dataset,
+    get_labeled_dataset,
+    get_user_datasets,
+    get_user_labeled_datasets,
     load_bot,
+    load_vdb,
     set_session_to_bot,
     store_bot,
     store_conversation_history,
+    store_eval_dataset,
+    store_labeled_eval_dataset,
     store_opinion_feedback,
     store_session_feedback,
+    store_vdb,
+    update_labeled_session,
 )
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
@@ -63,6 +78,14 @@ from app.models import (
     User,
     VDBTool,
     get_uuid_id,
+    EvalDataset,
+    EvalSession,
+    LabeledEvalDataset,
+    LabeledEvalSession,
+    LabelingType,
+    LabelingAspect,
+    InputGeneratorRequest,
+    OpenAIModelEnum,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
@@ -238,8 +261,6 @@ def chat(
         ],
         user: User = Depends(get_current_user)) -> dict:
     """Call a bot with history (only for backwards compat, could be deprecated)."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
     return process_chat(request, "")
 
@@ -260,12 +281,9 @@ def init_session(
                     },
                 },
             ),
-        ],
-        user: User = Depends(get_current_user)) -> dict:
+        ]) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
-    request.user = user
+    print(request.user)
 
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
@@ -296,8 +314,6 @@ def init_session_chat(
         ],
         user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_id = get_uuid_id()
@@ -340,8 +356,6 @@ def init_session_chat_stream(
         ],
         user: User = Depends(get_current_user)) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_id = get_uuid_id()
@@ -381,8 +395,6 @@ def chat_session(
         ],
         user: User = Depends(get_current_user))  -> dict:
     """Continue a chat session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_obj = FetchSession(session_id=request.session_id, user=request.user)
@@ -455,6 +467,37 @@ def get_session(
     cr = fetch_session(request)
     return {"message": "Success"} | cr.model_dump()
 
+@api.post("/fetch_sessions", tags=["Session Chat"])
+def fetch_sessions(
+    request: FetchSessions = Body(
+        ...,
+        openapi_examples={
+            "fetch sessions": {
+                "summary": "Fetch sessions by criteria",
+                "description": "Returns all sessions associated with a bot, a user, or both. If bot_id is provided, sessions "
+                               "will be filtered by that bot; otherwise, all sessions for the authenticated user are returned.",
+                "value": {
+                    "bot_id": "default_bot"  # optional field
+                },
+            },
+        },
+    ),
+    user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Fetch all sessions associated with a bot, a user, or both at once.
+    
+    The endpoint uses the Firebase UID from the authenticated user and optionally filters by bot ID.
+    If a bot_id is provided, only the bot creator can see all sessions - other users will only see their own sessions.
+    
+    Returns
+    -------
+    dict
+        A dictionary with a "message" and the list of matching "sessions".
+    """
+    sessions = fetch_sessions_by(bot_id=request.bot_id, firebase_uid=request.firebase_uid, user=user)
+    return {"message": "Success", "sessions": sessions}
+
 
 @api.post("/fetch_session_formatted_history", tags=["Session Chat"])
 def get_formatted_session_history(
@@ -517,6 +560,7 @@ def create_bot(
                         "summary": "create opb bot",
                         "description": "Returns: {message: 'Success', bot_id: the new bot_id which was created}",  # noqa: E501
                         "value": {
+                            "name": "Legal Research Assistant",
                             "search_tools": [
                                 {
                                     "name": "government-search",
@@ -580,7 +624,7 @@ def create_bot(
     bot_id = get_uuid_id()
     store_bot(request, bot_id)
 
-    return {"message": "Success", "bot_id": bot_id}
+    return {"message": "Success", "bot_id": bot_id, "name": request.name}
 
 
 @api.post("/view_bot", tags=["Bot"])
@@ -591,7 +635,9 @@ def view_bot(bot_id: str, user: User = Depends(get_current_user)) -> dict:
 
 @api.post("/view_bots", tags=["Bot"])
 def view_bots(user: User = Depends(get_current_user)) -> dict:
-    return {"message": "Success", "data": browse_bots(user)}
+    logger.info("User %s viewing bots", user.firebase_uid)
+    bots = browse_bots(user)
+    return {"message": "Success", "data": bots}
 
 
 @api.post("/upload_file", tags=["User Upload"])
@@ -855,6 +901,18 @@ def search_opinions(
     else:
         return {"message": "Success", "results": results}
 
+
+@api.post("/search_resources", tags=["Resource Search"])
+def search_resources(
+    req: CollectionSearchRequest,
+    user: User = Depends(get_current_user),
+) -> dict:
+    vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
+    tool_response = run_vdb_tool(vdb_tool, req.model_dump())
+    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
+    return {"message": "Success", "results": formatted_results}
+
+
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
@@ -1046,3 +1104,439 @@ def browse_collection(
     )
     formatted_results = format_vdb_tool_results(tool_output, vdb_tool)
     return {"message": "Success", "has_next": has_next, "results": formatted_results}
+
+
+@api.delete("/delete_bot/{bot_id}", tags=["Bot"])
+def delete_bot_endpoint(
+    bot_id: str,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Delete a bot.
+    
+    Only the creator of the bot can delete it.
+    
+    Parameters
+    ----------
+    bot_id : str
+        The ID of the bot to delete
+    user : User
+        The authenticated user making the request
+        
+    Returns
+    -------
+    dict
+        Success or failure message
+    """
+    logger.info("User %s attempting to delete bot %s", user.firebase_uid, bot_id)
+    
+    # Call the delete_bot function from db.py
+    success = delete_bot(bot_id, user)
+    
+    if success:
+        return {"message": "Success", "bot_id": bot_id}
+    else:
+        return {"message": "Failure: Bot not found or you don't have permission to delete it"}
+
+
+@api.post("/run_eval_dataset", tags=["Evaluation"])
+def run_eval_dataset(
+    dataset: Annotated[
+        EvalDataset,
+        Body(
+            openapi_examples={
+                "create dataset": {
+                    "summary": "Create an evaluation dataset",
+                    "description": "Creates a dataset with inputs and bots for evaluation",
+                    "value": {
+                        "name": "Test Dataset",
+                        "description": "A dataset for testing bot performance",
+                        "inputs": ["What is the capital of France?", "Explain quantum computing"],
+                        "bot_ids": ["bot_id_1", "bot_id_2"]
+                    },
+                },
+            },
+        ),
+    ],
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Create a new evaluation dataset with inputs and bots.
+    
+    This endpoint creates a dataset that can be used to evaluate multiple bots
+    against the same set of inputs. It initializes sessions for each input-bot pair,
+    runs the bots on the inputs, and stores the results.
+    
+    Parameters
+    ----------
+    dataset : EvalDataset
+        The dataset to create, containing inputs and bot IDs
+    user : User
+        The authenticated user creating the dataset
+        
+    Returns
+    -------
+    dict
+        Success message with the dataset ID and session count
+    """
+    # Set the user
+    dataset.user = user
+    
+    # Generate dataset ID
+    dataset_id = get_uuid_id()
+    
+    # Initialize sessions list
+    sessions = []
+
+    store_eval_dataset(dataset, dataset_id)
+    
+    # Create sessions for each input-bot pair
+    for input_idx, input_text in enumerate(dataset.inputs):
+        for bot_idx, bot_id in enumerate(dataset.bot_ids):
+            # Check if bot exists and user has access
+            bot = load_bot(bot_id)
+            if not bot:
+                return {"message": f"Failure: Bot {bot_id} not found"}
+            
+            # Create a new session for this input-bot pair
+            session_id = get_uuid_id()
+            set_session_to_bot(session_id, bot_id)
+            
+            # Initialize the session with the input
+            cr = ChatRequest(
+                history=[{"role": "user", "content": input_text}],
+                bot_id=bot_id,
+                session_id=session_id,
+                user=user,
+            )
+            
+            # Call the bot to get the output
+            response = process_chat(cr, input_text)
+            output_text = response.get("output", "Error: No output generated")
+            
+            # Create and store the session
+            eval_session = EvalSession(
+                input_idx=input_idx,
+                bot_idx=bot_idx,
+                input_text=input_text,
+                output_text=output_text,
+                bot_id=bot_id,
+                session_id=session_id
+            )
+            sessions.append(eval_session)
+            # Store the sessions in the dataset
+            dataset.sessions = sessions
+            # Store the conversation history with the bot's response
+            store_conversation_history(cr)
+        
+            store_eval_dataset(dataset, dataset_id)
+    
+    # Store the dataset
+    store_eval_dataset(dataset, dataset_id)
+    
+    return {
+        "message": "Success",
+        "dataset_id": dataset_id,
+        "session_count": len(sessions)
+    }
+
+@api.get("/get_user_datasets", tags=["Evaluation"])
+def get_datasets(user: User = Depends(get_current_user)) -> dict:
+    """Get all evaluation datasets for the authenticated user.
+    
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message with the datasets
+    """
+    datasets = get_user_datasets(user)
+    return {"message": "Success", "datasets": datasets}
+
+@api.get("/get_dataset_sessions/{dataset_id}", tags=["Evaluation"])
+def get_dataset_sessions(dataset_id: str, user: User = Depends(get_current_user)) -> dict:
+    """Get all sessions for a specific dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message with the sessions
+    """
+    dataset = get_dataset(dataset_id)
+    if not dataset:
+        return {"message": "Failure: Dataset not found"}
+    
+    if dataset.user.firebase_uid != user.firebase_uid:
+        return {"message": "Failure: You don't have permission to access this dataset"}
+    
+    # Create a more structured view of the sessions
+    structured_sessions = {}
+    for session in dataset.sessions:
+        structured_sessions[session.session_id] = session
+
+    return {
+        "message": "Success", 
+        "dataset": {
+            "name": dataset.name,
+            "description": dataset.description,
+            "inputs": dataset.inputs,
+            "bot_ids": dataset.bot_ids,
+            "sessions": structured_sessions
+        }
+    }
+
+@api.post("/create_labeled_dataset", tags=["Evaluation"])
+def create_labeled_dataset(
+    dataset_name: str,
+    dataset_id: str,
+    labeling_aspects: List[LabelingAspect],
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Create a new labeled evaluation dataset from an existing dataset.
+    
+    This endpoint creates a labeled dataset based on an existing evaluation dataset.
+    It copies the inputs, bot IDs, and sessions from the original dataset and prepares
+    them for labeling with multiple aspects.
+    
+    Parameters
+    ----------
+    dataset_name : str
+        given name for labeled dataset
+    dataset_id : str
+        The ID of the existing dataset to label
+    labeling_aspects : List[LabelingAspect]
+        The list of aspects to evaluate for each response
+    user : User
+        The authenticated user creating the labeled dataset
+        
+    Returns
+    -------
+    dict
+        Success message with the labeled dataset ID
+    """
+    # Get the original dataset
+    original_dataset = get_dataset(dataset_id)
+    if not original_dataset:
+        return {"message": "Failure: Dataset not found"}
+    
+    # Check user permission
+    if original_dataset.user.firebase_uid != user.firebase_uid:
+        return {"message": "Failure: You don't have permission to access this dataset"}
+    
+    # Create a new labeled dataset
+    labeled_dataset_id = get_uuid_id()
+    
+    # Initialize labeled sessions
+    labeled_sessions = []
+    for session in original_dataset.sessions:
+        labeled_session = LabeledEvalSession(
+            session_id=session.session_id,
+            input_idx=session.input_idx,
+            bot_idx=session.bot_idx,
+            input_text=session.input_text,
+            output_text=session.output_text,
+            bot_id=session.bot_id,
+            aspects=labeling_aspects,
+            labeled=False
+        )
+        labeled_sessions.append(labeled_session)
+    
+    # Create the labeled dataset
+    labeled_dataset = LabeledEvalDataset(
+        name=dataset_name,
+        description=original_dataset.description,
+        labeling_aspects=labeling_aspects,
+        original_dataset_id=dataset_id,
+        inputs=original_dataset.inputs,
+        bot_ids=original_dataset.bot_ids,
+        sessions=labeled_sessions,
+        progress=0.0,
+        completed=False,
+        user=user
+    )
+    
+    # Store the labeled dataset
+    store_labeled_eval_dataset(labeled_dataset, labeled_dataset_id)
+    
+    return {
+        "message": "Success",
+        "labeled_dataset_id": labeled_dataset_id
+    }
+
+@api.get("/get_user_labeled_datasets", tags=["Evaluation"])
+def get_labeled_datasets(user: User = Depends(get_current_user)) -> dict:
+    """Get all labeled evaluation datasets for the authenticated user.
+    
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message with the labeled datasets
+    """
+    datasets = get_user_labeled_datasets(user)
+    return {"message": "Success", "datasets": datasets}
+
+@api.get("/get_labeled_dataset/{dataset_id}", tags=["Evaluation"])
+def get_labeled_dataset_endpoint(dataset_id: str, user: User = Depends(get_current_user)) -> dict:
+    """Get a specific labeled evaluation dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the labeled dataset
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message with the labeled dataset
+    """
+    dataset = get_labeled_dataset(dataset_id)
+    if not dataset:
+        return {"message": "Failure: Labeled dataset not found"}
+    
+    if dataset.user.firebase_uid != user.firebase_uid:
+        return {"message": "Failure: You don't have permission to access this dataset"}
+    
+    return {
+        "message": "Success",
+        "dataset": dataset.model_dump()
+    }
+
+@api.post("/update_labeled_session", tags=["Evaluation"])
+def update_labeled_session_endpoint(
+    dataset_id: str,
+    session_id: str,
+    aspect_ratings: dict,  # Dictionary mapping aspect_id to rating value
+    notes: Optional[str] = None,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Update a labeled session within a labeled evaluation dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the labeled dataset
+    session_id : str
+        The ID of the session to update
+    aspect_ratings : dict
+        Dictionary mapping aspect_id to rating value (can be int for ranking, bool for thumbs, float for score)
+    notes : Optional[str], optional
+        Evaluation notes, by default None
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Success message
+    """
+    success = update_labeled_session(
+        dataset_id=dataset_id,
+        session_id=session_id,
+        aspect_ratings=aspect_ratings,
+        notes=notes,
+        user=user
+    )
+    
+    if not success:
+        return {"message": "Failure: Could not update labeled session"}
+    
+    # Get the updated dataset to return progress
+    dataset = get_labeled_dataset(dataset_id)
+    
+    return {
+        "message": "Success",
+        "progress": dataset.progress,
+        "completed": dataset.completed
+    }
+
+@api.post("/input_generator", tags=["Evaluation"])
+def input_generator_endpoint(
+    request: Annotated[
+        InputGeneratorRequest,
+        Body(
+            openapi_examples={
+                "generate inputs": {
+                    "summary": "Generate a list of inputs based on a prompt",
+                    "description": "Returns a list of generated inputs based on the provided prompt",
+                    "value": {
+                        "prompt": "Generate legal questions about contract law"
+                    },
+                },
+            },
+        ),
+    ],
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Generate a list of inputs based on a prompt using GPT-4o.
+    
+    Parameters
+    ----------
+    request : InputGeneratorRequest
+        The request containing the prompt
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        A dictionary containing the generated inputs
+    """
+    # Set up the request with the user
+    request.user = user
+    
+    # Create the messages for the GPT-4o call
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant that generates a list of inputs based on prompts."},
+        {"role": "user", "content": f"Generate a list of inputs based on the following prompt:\n\n{request.prompt}"}
+    ]
+    
+    # Call GPT-4o using the chat_str_openai function
+    try:
+        response = chat_str_openai(
+            messages=messages,
+            model=OpenAIModelEnum.gpt_4o.value,
+            temperature=0.7  # Use a slightly higher temperature for creativity
+        )
+        
+        # Parse the response into a list of strings
+        # First, try to parse as a list if it looks like one
+        if response.startswith("1.") or response.startswith("-") or response.startswith("*"):
+            # Split by newlines and clean up
+            inputs = [line.strip() for line in response.split("\n") 
+                     if line.strip() and not line.strip().isdigit()]
+            
+            # Remove numbering or bullet points
+            inputs = [re.sub(r"^\d+\.\s*|\*\s*|-\s*", "", line) for line in inputs]
+        else:
+            # If not in list format, split by newlines
+            inputs = [line.strip() for line in response.split("\n") if line.strip()]
+        
+        # Filter out any empty strings
+        inputs = [input_str for input_str in inputs if input_str]
+        
+        return {
+            "message": "Success",
+            "inputs": inputs
+        }
+    except Exception as e:
+        return {
+            "message": f"Error: {str(e)}",
+            "inputs": []
+        }
