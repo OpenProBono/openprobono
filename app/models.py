@@ -65,6 +65,7 @@ class EngineEnum(str, Enum):
 class AnthropicModelEnum(str, Enum):
     """Enumeration class representing different Anthropic chat models."""
 
+    claude_3_7_sonnet = "claude-3-7-sonnet-latest"
     claude_3_5_sonnet = "claude-3-5-sonnet-latest"
     claude_3_5_haiku = "claude-3-5-haiku-latest"
     claude_3_opus = "claude-3-opus-20240229"

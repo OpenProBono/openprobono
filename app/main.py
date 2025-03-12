@@ -84,8 +84,8 @@ from app.models import (
     HiveModelEnum,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
-from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 from app.user_auth import get_current_user
+from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 
 langfuse_context.configure(release=get_git_hash())
 logger = setup_logger()
