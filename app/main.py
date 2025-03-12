@@ -10,12 +10,9 @@ from fastapi import (
     Body,
     Depends,
     FastAPI,
-    HTTPException,
-    Security,
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
-from fastapi.security import APIKeyHeader
 from langfuse.decorators import langfuse_context, observe
 
 from app.bot import (
@@ -27,9 +24,8 @@ from app.bot import (
 from app.bot_helper import format_session_history, title_chat
 from app.chat_models import chat_str_openai
 from app.db import (
-    admin_check,
-    api_key_check,
     browse_bots,
+    browse_public_bots,
     delete_bot,
     fetch_session,
     fetch_sessions_by,
@@ -39,7 +35,6 @@ from app.db import (
     get_user_datasets,
     get_user_labeled_datasets,
     load_bot,
-    load_vdb,
     set_session_to_bot,
     store_bot,
     store_conversation_history,
@@ -47,14 +42,12 @@ from app.db import (
     store_labeled_eval_dataset,
     store_opinion_feedback,
     store_session_feedback,
-    store_vdb,
     update_labeled_session,
 )
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     count_resources,
-    crawl_upload_site,
     delete_expr,
     file_upload,
     get_expr,
@@ -70,6 +63,7 @@ from app.models import (
     CollectionSearchRequest,
     EngineEnum,
     FetchSession,
+    FetchSessions,
     InitializeSession,
     InitializeSessionChat,
     OpinionFeedback,
@@ -82,10 +76,12 @@ from app.models import (
     EvalSession,
     LabeledEvalDataset,
     LabeledEvalSession,
-    LabelingType,
     LabelingAspect,
     InputGeneratorRequest,
     OpenAIModelEnum,
+    AnthropicModelEnum,
+    GoogleModelEnum,
+    HiveModelEnum,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
@@ -496,6 +492,7 @@ def fetch_sessions(
         A dictionary with a "message" and the list of matching "sessions".
     """
     sessions = fetch_sessions_by(bot_id=request.bot_id, firebase_uid=request.firebase_uid, user=user)
+    logger.info(f"Succesffuly fetched {len(sessions)} sessions for user {user.firebase_uid}")
     return {"message": "Success", "sessions": sessions}
 
 
@@ -638,6 +635,26 @@ def view_bots(user: User = Depends(get_current_user)) -> dict:
     logger.info("User %s viewing bots", user.firebase_uid)
     bots = browse_bots(user)
     return {"message": "Success", "data": bots}
+
+
+@api.post("/view_public_bots", tags=["Bot"])
+def view_public_bots(user: User = Depends(get_current_user)) -> dict:
+    """
+    Get all public bots available in the system.
+    
+    Parameters
+    ----------
+    user : User
+        The authenticated user making the request
+        
+    Returns
+    -------
+    dict
+        Dictionary containing public bots
+    """
+    logger.info("User %s viewing public bots", user.firebase_uid)
+    public_bots = browse_public_bots()
+    return {"message": "Success", "data": public_bots}
 
 
 @api.post("/upload_file", tags=["User Upload"])
@@ -1540,3 +1557,22 @@ def input_generator_endpoint(
             "message": f"Error: {str(e)}",
             "inputs": []
         }
+
+@api.get("/available_models", tags=["Bot"])
+def get_available_models() -> dict:
+    """Return available models for each engine type based on the enums in models.py.
+    
+    Returns:
+        dict: A dictionary with engine types as keys and lists of available models as values
+    """
+    models = {
+        "openai": [model.value for model in OpenAIModelEnum],
+        "anthropic": [model.value for model in AnthropicModelEnum],
+        "google": [model.value for model in GoogleModelEnum],
+        "hive": [model.value for model in HiveModelEnum]
+    }
+    
+    return {
+        "message": "Success",
+        "data": models
+    }

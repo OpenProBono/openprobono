@@ -26,6 +26,9 @@ from app.models import (
     get_uuid_id,
     LabelingType,
 )
+from app.logger import setup_logger
+
+logger = setup_logger()
 
 # which version of db we are using
 DB_VERSION = "_vf16"
@@ -169,7 +172,7 @@ def set_session_to_bot(session_id: str, bot_id: str) -> bool:
         session_id (str): the session uuid
         bot_id (str): the bot uuid
 
-    Returns:
+    Returns
     -------
         bool: True if successful, False otherwise
 
@@ -224,7 +227,7 @@ def fetch_sessions_by(bot_id: Optional[str], firebase_uid: Optional[str], user: 
     Returns
     -------
     List[dict]
-        A list of session dicts that match the criteria.
+        A list of session dicts that match the criteria, sorted by timestamp (newest first).
     """
     if(bot_id is None and firebase_uid is None):
         return []
@@ -249,6 +252,9 @@ def fetch_sessions_by(bot_id: Optional[str], firebase_uid: Optional[str], user: 
         # No bot specified, only return user's sessions
         query = query.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
 
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
     docs = query.get()
     sessions = [doc.to_dict() for doc in docs]
     return sessions
@@ -305,7 +311,7 @@ def browse_bots(user: User) -> dict:
     Returns
     -------
     dict
-        the bots, indexed by bot id
+        the bots, indexed by bot id, sorted by timestamp (newest first)
 
     """
     bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
@@ -314,8 +320,34 @@ def browse_bots(user: User) -> dict:
     logger.debug("Filtering bots for firebase_uid: %s", user.firebase_uid)
     query = bot_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
     
-    data: QueryResultsList[DocumentSnapshot] = query.get()
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
+    data = query.get()
     logger.debug("Found %d bots for user %s", len(data), user.firebase_uid)
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
+
+def browse_public_bots() -> dict:
+    """Browse all public bots.
+
+    Returns
+    -------
+    dict
+        the public bots, indexed by bot id, sorted by timestamp (newest first)
+    """
+    bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
+    
+    # Filter bots where public is True
+    query = bot_ref.where(filter=FieldFilter("public", "==", True))
+    
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
+    data = query.get()
+    logger.debug("Found %d public bots", len(data))
     data_dict = {}
     for datum in data:
         data_dict[datum.id] = datum.to_dict()
@@ -559,12 +591,15 @@ def get_user_datasets(user: User) -> dict:
     Returns
     -------
     dict
-        Dictionary of datasets indexed by dataset_id.
+        Dictionary of datasets indexed by dataset_id, sorted by timestamp (newest first).
     """
     dataset_ref = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION)
     
     # Filter datasets by the user's firebase_uid
     query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
     
     data = query.get()
     logger.debug("Found %d datasets for user %s", len(data), user.firebase_uid)
@@ -656,12 +691,15 @@ def get_user_labeled_datasets(user: User) -> dict:
     Returns
     -------
     dict
-        Dictionary of labeled datasets indexed by dataset_id.
+        Dictionary of labeled datasets indexed by dataset_id, sorted by updated_at timestamp (newest first).
     """
     dataset_ref = db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION)
     
     # Filter datasets by the user's firebase_uid
     query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    # Order by updated_at timestamp in descending order (newest first)
+    query = query.order_by("updated_at", direction=firestore.Query.DESCENDING)
     
     data = query.get()
     logger.debug("Found %d labeled datasets for user %s", len(data), user.firebase_uid)

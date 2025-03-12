@@ -6,7 +6,7 @@ import uuid
 from enum import Enum, unique
 from typing import Optional, List
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 from app.prompts import BOT_PROMPT
 
@@ -168,15 +168,17 @@ class BotRequest(BaseModel):
         vdb_tools (list[VDBTool]): The list of VDB tools.
         chat_model (ChatModelParams): The chat model parameters.
         user (User): The user obj.
+        public (bool): Whether the bot is publicly available.
 
     """
-
+    name: str
     system_prompt: str = BOT_PROMPT
     message_prompt: str = ""
     search_tools: list[SearchTool] = []
     vdb_tools: list[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
     user: User
+    public: bool = False
 
 
 class OpinionSearchRequest(BaseModel):
