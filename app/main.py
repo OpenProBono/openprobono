@@ -11,6 +11,7 @@ from fastapi import (
     Depends,
     FastAPI,
     UploadFile,
+    BackgroundTasks,
 )
 from fastapi.responses import StreamingResponse
 from langfuse.decorators import langfuse_context, observe
@@ -1158,6 +1159,7 @@ def delete_bot_endpoint(
 
 @api.post("/run_eval_dataset", tags=["Evaluation"])
 def run_eval_dataset(
+    background_tasks: BackgroundTasks,
     dataset: Annotated[
         EvalDataset,
         Body(
@@ -1181,10 +1183,12 @@ def run_eval_dataset(
     
     This endpoint creates a dataset that can be used to evaluate multiple bots
     against the same set of inputs. It initializes sessions for each input-bot pair,
-    runs the bots on the inputs, and stores the results.
+    runs the bots on the inputs, and stores the results asynchronously.
     
     Parameters
     ----------
+    background_tasks : BackgroundTasks
+        FastAPI background tasks handler
     dataset : EvalDataset
         The dataset to create, containing inputs and bot IDs
     user : User
@@ -1193,7 +1197,7 @@ def run_eval_dataset(
     Returns
     -------
     dict
-        Success message with the dataset ID and session count
+        Success message with the dataset ID
     """
     # Set the user
     dataset.user = user
@@ -1202,58 +1206,71 @@ def run_eval_dataset(
     dataset_id = get_uuid_id()
     
     # Initialize sessions list
-    sessions = []
-
+    dataset.sessions = []
+    
+    # Store the initial dataset
     store_eval_dataset(dataset, dataset_id)
     
-    # Create sessions for each input-bot pair
-    for input_idx, input_text in enumerate(dataset.inputs):
-        for bot_idx, bot_id in enumerate(dataset.bot_ids):
-            # Check if bot exists and user has access
-            bot = load_bot(bot_id)
-            if not bot:
-                return {"message": f"Failure: Bot {bot_id} not found"}
-            
-            # Create a new session for this input-bot pair
-            session_id = get_uuid_id()
-            set_session_to_bot(session_id, bot_id)
-            
-            # Initialize the session with the input
-            cr = ChatRequest(
-                history=[{"role": "user", "content": input_text}],
-                bot_id=bot_id,
-                session_id=session_id,
-                user=user,
-            )
-            
-            # Call the bot to get the output
-            response = process_chat(cr, input_text)
-            output_text = response.get("output", "Error: No output generated")
-            
-            # Create and store the session
-            eval_session = EvalSession(
-                input_idx=input_idx,
-                bot_idx=bot_idx,
-                input_text=input_text,
-                output_text=output_text,
-                bot_id=bot_id,
-                session_id=session_id
-            )
-            sessions.append(eval_session)
-            # Store the sessions in the dataset
-            dataset.sessions = sessions
-            # Store the conversation history with the bot's response
-            store_conversation_history(cr)
+    # Define the background task function
+    def process_eval_dataset(dataset, dataset_id, user):
+        sessions = []
         
-            store_eval_dataset(dataset, dataset_id)
+        # Create sessions for each input-bot pair
+        for input_idx, input_text in enumerate(dataset.inputs):
+            for bot_idx, bot_id in enumerate(dataset.bot_ids):
+                # Check if bot exists and user has access
+                bot = load_bot(bot_id)
+                if not bot:
+                    logger.error(f"Bot {bot_id} not found for dataset {dataset_id}")
+                    continue
+                
+                # Create a new session for this input-bot pair
+                session_id = get_uuid_id()
+                set_session_to_bot(session_id, bot_id)
+                
+                # Initialize the session with the input
+                cr = ChatRequest(
+                    history=[{"role": "user", "content": input_text}],
+                    bot_id=bot_id,
+                    session_id=session_id,
+                    user=user,
+                )
+                
+                # Call the bot to get the output
+                response = process_chat(cr, input_text)
+                output_text = response.get("output", "Error: No output generated")
+                
+                # Create and store the session
+                eval_session = EvalSession(
+                    input_idx=input_idx,
+                    bot_idx=bot_idx,
+                    input_text=input_text,
+                    output_text=output_text,
+                    bot_id=bot_id,
+                    session_id=session_id
+                )
+                sessions.append(eval_session)
+                
+                # Store the conversation history with the bot's response
+                store_conversation_history(cr)
+                
+                # Update the dataset with the current sessions
+                dataset.sessions = sessions
+                store_eval_dataset(dataset, dataset_id)
+        
+        # Final update to the dataset
+        dataset.sessions = sessions
+        store_eval_dataset(dataset, dataset_id)
+        logger.info(f"Completed evaluation dataset {dataset_id} with {len(sessions)} sessions")
     
-    # Store the dataset
-    store_eval_dataset(dataset, dataset_id)
+    # Add the task to background tasks
+    background_tasks.add_task(process_eval_dataset, dataset, dataset_id, user)
     
+    # Return immediately with the dataset ID
     return {
         "message": "Success",
         "dataset_id": dataset_id,
-        "session_count": len(sessions)
+        "status": "Processing evaluation dataset in the background"
     }
 
 @api.get("/get_user_datasets", tags=["Evaluation"])
