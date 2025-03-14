@@ -865,6 +865,10 @@ def upload_site(
         metadata["source"] = search_result["source"]
         if "favicon" in search_result:
             metadata["favicon"] = search_result["favicon"]
+        # if search_result contains any keys with the word "date" in them, add those
+        for key, value in search_result.items():
+            if "date" in key.lower():
+                metadata[key] = value
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],

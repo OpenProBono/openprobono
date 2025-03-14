@@ -35,7 +35,7 @@ MAX_NUM_TOOLS = 8
 
 logger = setup_logger()
 
-@observe(capture_input=False)
+@observe(capture_input=False, capture_output=False)
 def openai_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator[dict, None, None]:
     """Call streaming bot using openai engine.
 

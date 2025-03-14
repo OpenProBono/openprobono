@@ -60,7 +60,7 @@ def filtered_search(results: dict) -> dict:
 
 
 @observe(capture_input=False, capture_output=False)
-def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
+def process_site(result: dict, tool: SearchTool) -> None:
     url = result["link"]
     num_attempts = 10
 
@@ -77,13 +77,13 @@ def process_site(result: dict, bot_id: str, tool: SearchTool) -> None:
                 logger.info("Skipping previously failed URL: %s", url)
                 return
         try:
-            if not source_exists(search_collection, result, bot_id, tool.name):
+            if not source_exists(search_collection, result, tool.bot_id, tool.name):
                 logger.info("Uploading site: %s", url)
                 res = upload_site(search_collection, result, tool)
                 if res["message"] == "Success":
                     # check to ensure site appears in collection before releasing URL lock
                     attempt = 0
-                    while not source_exists(search_collection, result, bot_id, tool.name) and attempt < num_attempts:
+                    while not source_exists(search_collection, result, tool.bot_id, tool.name) and attempt < num_attempts:
                         attempt += 1
                     if attempt == num_attempts:
                         logger.error("Site not found in collection, add to failed URLs: %s", url)
@@ -130,8 +130,6 @@ def dynamic_serpapi_tool(
         result of the query on the embeddings uploaded to the search collection
 
     """
-    bot_id = tool.bot_id
-    tool_name = tool.name
     # tracing
     langfuse_context.update_current_observation(
         input={
@@ -139,8 +137,8 @@ def dynamic_serpapi_tool(
             "prefix": prf,
             "num_results": num_results,
             "k": k,
-            "bot_id": bot_id,
-            "tool_name": tool_name,
+            "bot_id": tool.bot_id,
+            "tool_name": tool.name,
         },
     )
 
@@ -156,14 +154,14 @@ def dynamic_serpapi_tool(
             return {"message": "No results found."}
         for result in response["organic_results"]:
             ctx = copy_context()
-            def task(r=result, b=bot_id, t=tool, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(process_site, r, b, t)
+            def task(r=result, t=tool, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(process_site, r, t)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
             _ = future.result()
 
-    filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
+    filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{tool.bot_id + tool.name}')"
     if tool.jurisdictions:
         filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
@@ -371,13 +369,21 @@ def openai_tool(t: SearchTool) -> dict:
             "The search text. Include the jurisdiction here as well, if provided."
         )
     if t.method == SearchMethodEnum.bailii:
-        # replace query description with advanced search description
+        # Update qr as semantic query and add advanced_query parameter
         body["function"]["parameters"]["properties"]["qr"]["description"] = (
-            "The search text, formatted as an advanced search. "
+            "A semantic query to search for general concepts and terms."
         )
-        body["function"]["parameters"]["properties"]["qr"]["description"] += (
-            ADVANCED_SEARCH_DESC
-        )
+        # Add the advanced_query parameter
+        body["function"]["parameters"]["properties"]["advanced_query"] = {
+            "type": "string",
+            "description": "The advanced search query with boolean operators. " + ADVANCED_SEARCH_DESC,
+        }
+        # Add the after_date parameter using courtlistener prompt
+        body["function"]["parameters"]["properties"]["after-date"] = courtlistener_tool_args["after-date"]
+        # Add the before_date parameter using courtlistener prompt
+        body["function"]["parameters"]["properties"]["before-date"] = courtlistener_tool_args["before-date"]
+        # Make advanced_query required
+        body["function"]["parameters"]["required"].append("advanced_query")
     return body
 
 def anthropic_tool(t: SearchTool) -> dict:
@@ -428,13 +434,21 @@ def anthropic_tool(t: SearchTool) -> dict:
             "The search text. Include the jurisdiction here as well, if provided."
         )
     if t.method == SearchMethodEnum.bailii:
-        # replace query description with advanced search description
+        # Update qr as semantic query and add advanced_query parameter
         body["input_schema"]["properties"]["qr"]["description"] = (
-            "The search text, formatted as an advanced search. "
+            "A semantic query to search for general concepts and terms."
         )
-        body["input_schema"]["properties"]["qr"]["description"] += (
-            ADVANCED_SEARCH_DESC
-        )
+        # Add the advanced_query parameter
+        body["input_schema"]["properties"]["advanced_query"] = {
+            "type": "string",
+            "description": "The advanced search query with boolean operators. " + ADVANCED_SEARCH_DESC,
+        }
+        # Add the after_date parameter using courtlistener prompt
+        body["input_schema"]["properties"]["after-date"] = courtlistener_tool_args["after-date"]
+        # Add the before_date parameter using courtlistener prompt
+        body["input_schema"]["properties"]["before-date"] = courtlistener_tool_args["before-date"]
+        # Make advanced_query required
+        body["input_schema"]["required"].append("advanced_query")
     return body
 
 
@@ -496,7 +510,19 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
         case SearchMethodEnum.dynamic_courtroom5:
             function_response = dynamic_courtroom5_search_tool(qr, prf, tool)
         case SearchMethodEnum.bailii:
-            function_response = bailii_search(qr, tool)
+            advanced_query = function_args.get("advanced_query")
+            tool_after_date, tool_before_date = None, None
+            if "after-date" in function_args:
+                tool_after_date = function_args["after-date"]
+            if "before-date" in function_args:
+                tool_before_date = function_args["before-date"]
+            function_response = bailii_search(
+                semantic_query=qr,
+                advanced_query=advanced_query,
+                tool=tool,
+                after_date=tool_after_date,
+                before_date=tool_before_date,
+            )
     return function_response
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
