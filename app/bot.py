@@ -325,7 +325,7 @@ def anthropic_tools(
     ])
 
 
-@observe(capture_input=False)
+@observe(capture_input=False, capture_output=False)
 def anthropic_bot_stream(
     r: ChatRequest,
     bot: BotRequest,
@@ -406,87 +406,119 @@ def anthropic_tools_stream(
         content = ""
 
         try:
-            for chunk in response:
-                if chunk.type == "content_block_start":
-                    if chunk.content_block.type == "tool_use":
-                        current_tool_call = ToolUseBlock(
-                            type="tool_use",
-                            name=chunk.content_block.name,
-                            input="",
-                            id=chunk.content_block.id,
-                        )
-                    elif chunk.content_block.type == "text":
-                        current_text = {"type": "text", "text": ""}
-                elif chunk.type == "content_block_delta":
-                    if chunk.delta.type == "text_delta":
-                        current_text["text"] += chunk.delta.text
-                        content += chunk.delta.text
-                        if "\n" in content:
-                            index_of_newline = content.rfind("\n")
-                            yield {
-                                "type": "response",
-                                "content": content[:index_of_newline + 1],
-                            }
-                            content = content[index_of_newline + 1:]
-                    elif chunk.delta.type == "input_json_delta" and current_tool_call:
-                        current_tool_call.input += chunk.delta.partial_json
-                elif chunk.type == "content_block_stop":
-                    if current_text:
-                        tool_msg["content"].append(current_text)
-                        current_text = None
-                        if content:
-                            yield {
-                                "type": "response",
-                                "content": content,
-                            }
-                            content = ""
-                    if current_tool_call:
-                        # Step 3: call the function for the model
-                        yield {
-                            "type": "tool_call",
-                            "id": current_tool_call.id,
-                            "name": current_tool_call.name,
-                            "args": current_tool_call.input,
-                        }
+            import time
 
-                        # convert tool call string to object
-                        current_tool_call.input = json.loads(current_tool_call.input)
+            from anthropic import APIStatusError
+            max_retries = 3
+            retry_delay = 1  # Start with 1 second delay
 
-                        tool_call_id, tool_response, formatted_results = execute_tool_call(
-                            current_tool_call,
-                            bot,
-                        )
+            for retry in range(max_retries):
+                try:
+                    for chunk in response:
+                        if chunk.type == "content_block_start":
+                            if chunk.content_block.type == "tool_use":
+                                current_tool_call = ToolUseBlock(
+                                    type="tool_use",
+                                    name=chunk.content_block.name,
+                                    input="",
+                                    id=chunk.content_block.id,
+                                )
+                            elif chunk.content_block.type == "text":
+                                current_text = {"type": "text", "text": ""}
+                        elif chunk.type == "content_block_delta":
+                            if chunk.delta.type == "text_delta":
+                                current_text["text"] += chunk.delta.text
+                                content += chunk.delta.text
+                                if "\n" in content:
+                                    index_of_newline = content.rfind("\n")
+                                    yield {
+                                        "type": "response",
+                                        "content": content[:index_of_newline + 1],
+                                    }
+                                    content = content[index_of_newline + 1:]
+                            elif chunk.delta.type == "input_json_delta" and current_tool_call:
+                                current_tool_call.input += chunk.delta.partial_json
+                        elif chunk.type == "content_block_stop":
+                            if current_text:
+                                tool_msg["content"].append(current_text)
+                                current_text = None
+                                if content:
+                                    yield {
+                                        "type": "response",
+                                        "content": content,
+                                    }
+                                    content = ""
+                            if current_tool_call:
+                                # Step 3: call the function for the model
+                                yield {
+                                    "type": "tool_call",
+                                    "id": current_tool_call.id,
+                                    "name": current_tool_call.name,
+                                    "args": current_tool_call.input,
+                                }
 
-                        yield {
-                            "type": "tool_result",
-                            "id": current_tool_call.id,
-                            "name": current_tool_call.name,
-                            "results": formatted_results,
-                        }
-                        # add sources from this tool call to the overall source list
-                        new_sources += [str(res["id"]) for res in formatted_results]
+                                # convert tool call string to object
+                                current_tool_call.input = json.loads(current_tool_call.input)
 
-                        # tool use message
-                        tool_msg["content"].append(current_tool_call)
-                        messages.append(tool_msg)
-                        # tool response message
-                        tool_response_msg = {
-                            "type": "tool_result",
-                            "tool_use_id": current_tool_call.id,
-                            "content": tool_response,
-                        }
-                        messages.append({"role": "user", "content": [tool_response_msg]})
+                                tool_call_id, tool_response, formatted_results = execute_tool_call(
+                                    current_tool_call,
+                                    bot,
+                                )
 
-                        tools_used += 1
-                        tool_msg = {"role": "assistant", "content": []}
-                        break
-                elif chunk.type == "message_delta" and \
-                chunk.delta.stop_reason == "end_turn":
-                    usage["output"] += chunk.usage.output_tokens
+                                yield {
+                                    "type": "tool_result",
+                                    "id": current_tool_call.id,
+                                    "name": current_tool_call.name,
+                                    "results": formatted_results,
+                                }
+                                # add sources from this tool call to the overall source list
+                                new_sources += [str(res["id"]) for res in formatted_results]
+
+                                # tool use message
+                                tool_msg["content"].append(current_tool_call)
+                                messages.append(tool_msg)
+                                # tool response message
+                                tool_response_msg = {
+                                    "type": "tool_result",
+                                    "tool_use_id": current_tool_call.id,
+                                    "content": tool_response,
+                                }
+                                messages.append({"role": "user", "content": [tool_response_msg]})
+
+                                tools_used += 1
+                                tool_msg = {"role": "assistant", "content": []}
+                                break
+                        elif chunk.type == "message_delta" and \
+                        chunk.delta.stop_reason == "end_turn":
+                            usage["output"] += chunk.usage.output_tokens
+                            break
+                        elif chunk.type == "message_start":
+                            usage["input"] += chunk.message.usage.input_tokens
+                            usage["output"] += chunk.message.usage.output_tokens
+                    # If we get here without error, break the retry loop
                     break
-                elif chunk.type == "message_start":
-                    usage["input"] += chunk.message.usage.input_tokens
-                    usage["output"] += chunk.message.usage.output_tokens
+                except APIStatusError as e:
+                    overloaded_error_code = 529
+                    # Only retry on overloaded errors
+                    if retry < max_retries - 1 and (
+                        getattr(e, "status_code", None) == overloaded_error_code or \
+                        (
+                            hasattr(e, "error") and
+                            getattr(e.error, "type", None) == "overloaded_error"
+                        )
+                    ):
+                        logger.warning(
+                            "Anthropic API overloaded, retrying in %ss (attempt %s/%s)",
+                            retry_delay,
+                            retry + 1,
+                            max_retries,
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    # If not overloaded error or max retries reached,
+                    # raise to outer exception handler
+                    raise
         except Exception as e:
             logger.exception("anthropic_tools_stream exception")
             langfuse_context.update_current_observation(
