@@ -362,15 +362,15 @@ def create_batch_openai(
     file_id: str,
     endpoint: str,
     client: OpenAI | None = None,
-    description: str | None = None,
     metadata: dict | None = None,
+    completion_window: str = "24h"
 ) -> str:
     client = OpenAI() if client is None else client
     batch = client.batches.create(
         input_file_id=file_id,
         endpoint=endpoint,
-        description=description,
         metadata=metadata,
+        completion_window=completion_window,
     )
     return batch.id
 
