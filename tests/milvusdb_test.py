@@ -50,9 +50,10 @@ def test_firebase_config() -> None:
         assert isinstance(metadata_format, MilvusMetadataEnum)
         match metadata_format:
             case MilvusMetadataEnum.field:
-                fields = milvusdb.load_vdb_param(coll, "fields")
+                fields = milvusdb.load_vdb_param(coll, "extra_fields")
+                field_names = [f.name for f in fields]
                 assert isinstance(fields, list)
-                assert sorted(milvus_field_names) == sorted(fields)
+                assert sorted(milvus_field_names) == sorted(field_names)
             case MilvusMetadataEnum.json:
                 assert milvus_field_names == ["metadata"]
             case MilvusMetadataEnum.no_field:

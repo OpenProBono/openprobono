@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
 from json import loads
 from typing import TYPE_CHECKING
 
@@ -23,7 +22,7 @@ from pymilvus import (
 )
 
 from app.classifiers import url_jurisdictions
-from app.db import get_batch, load_vdb, load_vdb_chunk, load_vdb_source, store_vdb
+from app.db import delete_vdb, load_vdb, store_vdb
 from app.encoders import embed_strs
 from app.loaders import (
     extract_elements,
@@ -34,10 +33,13 @@ from app.loaders import (
 from app.logger import setup_logger
 from app.models import (
     ChatModelParams,
-    EncoderParams,
+    MilvusDataTypeEnum,
+    MilvusField,
     MilvusMetadataEnum,
     SearchTool,
     SummaryMethodEnum,
+    User,
+    VDBRequest,
 )
 from app.splitters import chunk_elements_by_title, chunk_str
 from app.summarization import summarize
@@ -52,9 +54,6 @@ connection_args = loads(os.environ["Milvus"])  # noqa: SIM112
 # test connection to db, also needed to use utility functions
 connections.connect(uri=connection_args["uri"], token=connection_args["token"])
 
-
-# used to cache collection params from firebase
-COLLECTION_PARAMS = {}
 # for storing session data
 SESSION_DATA = "SessionData"
 # limit for number of results in queries
@@ -62,94 +61,65 @@ MAX_K = 16384
 
 # core features
 
-def load_vdb_param(
-    collection_name: str,
-    param_name: str,
-) -> EncoderParams | MilvusMetadataEnum | list:
-    """Load a vector database parameter from firebase.
+def convert_fields(fields: list[MilvusField]) -> list[FieldSchema]:
+    """Convert a list of MilvusFields to a list of FieldSchemas.
 
     Parameters
     ----------
-    collection_name : str
-        The name of the collection using the parameter
-    param_name : str
-        The name of the desired parameter value
+    fields : list[MilvusField]
+        A list of MilvusFields.
 
     Returns
     -------
-    EncoderParams | MilvusMetadataEnum | list
-        EncoderParams if param_name = "encoder"
-
-        MilvusMetadataEnum if param_name = "metadata_format"
-
-        list if param_name = "fields"
+    list[FieldSchema]
+        A list of FieldSchemas.
 
     """
-    # check if the params are cached
-    if collection_name in COLLECTION_PARAMS and \
-        param_name in COLLECTION_PARAMS[collection_name]:
-
-        return COLLECTION_PARAMS[collection_name][param_name]
-    if collection_name not in COLLECTION_PARAMS:
-        COLLECTION_PARAMS[collection_name] = {}
-    param_value = load_vdb(collection_name)[param_name]
-    # create the parameter object
-    match param_name:
-        case "encoder":
-            COLLECTION_PARAMS[collection_name][param_name] = EncoderParams(
-                **param_value,
-            )
-        case "metadata_format":
-            COLLECTION_PARAMS[collection_name][param_name] = MilvusMetadataEnum(
-                param_value,
-            )
-        case "fields":
-            COLLECTION_PARAMS[collection_name][param_name] = param_value
-        case _:
-            raise ValueError(param_name)
-    return COLLECTION_PARAMS[collection_name][param_name]
+    converted = []
+    for f in fields:
+        match f.dtype:
+            case MilvusDataTypeEnum.json:
+                dtype = DataType.JSON
+            case MilvusDataTypeEnum.string:
+                dtype = DataType.VARCHAR
+            case MilvusDataTypeEnum.int:
+                dtype = DataType.INT32
+            case MilvusDataTypeEnum.float:
+                dtype = DataType.FLOAT
+            case MilvusDataTypeEnum.boolean:
+                dtype = DataType.BOOL
+            case MilvusDataTypeEnum.double:
+                dtype = DataType.DOUBLE
+        converted.append(FieldSchema(
+            name=f.name,
+            dtype=dtype,
+            description=f.description,
+        ))
+    return converted
 
 
 @observe()
-def create_collection(
-    name: str,
-    encoder: EncoderParams | None = None,
-    description: str = "",
-    extra_fields: list[FieldSchema] | None = None,
-    metadata_format: MilvusMetadataEnum = MilvusMetadataEnum.json,
-) -> Collection:
-    """Create a collection with a given name and other parameters.
+def create_collection(vdb: VDBRequest, vdb_id: str) -> Collection | None:
+    """Create a collection (vector database) with a given name and other parameters.
 
     Parameters
     ----------
-    name : str
-        The name of the collection to be created
-    encoder : EncoderParams, optional
-        The embedding model used to create the vectors,
-        by default text-embedding-3-small with 768 dimensions
-    description : str, optional
-        A description for the collection, by default ""
-    extra_fields : list[FieldSchema] | None, optional
-        A list of fields to add to the collections schema, by default None
-    metadata_format : MilvusMetadataEnum, optional
-        The format used to store metadata other than text, by default json
-        (a single field called `metadata`)
-
-        If `json`, the `metadata` field will be made automatically
-
-        If `no_field`, `extra_fields` should not contain fields
+    vdb : VDBRequest
+        The VDB request object.
+    vdb_id : str
+        The id associated with the vector database.
 
     Returns
     -------
     pymilvus.Collection
-        The collection. Must call load() before query/search.
+        The created collection (must call load() before query/search).
+    None
+        If the collection failed to be created.
 
     """
-    if utility.has_collection(name):
-        logger.warning("Tried to create collection that already exists %s", name)
-        return Collection(name)
-    encoder = encoder if encoder is not None else EncoderParams()
-    db_fields = None
+    if utility.has_collection(vdb_id):
+        logger.error("Tried to create collection that already exists %s", vdb_id)
+        return None
 
     # define schema
     pk_field = FieldSchema(
@@ -170,10 +140,14 @@ def create_collection(
     embedding_field = FieldSchema(
         name="vector",
         dtype=DataType.FLOAT_VECTOR,
-        dim=encoder.dim,
+        dim=vdb.encoder.dim,
         description="The embedded text",
     )
-    sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR, description="The sparse vector for full text search")
+    sparse_field = FieldSchema(
+        name="sparse",
+        dtype=DataType.SPARSE_FLOAT_VECTOR,
+        description="The sparse vector for full text search",
+    )
     bm25_function = Function(
         name="text_bm25_emb",
         input_field_names=["text"],
@@ -182,7 +156,8 @@ def create_collection(
     )
 
     # keep track of how the collection stores metadata
-    match metadata_format:
+    extra_fields = []
+    match vdb.metadata_format:
         case MilvusMetadataEnum.json:
             extra_fields = [FieldSchema(
                 name="metadata",
@@ -190,25 +165,31 @@ def create_collection(
                 description="The associated metadata",
             )]
         case MilvusMetadataEnum.no_field:
-            if extra_fields:
-                msg = "metadata_format = no_field but extra_fields is not empty"
-                raise ValueError(msg)
+            if vdb.extra_fields:
+                logger.error(
+                    "metadata_format=no_field but extra_fields isn't empty."
+                    "Remove fields or use field instead.",
+                )
+                return None
         case MilvusMetadataEnum.field:
-            # field format allows for empty extra_fields or a single json field as long
-            # as dynamic fields are enabled, otherwise should be no_field or json
-            if extra_fields is None:
-                extra_fields = []
-            else:
-                db_fields = [field.name for field in extra_fields]
+            # field format allows for empty extra_fields
+            if vdb.extra_fields is None:
+                logger.error(
+                    "metadata_format=field but extra_fields is None."
+                    "Add fields or use no_field instead.",
+                )
+                return None
+            # convert from basic MilvusField to FieldSchema
+            extra_fields = convert_fields(vdb.extra_fields)
 
     schema = CollectionSchema(
         fields=[pk_field, text_field, embedding_field, sparse_field, *extra_fields],
         functions=[bm25_function],
-        description=description,
+        description=vdb.description,
     )
 
     # create collection
-    coll = Collection(name=name, schema=schema)
+    coll = Collection(name=vdb_id, schema=schema)
     # create index for vector field
     # AUTOINDEX is only supported through Zilliz, not standalone Milvus
     auto_index = {
@@ -219,47 +200,43 @@ def create_collection(
     auto_index["metric_type"] = "BM25"
     # create index for full text search
     coll.create_index(field_name="sparse", index_params=auto_index, metric_type="BM25")
-    # add created_at property
-    coll.set_properties({"created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d")})
 
     # save params in firebase
-    store_vdb(name, encoder, metadata_format, db_fields)
-    # cache params in dictionary
-    COLLECTION_PARAMS[name] = {
-        "encoder": encoder,
-        "metadata_format": metadata_format,
-    }
-    if db_fields is not None:
-        COLLECTION_PARAMS[name]["fields"] = db_fields
-    logger.info("Collection Created: %s", name)
+    db_result = store_vdb(vdb, vdb_id)
+    if not db_result:
+        logger.error("Error saving VDB to firebase. Collection not created.")
+        coll.drop()
+        return None
+
+    logger.info("Collection Created: %s", vdb_id)
     return coll
 
-def metadata_fields(collection_name: str) -> list[str]:
-    """Get the metadata fields for a collection.
+@observe()
+def delete_collection(vdb_id: str, user: User) -> bool:
+    """Delete a collection from Milvus and Firebase.
 
     Parameters
     ----------
-    collection_name : str
-        The name of the collection.
+    vdb_id : str
+        The ID of the vector database to be deleted.
+    user : User
+        The user requesting to delete the collection.
 
     Returns
     -------
-    list[str]
-        The metadata fields for the collection.
+    bool
+        True if the collection was successfully deleted, False otherwise.
 
     """
-    metadata_format = load_vdb_param(collection_name, "metadata_format")
-    match metadata_format:
-        case MilvusMetadataEnum.json:
-            return ["metadata"]
-        case MilvusMetadataEnum.field:
-            return load_vdb_param(collection_name, "fields")
-    # MilvusMetadataEnum.no_field does not have metadata fields
-    return []
+    res = delete_vdb(vdb_id, user)
+    if res:
+        coll = Collection(vdb_id)
+        coll.drop()
+    return res
 
 @observe()
 def query(
-    collection_name: str,
+    vdb_id: str,
     query: str,
     k: int = 4,
     expr: str = "",
@@ -269,8 +246,8 @@ def query(
 
     Parameters
     ----------
-    collection_name : str
-        the collection to query
+    vdb_id : str
+        the ID of the collection to query
     query : str
         the query itself
     k : int, optional
@@ -286,13 +263,20 @@ def query(
         With message and result on success, just message on failure
 
     """
-    coll = Collection(collection_name)
-    encoder = load_vdb_param(collection_name, "encoder")
-    data = embed_strs([query], encoder)
+    coll = Collection(vdb_id)
+    vdb = load_vdb(vdb_id)
+    match vdb.metadata_format:
+        case MilvusMetadataEnum.json:
+            extra_fields = ["metadata"]
+        case MilvusMetadataEnum.field:
+            extra_fields = [f.name for f in vdb.extra_fields]
+        case _:
+            extra_fields = []
+    data = embed_strs([query], vdb.encoder)
     search_params = {
         "anns_field": "vector",
         "param": {}, # can customize index params assuming you know index type
-        "output_fields": ["text", *metadata_fields(collection_name)],
+        "output_fields": ["text", *extra_fields],
         "data": data,
         "limit": k,
     }
@@ -312,7 +296,7 @@ def query(
         res = coll.hybrid_search(reqs, RRFRanker(), k, output_fields=output_fields)
     else:
         res = coll.search(**search_params)
-    logger.info("Collection queried: %s", collection_name)
+    logger.info("Collection queried: %s", vdb_id)
     if res:
         # on success, returns a list containing a single inner list containing
         # result objects
@@ -430,25 +414,6 @@ def count_resources(collection_name: str) -> int:
     return Collection(collection_name).num_entities
 
 
-def collection_created_at(collection_name: str) -> str:
-    """Get the creation date of a collection.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of the collection
-
-    Returns
-    -------
-    str
-        The creation date of the collection in ISO 8601 (YYYY-MM-DD) format.
-
-    """
-    description = Collection(collection_name).describe()
-    properties = description["properties"]
-    return properties.get("created_at", "")
-
-
 @observe()
 def upload_data(
     collection_name: str,
@@ -519,63 +484,14 @@ def upload_data(
     return {"message": "Success", "insert_count": insert_count}
 
 
-def upload_data_firebase(
-    coll_name: str,
-    data: list[dict],
-    source_ids: set | None = None,
-) -> dict:
-    """Insert chunk data into Firebase.
-
-    Parameters
-    ----------
-    coll_name : str
-        The name of the Firebase collection.
-    data : list[dict]
-        Each element must contain `text`, `chunk_index`, `source_id`.
-    source_ids : set | None, optional
-        A set of source_ids that have already been inserted into the database,
-        by default None.
-
-    Returns
-    -------
-    dict
-        Containing a message and insert count
-
-    """
-    if source_ids is None:
-        source_ids = set()
-    db_batch = get_batch()
-    insert_count = len(data)
-    for i in range(insert_count):
-        text = data[i]["text"]
-        chunk_idx = data[i]["chunk_index"]
-        source_id = data[i]["source_id"]
-        if source_id not in source_ids:
-            source_ids.add(source_id)
-            db_source = load_vdb_source(coll_name, source_id)
-            del data[i]["text"]
-            del data[i]["chunk_index"]
-            del data[i]["source_id"]
-            db_batch.set(db_source, data[i])
-        chunk_data = {"text": text, "chunk_index": chunk_idx}
-        db_chunk = load_vdb_chunk(coll_name, source_id, data[i]["pk"])
-        db_batch.set(db_chunk, chunk_data)
-        if i % 1000 == 0:
-            db_batch.commit()
-            db_batch = get_batch()
-    db_batch.commit()
-    logger.info("Collection uploaded data to Firebase: %s", coll_name)
-    return {"message": "Success", "insert_count": insert_count}
-
-
 @observe(capture_output=False)
-def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
+def get_expr(vdb_id: str, expr: str, batch_size: int = 1000) -> dict:
     """Get database entries according to a boolean expression.
 
     Parameters
     ----------
-    collection_name : str
-        The name of a pymilvus.Collection
+    vdb_id : str
+        The ID of a pymilvus.Collection
     expr : str
         A boolean expression to filter database entries
     batch_size: int, optional
@@ -587,8 +503,16 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
         Contains `message`, `result` list if successful
 
     """
-    coll = Collection(collection_name)
-    output_fields = ["text", "vector", *metadata_fields(collection_name)]
+    coll = Collection(vdb_id)
+    vdb = load_vdb(vdb_id)
+    match vdb.metadata_format:
+        case MilvusMetadataEnum.json:
+            extra_fields = ["metadata"]
+        case MilvusMetadataEnum.field:
+            extra_fields = [f.name for f in vdb.extra_fields]
+        case _:
+            extra_fields = []
+    output_fields = ["text", "vector", *extra_fields]
     hits = []
     try:
         q_iter = coll.query_iterator(
@@ -602,12 +526,15 @@ def get_expr(collection_name: str, expr: str, batch_size: int = 1000) -> dict:
             res = q_iter.next()
         q_iter.close()
     except MilvusException as e:
-        logger.exception("Collection failed to get expression: %s", collection_name)
-        langfuse_context.update_current_observation(level="ERROR", status_message=str(e))
-        return {"message": "Failure"}
+        logger.exception("Collection failed to get expression: %s", vdb_id)
+        langfuse_context.update_current_observation(
+            level="ERROR",
+            status_message=str(e),
+        )
+        return {"message": f"Failure: Internal Error: {e!s}"}
     pks = [hit["pk"] for hit in hits]
     langfuse_context.update_current_observation(output=pks)
-    logger.info("Collection got expression: %s", collection_name)
+    logger.info("Collection got expression: %s", vdb_id)
     return {"message": "Success", "result": hits}
 
 
@@ -675,31 +602,6 @@ def upsert_data(
     return {"message": "Success", "upsert_count": result.upsert_count}
 
 
-def fields_to_json(fields_entry: dict) -> dict:
-    """Convert a Collection entry from fields to json metadata format.
-
-    Parameters
-    ----------
-    fields_entry : dict
-        The entry from a Collection with fields metadata format
-
-    Returns
-    -------
-    dict
-        The entry with fields replaced with a metadata dictionary
-        (json metadata format)
-
-    """
-    d = {k: v for k, v in fields_entry.items() if k != "entity"}
-    d["entity"] = {
-        "text": fields_entry["entity"]["text"],
-        "metadata": {
-            k: v for k, v in fields_entry["entity"].items() if k != "text"
-        },
-    }
-    return d
-
-
 def query_iterator(
     collection_name: str,
     expr: str,
@@ -735,8 +637,8 @@ def query_iterator(
 # application level features
 
 def crawl_upload_site(
-    collection_name: str,
-    description: str,
+    vdb: VDBRequest,
+    vdb_id: str,
     url: str,
     summary_method: SummaryMethodEnum = SummaryMethodEnum.stuff_reduce,
     summary_chatmodel: ChatModelParams | None = None,
@@ -745,10 +647,10 @@ def crawl_upload_site(
 
     Parameters
     ----------
-    collection_name : str
-        The name of the collection
-    description : str
-        The description of the website
+    vdb_id : str
+        The ID of the collection
+    vdb : VDBRequest
+        The VDB object
     url : str
         The website URL
     summary_method : SummaryMethodEnum, optional
@@ -764,21 +666,21 @@ def crawl_upload_site(
     """
     if summary_chatmodel is None:
         summary_chatmodel = ChatModelParams()
-    _ = create_collection(collection_name, description=description)
+    _ = create_collection(vdb, vdb_id)
     urls = [url]
     new_urls, prev_elements = scrape_with_links(url, urls)
     texts, metadatas = chunk_elements_by_title(prev_elements, 3000, 1000, 300)
     ai_summary = summarize(texts, summary_method, summary_chatmodel)
     for metadata in metadatas:
         metadata["ai_summary"] = ai_summary
-    encoder = load_vdb_param(collection_name, "encoder")
+    encoder = load_vdb(vdb_id).encoder
     vectors = embed_strs(texts, encoder)
     data = [{
         "vector": vectors[i],
         "metadata": metadatas[i],
         "text": texts[i],
     } for i in range(len(texts))]
-    upload_data(collection_name, data)
+    upload_data(vdb_id, data)
     logger.info("new_urls: %r", new_urls)
     while len(new_urls) > 0:
         cur_url = new_urls.pop()
@@ -798,7 +700,7 @@ def crawl_upload_site(
                 "metadata": metadatas[i],
                 "text": texts[i],
             } for i in range(len(texts))]
-            upload_data(collection_name, data)
+            upload_data(vdb_id, data)
             prev_elements = cur_elements
     logger.info(urls)
     return urls
@@ -850,7 +752,8 @@ def upload_site(
     )
     # TODO: vectors, ai summary, and jurisdictions can be done in parallel,
     # unless jurisdictions are low confidence, then they need a summary
-    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
+    vdb = load_vdb(collection_name)
+    vectors = embed_strs(texts, vdb.encoder)
     ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
     jurisdictions = url_jurisdictions(url, summary=ai_summary)
     bot_id = search_tool.bot_id
@@ -907,7 +810,8 @@ def session_upload_ocr(
     """
     reader = quickstart_ocr(file)
     texts = chunk_str(reader, max_chunk_size, chunk_overlap)
-    vectors = embed_strs(texts, load_vdb_param(SESSION_DATA, "encoder"))
+    vdb = load_vdb(SESSION_DATA)
+    vectors = embed_strs(texts, vdb.encoder)
     ai_summary = summarize(texts)
     metadata = {
         "session_id": session_id,
@@ -958,7 +862,8 @@ def file_upload(
     elements = extract_elements(file.file, file.filename)
     # chunk text
     texts, metadatas = chunk_elements_by_title(elements)
-    vectors = embed_strs(texts, load_vdb_param(collection_name, "encoder"))
+    vdb = load_vdb(collection_name)
+    vectors = embed_strs(texts, vdb.encoder)
     # add session id to metadata
     for i in range(len(metadatas)):
         metadatas[i]["session_id"] = session_id

@@ -134,6 +134,22 @@ class MilvusMetadataEnum(str, Enum):
 
 
 @unique
+class MilvusDataTypeEnum(str, Enum):
+    """Enumeration class representing different data types in Milvus.
+
+    This only supports basic Milvus data types (not arrays or vectors).
+
+    """
+
+    boolean = "boolean"
+    int = "int"
+    float = "float"
+    double = "double"
+    string = "string"
+    json = "json"
+
+
+@unique
 class FeedbackType(str, Enum):
     """Enumeration class representing different kinds of user feedback."""
 
@@ -212,13 +228,13 @@ class OpinionSearchRequest(BaseModel):
     after_date: str | None = None
     before_date: str | None = None
 
-class CollectionSearchRequest(BaseModel):
-    """Model class representing a collection search request.
+class VDBSearchRequest(BaseModel):
+    """Model class representing a VDB collection search request.
 
     Attributes
     ----------
-    collection : str
-        The collection name
+    vdb_id : str
+        The collection ID
     query : str
         The query
     k : int, optional
@@ -237,7 +253,7 @@ class CollectionSearchRequest(BaseModel):
 
     """
 
-    collection: str
+    vdb_id: str
     query: str
     k: int = 5
     keyword_query: str | None = None
@@ -245,13 +261,13 @@ class CollectionSearchRequest(BaseModel):
     after_date: str | None = None
     before_date: str | None = None
 
-class CollectionManageRequest(BaseModel):
-    """Model class representing a collection management request.
+class VDBManageRequest(BaseModel):
+    """Model class representing a VDB collection management request.
 
     Attributes
     ----------
-    collection : str
-        The collection name
+    vdb_id : str
+        The collection ID
     source : str | None, optional
         The source ID to lookup in the collection, by default None
     keyword_query: str | None, optional
@@ -268,12 +284,63 @@ class CollectionManageRequest(BaseModel):
 
     """
 
-    collection: str
+    vdb_id: str
     source: str | None = None
     keyword_query: str | None = None
     jurisdictions: list[str] | None = None
     after_date: str | None = None
     before_date: str | None = None
+
+class VDBRequest(BaseModel):
+    """Model class representing a VDB collection create/read request.
+
+    Attributes
+    ----------
+    user : User
+        The user who created the collection.
+    name : str
+        The display name of the collection.
+    description : str, optional
+        A description for the collection. By default None.
+    encoder : EncoderParams, optional
+        The parameters for the encoder used in this collection.
+        By default OpenAI text-embedding-3-small, 768 dim.
+    metadata_format : MilvusMetadataEnum, optional
+        The configuration of metadata in this collection.
+        By default MilvusMetadataEnum.json.
+    extra_fields : list[MilvusField], optional
+        The list of extra fields in this collection.
+        Only set if metadata_format is MilvusMetadataEnum.field. By default None.
+    public : bool, optional
+        Whether or not the collection should be public. By default False.
+
+    """
+
+    user: User
+    name: str
+    description: str | None = None
+    encoder: EncoderParams = EncoderParams()
+    metadata_format: MilvusMetadataEnum = MilvusMetadataEnum.json
+    extra_fields: list[MilvusField] | None = None
+    public: bool = False
+
+class MilvusField(BaseModel):
+    """Model class representing the schema of a field in a Milvus collection.
+
+    Attributes
+    ----------
+    name : str
+        The name of the field.
+    dtype : MilvusDataTypeEnum
+        The type of data stored in this field.
+    description : str
+        A description of the field.
+
+    """
+
+    name: str
+    dtype: MilvusDataTypeEnum
+    description: str
 
 class OpinionFeedback(BaseModel):
     """Model class representing an opinion feedback request.
@@ -354,7 +421,7 @@ class VDBTool(BaseModel):
     Attributes
     ----------
         name (str): The name of the VDB tool.
-        collection_name (str): The collection name for the VDB tool.
+        vdb_id (str): The ID of the VDB being used by the tool.
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
         session_id (str | None): The session id if querying session data, else None.
@@ -364,7 +431,7 @@ class VDBTool(BaseModel):
     """
 
     name: str
-    collection_name: str
+    vdb_id: str
     k: int = 4
     prompt: str = ""
     session_id: str | None = None

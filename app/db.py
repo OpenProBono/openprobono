@@ -1,32 +1,30 @@
 """Written by Arman Aydemir. Used to access and store data in the Firestore database."""
 from __future__ import annotations
 
+import datetime
 import os
 from json import loads
 from typing import List, Optional
-import datetime
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from langfuse.decorators import observe
 
+from app.logger import setup_logger
 from app.models import (
     BotRequest,
     ChatRequest,
-    EncoderParams,
     EvalDataset,
-    LabeledEvalDataset,
-    LabeledEvalSession,
     FetchSession,
-    MilvusMetadataEnum,
+    LabeledEvalDataset,
+    LabelingType,
     OpinionFeedback,
     SessionFeedback,
     User,
+    VDBRequest,
     get_uuid_id,
-    LabelingType,
 )
-from app.logger import setup_logger
 
 logger = setup_logger()
 
@@ -38,6 +36,9 @@ MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
 EVAL_DATASET_COLLECTION = "eval_datasets"
+
+# used to cache VDB params from firebase
+ID_VDB = {}
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -150,9 +151,9 @@ def store_opinion_feedback(r: OpinionFeedback) -> bool:
 
     """
     # TODO: generalize to store_vdb_source_feedback()
-    collection_name = "test_firebase"
+    vdb_id = "test_firebase"
     milvus = db.collection(MILVUS_COLLECTION)
-    milvus_coll = milvus.document(collection_name)
+    milvus_coll = milvus.document(vdb_id)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     source = coll_sources.document(str(r.opinion_id))
     if not source.get().exists:
@@ -353,44 +354,44 @@ def browse_public_bots() -> dict:
         data_dict[datum.id] = datum.to_dict()
     return data_dict
 
-def load_vdb(collection_name: str) -> dict:
+def load_vdb(vdb_id: str) -> VDBRequest | None:
     """Load the parameters for a collection from the database.
 
     Parameters
     ----------
-    collection_name : str
-        The name of the collection that uses the parameters.
+    vdb_id : str
+        The ID of the collection that uses the parameters.
 
     Returns
     -------
-    dict
-        The collection parameters: encoder, metadata_format, fields.
+    VDBRequest
+        The VDB object.
+    None
+        If the collection cannot be found.
 
     """
-    data = db.collection(MILVUS_COLLECTION).document(collection_name).get()
+    # check if the VDB is cached
+    if vdb_id in ID_VDB:
+        return ID_VDB[vdb_id]
+    # it's not; load it
+    data = db.collection(MILVUS_COLLECTION).document(vdb_id).get()
     if data.exists:
-        return data.to_dict()
+        vdb = VDBRequest(**data.to_dict())
+        # cache it
+        ID_VDB[vdb_id] = vdb
+        return vdb
 
     return None
 
-def store_vdb(
-    collection_name: str,
-    encoder: EncoderParams,
-    metadata_format: MilvusMetadataEnum,
-    fields: list | None = None,
-) -> bool:
+def store_vdb(vdb: VDBRequest, vdb_id: str) -> bool:
     """Store the configuration of a Milvus collection in the database.
 
     Parameters
     ----------
-    collection_name : str
-        The collection that uses the configuration.
-    encoder : EncoderParams
-        The EncoderParams object to store.
-    metadata_format : MilvusMetadataEnum
-        The MilvusMetadataEnum object to store.
-    fields : list
-        The list of field names to store if metadata_format is field.
+    vdb : VDBRequest
+        The request object containing the collection parameters to store.
+    vdb_id: str
+        The ID of the VDB.
 
     Returns
     -------
@@ -398,18 +399,20 @@ def store_vdb(
         True if successful, False otherwise.
 
     """
-    data = {
-        "encoder": encoder.model_dump(),
-        "metadata_format": metadata_format,
-        "timestamp": firestore.SERVER_TIMESTAMP,
-    }
-    if fields is not None:
-        data["fields"] = fields
-    db.collection(MILVUS_COLLECTION).document(collection_name).set(data)
-    return True
+    data = vdb.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+    try:
+        db.collection(MILVUS_COLLECTION).document(vdb_id).set(data)
+    except Exception:
+        logger.exception("Error storing VDB in Firebase")
+        return False
+    else:
+        # cache vdb in dictionary
+        ID_VDB[vdb_id] = vdb
+        return True
 
 def load_vdb_source(
-    collection_name: str,
+    vdb_id: str,
     source_id: int,
 ) -> firestore.firestore.DocumentReference:
     """Load source data for entities in a Milvus collection from Firebase.
@@ -418,8 +421,8 @@ def load_vdb_source(
 
     Parameters
     ----------
-    collection_name : str
-        The name of the Milvus collection containing the source.
+    vdb_id : str
+        The ID of the Milvus collection containing the source.
     source_id : int
         The id of the source.
 
@@ -430,12 +433,12 @@ def load_vdb_source(
 
     """
     milvus = db.collection(MILVUS_COLLECTION)
-    milvus_coll = milvus.document(collection_name)
+    milvus_coll = milvus.document(vdb_id)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     return coll_sources.document(str(source_id))
 
 def load_vdb_chunk(
-    collection_name: str,
+    vdb_id: str,
     source_id: int,
     chunk_id: int,
 ) -> firestore.firestore.DocumentReference:
@@ -445,8 +448,8 @@ def load_vdb_chunk(
 
     Parameters
     ----------
-    collection_name : str
-        The name of the Milvus collection containing the chunk.
+    vdb_id : str
+        The ID of the Milvus collection containing the chunk.
     source_id : int
         The id of the source from which the chunk originated.
     chunk_id : int
@@ -459,11 +462,118 @@ def load_vdb_chunk(
 
     """
     milvus = db.collection(MILVUS_COLLECTION)
-    milvus_coll = milvus.document(collection_name)
+    milvus_coll = milvus.document(vdb_id)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     source = coll_sources.document(str(source_id))
     source_chunks = source.collection(MILVUS_CHUNKS)
     return source_chunks.document(str(chunk_id))
+
+def browse_vdbs(user: User) -> dict:
+    """Browse VDBs created by a given user.
+
+    Parameters
+    ----------
+    user : User
+        the user to filter on
+
+    Returns
+    -------
+    dict
+        the VDBs created by the given user, indexed by vdb id, sorted by timestamp (newest first)
+
+    """
+    vdb_ref = db.collection(MILVUS_COLLECTION)
+
+    # Filter bots by the user's firebase_uid
+    logger.debug("Filtering VDBs for firebase_uid: %s", user.firebase_uid)
+    query = vdb_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+
+    data = query.get()
+    logger.debug("Found %d VDBs for user %s", len(data), user.firebase_uid)
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
+
+def browse_public_vdbs() -> dict:
+    """Browse all public VDBs.
+
+    Returns
+    -------
+    dict
+        the public VDBs, indexed by VDB id, sorted by timestamp (newest first)
+
+    """
+    vdb_ref = db.collection(MILVUS_COLLECTION)
+
+    # Filter bots where public is True
+    query = vdb_ref.where(filter=FieldFilter("public", "==", True))
+
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+
+    data = query.get()
+    logger.debug("Found %d public VDBs", len(data))
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
+
+def delete_vdb(vdb_id: str, user: User) -> bool:
+    """Delete a VDB collection from the database.
+
+    Only the user who created the VDB can delete it.
+
+    Parameters
+    ----------
+    vdb_id : str
+        The ID of the VDB to delete
+    user : User
+        The user requesting the deletion
+
+    Returns
+    -------
+    bool
+        True if deletion was successful, False otherwise
+
+    """
+    # First, load the VDB to check ownership
+    vdb = load_vdb(vdb_id)
+
+    # If VDB doesn't exist, return False
+    if not vdb:
+        logger.warning(
+            "Attempted to delete non-existent VDB %s by user %s",
+            vdb_id,
+            user.firebase_uid,
+        )
+        return False
+
+    # Check if the requesting user is the VDB creator
+    if vdb.user.firebase_uid != user.firebase_uid:
+        logger.warning(
+            "Unauthorized deletion attempt of VDB %s by user %s",
+            vdb_id,
+            user.firebase_uid,
+        )
+        return False
+
+    # Delete the VDB
+    try:
+        db.collection(MILVUS_COLLECTION).document(vdb_id).delete()
+        logger.info(
+            "VDB %s successfully deleted by user %s",
+            vdb_id,
+            user.firebase_uid,
+        )
+    except Exception:
+        logger.exception("Exception while deleting VDB %s", vdb_id)
+        return False
+    else:
+        return True
 
 def get_batch() -> firestore.firestore.WriteBatch:
     """Get a batch object for use with Firestore.
@@ -479,6 +589,53 @@ def get_batch() -> firestore.firestore.WriteBatch:
     """
     return db.batch()
 
+def upload_data_firebase(
+    vdb_id: str,
+    data: list[dict],
+    source_ids: set | None = None,
+) -> dict:
+    """Insert chunk data into Firebase.
+
+    Parameters
+    ----------
+    vdb_id : str
+        The ID of the Firebase collection.
+    data : list[dict]
+        Each element must contain `text`, `chunk_index`, `source_id`.
+    source_ids : set | None, optional
+        A set of source_ids that have already been inserted into the database,
+        by default None.
+
+    Returns
+    -------
+    dict
+        Containing a message and insert count
+
+    """
+    if source_ids is None:
+        source_ids = set()
+    db_batch = get_batch()
+    insert_count = len(data)
+    for i in range(insert_count):
+        text = data[i]["text"]
+        chunk_idx = data[i]["chunk_index"]
+        source_id = data[i]["source_id"]
+        if source_id not in source_ids:
+            source_ids.add(source_id)
+            db_source = load_vdb_source(vdb_id, source_id)
+            del data[i]["text"]
+            del data[i]["chunk_index"]
+            del data[i]["source_id"]
+            db_batch.set(db_source, data[i])
+        chunk_data = {"text": text, "chunk_index": chunk_idx}
+        db_chunk = load_vdb_chunk(vdb_id, source_id, data[i]["pk"])
+        db_batch.set(db_chunk, chunk_data)
+        if i % 1000 == 0:
+            db_batch.commit()
+            db_batch = get_batch()
+    db_batch.commit()
+    logger.info("Collection uploaded data to Firebase: %s", vdb_id)
+    return {"message": "Success", "insert_count": insert_count}
 
 @observe()
 def get_cached_response(bot_id: str, firebase_uid: str, message: str) -> str | None:

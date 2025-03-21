@@ -4,14 +4,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from langfuse.decorators import observe
-from pymilvus import Collection
 
+from app.bailii import BAILII_COLLECTION
 from app.courtlistener import (
     courtlistener_collection,
     courtlistener_query,
     jurisdiction_codes,
 )
-from app.db import fetch_session
+from app.db import fetch_session, load_vdb
 from app.logger import setup_logger
 from app.milvusdb import SESSION_DATA, fuzzy_keyword_query, get_expr, query
 from app.models import (
@@ -45,10 +45,12 @@ def tool_prompt(tool: VDBTool) -> str:
     # add default prompts
     match tool.method:
         case VDBMethodEnum.query:
+            # get VDB information from firebase
+            vdb = load_vdb(tool.vdb_id)
             return VDB_QUERY_PROMPT.format(
-                collection_name=tool.collection_name,
+                collection_name=vdb.name,
                 k=tool.k,
-                description=Collection(tool.collection_name).description,
+                description=vdb.description,
             )
         case VDBMethodEnum.get_source:
             return VDB_SOURCE_PROMPT
@@ -157,7 +159,7 @@ def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
 
     """
     function_response = None
-    collection_name = t.collection_name
+    collection_name = t.vdb_id
     k = t.k
     match t.method:
         case VDBMethodEnum.query:
@@ -245,11 +247,13 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
     for t in bot.search_tools:
         if t.method == SearchMethodEnum.courtlistener:
             coll_name = courtlistener_collection
+        elif t.method == SearchMethodEnum.bailii:
+            coll_name = BAILII_COLLECTION
         else:
             coll_name = search_collection
         vdb_tool = VDBTool(
             name=t.name + "-get-source",
-            collection_name=coll_name,
+            vdb_id=coll_name,
             method=VDBMethodEnum.get_source,
             bot_id=bot_id,
         )
@@ -271,19 +275,19 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
         file_count = session_info.file_count
     else:
         file_count = 0
-    # add the session query tool, if necessary
+    # add the session query tools, if necessary
     if file_count > 0:
         bot.vdb_tools += [
             VDBTool(
                 name="session_data",
-                collection_name=SESSION_DATA,
+                vdb_id=SESSION_DATA,
                 k=5,
                 prompt="Use to search user uploaded files. ALWAYS use this tool if its available.",
                 session_id=session_id,
             ),
             VDBTool(
                 name="session_data-get-source",
-                collection_name=SESSION_DATA,
+                vdb_id=SESSION_DATA,
                 method=VDBMethodEnum.get_source,
                 bot_id=bot_id,
                 prompt="This tool gets all of the text chunks comprising a user uploaded file in their original order. The source ID is always the filename.",
@@ -358,13 +362,13 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
             # pks need to be strings to handle in JavaScript front end
             hit["pk"] = str(hit["pk" if "pk" in hit else "id"])
 
-    if tool.collection_name == courtlistener_collection:
+    if tool.vdb_id == courtlistener_collection:
         entity_type = "opinion"
         entity_id_key = "id"
-    elif tool.collection_name in {search_collection, "search_collection_gemini"}:
+    elif tool.vdb_id in {search_collection, "search_collection_gemini", "bailii"}:
         entity_type = "url"
         entity_id_key = "url"
-    elif tool.collection_name == SESSION_DATA:
+    elif tool.vdb_id == SESSION_DATA:
         entity_type = "file"
         entity_id_key = "filename"
     else:

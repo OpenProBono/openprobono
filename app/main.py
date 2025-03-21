@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from datetime import UTC, datetime
 from typing import Annotated, Optional, List
 
 from fastapi import (
@@ -27,6 +28,8 @@ from app.chat_models import chat_str_openai
 from app.db import (
     browse_bots,
     browse_public_bots,
+    browse_public_vdbs,
+    browse_vdbs,
     delete_bot,
     fetch_session,
     fetch_sessions_by,
@@ -36,6 +39,7 @@ from app.db import (
     get_user_datasets,
     get_user_labeled_datasets,
     load_bot,
+    load_vdb,
     set_session_to_bot,
     store_bot,
     store_conversation_history,
@@ -49,10 +53,11 @@ from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     count_resources,
+    create_collection,
+    delete_collection,
     delete_expr,
     file_upload,
     get_expr,
-    metadata_fields,
     query_iterator,
     session_upload_ocr,
 )
@@ -60,8 +65,6 @@ from app.models import (
     BotRequest,
     ChatBySession,
     ChatRequest,
-    CollectionManageRequest,
-    CollectionSearchRequest,
     EngineEnum,
     FetchSession,
     FetchSessions,
@@ -71,6 +74,9 @@ from app.models import (
     OpinionSearchRequest,
     SessionFeedback,
     User,
+    VDBRequest,
+    VDBManageRequest,
+    VDBSearchRequest,
     VDBTool,
     get_uuid_id,
     EvalDataset,
@@ -571,7 +577,7 @@ def create_bot(
                             "vdb_tools": [
                                 {
                                     "name": "session-query",
-                                    "collection_name": "SessionData",
+                                    "vdb_id": "SessionData",
                                     "k": 4,
                                     "prompt": "Used to search user uploaded data. Only available if a user has uploaded a file.",
                                 },
@@ -602,7 +608,7 @@ def create_bot(
                             "vdb_tools": [
                                 {
                                     "name": "name for tool",
-                                    "collection_name": "name of database to query, must be one of: courtlistener",  # noqa: E501
+                                    "vdb_id": "name of database to query, must be one of: courtlistener, bailii",  # noqa: E501
                                     "k": "the number of text chunks to return when querying the database",
                                     "prompt": "description for agent to know when to use the tool",
                                 },
@@ -852,10 +858,8 @@ def get_session_files(session_id: str, user: User = Depends(get_current_user)) -
     """
     logger.info("User %s getting session files for session %s", user.firebase_uid, session_id)
     cr = fetch_session(FetchSession(session_id=session_id, user=user))
-    result = get_expr(
-        collection_name=SESSION_DATA,
-        expr = f"metadata['session_id']=='{session_id}'",
-    )
+    expr = f"metadata['session_id']=='{session_id}'"
+    result = get_expr(SESSION_DATA, expr)
     if result["message"] != "Success":
         return {"message": "Failure: unable to get session files from Milvus"}
     files = list({data["metadata"]["filename"] for data in result["result"]})
@@ -894,11 +898,8 @@ def delete_session_files(session_id: str, user: User = Depends(get_current_user)
     """
     logger.info("user %s deleting session files for session %s", user.firebase_uid, session_id)
     cr = fetch_session(FetchSession(session_id=session_id, user=user))
-    result = delete_expr(
-        SESSION_DATA,
-        f"metadata['session_id']=='{session_id}'",
-        session_id,
-    )
+    expr = f"metadata['session_id']=='{session_id}'"
+    result = get_expr(SESSION_DATA, expr, session_id)
     if result["message"] == "Success":
         cr.file_count = 0
         store_conversation_history(cr)
@@ -910,25 +911,16 @@ def delete_session_files(session_id: str, user: User = Depends(get_current_user)
 @api.post("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
     req: OpinionSearchRequest,
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
+    logger.info("User %s searching opinions with request %s", user.firebase_uid, req)
     try:
         results = opinion_search(req)
     except Exception as error:
+        logger.exception("Error searching opinions")
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "results": results}
-
-
-@api.post("/search_resources", tags=["Resource Search"])
-def search_resources(
-    req: CollectionSearchRequest,
-    user: User = Depends(get_current_user),
-) -> dict:
-    vdb_tool = VDBTool(name="test-tool", collection_name=req.resource_group, k=req.k)
-    tool_response = run_vdb_tool(vdb_tool, req.model_dump())
-    formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
-    return {"message": "Success", "results": formatted_results}
 
 
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
@@ -942,6 +934,7 @@ def get_opinion_summary(
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
+
 
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
 def opinion_feedback(
@@ -968,44 +961,53 @@ def opinion_feedback(
 
 @api.post("/search_collection", tags=["Resource Search"])
 def search_collection(
-    req: CollectionSearchRequest,
+    req: VDBSearchRequest,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    vdb_tool = VDBTool(name="test-tool", collection_name=req.collection, k=req.k)
+    logger.info("User %s searching collection with request %s", user.firebase_uid, req)
+    vdb_tool = VDBTool(name="test-tool", vdb_id=req.vdb_id, k=req.k)
     tool_response = run_vdb_tool(vdb_tool, req.model_dump(exclude_unset=True))
     formatted_results = format_vdb_tool_results(tool_response, vdb_tool)
     return {"message": "Success", "results": formatted_results}
 
 
 @api.get("/resource_count/{collection_name}", tags=["Resource Search"])
-def get_resource_count(
+def resource_count(
     collection_name: str,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
+    msg = "User %s counting resources in collection %s"
+    logger.info(msg, user.firebase_uid, collection_name)
     return {"message": "Success", "resource_count": count_resources(collection_name)}
 
 
 @api.post("/browse_collection", tags=["Resource Search"])
 def browse_collection(
-        req: CollectionManageRequest,
-        page: int = 1,
-        per_page: int = 200,
-        user: User = Depends(get_current_user)
+    req: VDBManageRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    page: int = 1,
+    per_page: int = 200,
 ):
     """Browse a collection."""
-    from datetime import UTC, datetime
-
     from app.courtlistener import courtlistener_collection, jurisdiction_codes
     from app.milvusdb import fuzzy_keyword_query
-    from app.models import VDBMethodEnum
+    from app.models import MilvusMetadataEnum, VDBMethodEnum
 
+    logger.info("User %s browsing collection with request %s", user.firebase_uid, req)
     expr = ""
-    output_fields = ["text", *metadata_fields(req.collection)]
-    if req.collection in {"search_collection_vj1", "search_collection_gemini"}:
+    vdb = load_vdb(req.vdb_id)
+    if vdb.metadata_format == MilvusMetadataEnum.json:
+        fields = ["metadata"]
+    elif vdb.metadata_format == MilvusMetadataEnum.field:
+        fields = [f.name for f in vdb.extra_fields]
+    output_fields = ["text", *fields]
+    if req.vdb_id in {"search_collection_vj1", "search_collection_gemini", "bailii"}:
         entity_id_key = "url"
-    elif req.collection == SESSION_DATA:
+    elif req.vdb_id == SESSION_DATA:
         entity_id_key = "filename"
     else:
         entity_id_key = "id"
-    if req.collection == courtlistener_collection:
+    if req.vdb_id == courtlistener_collection:
         if req.source:
             expr = f"metadata['case_name'] like '%{req.source}%'"
         if req.keyword_query:
@@ -1034,10 +1036,17 @@ def browse_collection(
         if req.source:
             expr = f"metadata['{entity_id_key}'] like '%{req.source}%'"
         if req.keyword_query:
-            tool_keyword_query = req.keyword_query
-            keyword_query = fuzzy_keyword_query(tool_keyword_query)
-            expr += (" and " if expr else "")
-            expr += f"text like '% {keyword_query} %'"
+            if req.vdb_id == "bailii":
+                expr += (" and " if expr else "")
+                expr += " and ".join([
+                    f"TEXT_MATCH(text, '{word}')"
+                    for word in req.keyword_query.split()
+                ])
+            else:
+                tool_keyword_query = req.keyword_query
+                keyword_query = fuzzy_keyword_query(tool_keyword_query)
+                expr += (" and " if expr else "")
+                expr += f"text like '% {keyword_query} %'"
         if req.jurisdictions:
             valid_jurisdics = [j.upper() for j in req.jurisdictions]
             # look up each str in dictionary, append matches as lists
@@ -1048,23 +1057,31 @@ def browse_collection(
             valid_jurisdics = list(set(valid_jurisdics))
             expr += (" and " if expr else "")
             expr += f"ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {valid_jurisdics})"
-        if req.after_date:
-            # convert YYYY-MM-DD to epoch time
-            after_date = datetime.strptime(
-                req.after_date,
-                "%Y-%m-%d",
-            ).replace(tzinfo=UTC)
-            expr += (" and " if expr else "")
-            expr += f"metadata['timestamp']>{after_date.timestamp()}"
-        if req.before_date:
-            # convert YYYY-MM-DD to epoch time
-            before_date = datetime.strptime(
-                req.before_date,
-                "%Y-%m-%d",
-            ).replace(tzinfo=UTC)
-            expr += (" and " if expr else "")
-            expr += f"metadata['timestamp']<{before_date.timestamp()}"
-    q_iter = query_iterator(req.collection, expr, output_fields, 1000)
+        if req.vdb_id == "bailii":
+            if req.after_date:
+                expr += (" and " if expr else "")
+                expr += f"metadata['decision_date']>'{req.after_date}'"
+            if req.before_date:
+                expr += (" and " if expr else "")
+                expr += f"metadata['decision_date']<'{req.before_date}'"
+        else:
+            if req.after_date:
+                # convert YYYY-MM-DD to epoch time
+                after_date = datetime.strptime(
+                    req.after_date,
+                    "%Y-%m-%d",
+                ).replace(tzinfo=UTC)
+                expr += (" and " if expr else "")
+                expr += f"metadata['timestamp']>{after_date.timestamp()}"
+            if req.before_date:
+                # convert YYYY-MM-DD to epoch time
+                before_date = datetime.strptime(
+                    req.before_date,
+                    "%Y-%m-%d",
+                ).replace(tzinfo=UTC)
+                expr += (" and " if expr else "")
+                expr += f"metadata['timestamp']<{before_date.timestamp()}"
+    q_iter = query_iterator(req.vdb_id, expr, output_fields, 1000)
     source_ids = set()
     res = []
     has_next = True
@@ -1081,7 +1098,12 @@ def browse_collection(
                 if len(source_ids) == (page - 1) * per_page:
                     break
     if not has_next:
-        return {"message": "Success", "has_next": False, "results": []}
+        return {
+            "message": "Success",
+            "collection_name": vdb.name,
+            "has_next": False,
+            "results": [],
+        }
     last_id = None
     res = [hit for hit in res if hit["metadata"][entity_id_key] not in source_ids]
     page_results = []
@@ -1103,7 +1125,7 @@ def browse_collection(
     q_iter.close()
     last_id_expr = last_id if isinstance(last_id, int) else f"'{last_id}'"
     expr = f"metadata['{entity_id_key}']=={last_id_expr}"
-    q_iter = query_iterator(req.collection, expr, output_fields, 1000)
+    q_iter = query_iterator(req.vdb_id, expr, output_fields, 1000)
     last_id_chunks = []
     res = q_iter.next()
     while len(res) > 0:
@@ -1117,12 +1139,156 @@ def browse_collection(
     tool_output = {"message": "Success", "result": page_results + last_id_chunks}
     vdb_tool = VDBTool(
         name="test-tool",
-        collection_name=req.collection,
+        vdb_id=req.vdb_id,
         method=VDBMethodEnum.get_source,
     )
     formatted_results = format_vdb_tool_results(tool_output, vdb_tool)
-    return {"message": "Success", "has_next": has_next, "results": formatted_results}
+    return {
+        "message": "Success",
+        "collection_name": vdb.name,
+        "has_next": has_next,
+        "results": formatted_results,
+    }
 
+@api.get("/view_collection/{vdb_id}", tags=["Collection"])
+def view_collection(
+    user: Annotated[User, Depends(get_current_user)],
+    vdb_id: str,
+) -> dict:
+    """Get collection info by vdb_id.
+
+    Parameters
+    ----------
+    user : Annotated[User, Depends
+        The authenticated user
+    vdb_id : str
+        The VDB ID
+
+    Returns
+    -------
+    dict
+        Containing `message` key indicating success,
+        and `data` containing  VDBRequest object on success
+
+    """
+    logger.info("User %s viewing collection %s", user.firebase_uid, vdb_id)
+    vdb = load_vdb(vdb_id)
+    if vdb is None:
+        return {"message": "Failure: collection not found"}
+    return {"message": "Success", "data": vdb}
+
+@api.get("/view_user_collections", tags=["Collection"])
+def view_user_collections(user: Annotated[User, Depends(get_current_user)]) -> dict:
+    """View all collections created by this user.
+
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+
+    Returns
+    -------
+    dict
+        Success message with collections dictionary
+
+    """
+    logger.info("User %s requesting their collections", user.firebase_uid)
+    vdbs = browse_vdbs(user)
+    for vdb_id in vdbs:
+        vdbs[vdb_id]["resource_count"] = count_resources(vdb_id)
+    return {"message": "Success", "data": vdbs}
+
+
+@api.get("/view_public_collections", tags=["Collection"])
+def view_public_collections(
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """View all public collections.
+
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+
+    Returns
+    -------
+    dict
+        Success message with collections dictionary
+
+    """
+    logger.info("User %s requesting public collections", user.firebase_uid)
+    public_vdbs = browse_public_vdbs()
+    for vdb_id in public_vdbs:
+        public_vdbs[vdb_id]["resource_count"] = count_resources(vdb_id)
+    return {"message": "Success", "data": public_vdbs}
+
+
+@api.delete("/delete_collection/{collection_id}", tags=["Collection"])
+def delete_vdb(
+    collection_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Delete a collection.
+
+    Only the creator of the collection can delete it.
+
+    Parameters
+    ----------
+    collection_id : str
+        The ID of the collection to delete
+    data : dict
+        Dict containing the user information
+    user : User
+        The authenticated user making the request
+
+    Returns
+    -------
+    dict
+        Success or failure message
+
+    """
+    msg = "User %s attempting to delete collection %s"
+    logger.info(msg,user.firebase_uid, collection_id)
+    res = delete_collection(collection_id, user)
+    if res:
+        return {"message": "Success", "collection_id": collection_id}
+    return {
+        "message": "Failure: Collection not found or you don't have permission to delete it."}
+
+
+@api.post("/create_collection", tags=["Collection"])
+def create_vdb(
+    req: VDBRequest,
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Create a new collection.
+
+    Parameters
+    ----------
+    req : VDBRequest
+        Containing the collection information (name, description, etc.)
+    user : User
+        The authenticated user making the request
+
+    Returns
+    -------
+    dict
+        Success or failure message with the new collection ID
+
+    """
+    logger.info("User %s creating a new collection: %s", user.firebase_uid, req.name)
+
+    # get a unique ID for the collection
+    vdb_id = get_uuid_id().replace("-", "_")
+    # keep getting until it doesn't start with a number
+    while vdb_id[0].isdigit():
+        vdb_id = get_uuid_id().replace("-", "_")
+
+    coll = create_collection(req, vdb_id)
+
+    if coll is None:
+        return {"message": "Failure: The schema is invalid or the collection already exists."}
+    return {"message": "Success", "vdb_id": vdb_id}
 
 @api.delete("/delete_bot/{bot_id}", tags=["Bot"])
 def delete_bot_endpoint(
