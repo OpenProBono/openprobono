@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 HIVE_TASK_URL = "https://api.thehive.ai/api/v2/task/sync"
-MAX_TOKENS = 1000
+MAX_TOKENS = 10000
 TEMPERATURE = 0
 TOP_P = 0.95
 SEED = 0

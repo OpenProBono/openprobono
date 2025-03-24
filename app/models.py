@@ -497,7 +497,6 @@ class ChatBySession(BaseModel):
 
     message: str
     session_id: str
-    user: User
 
 class InitializeSession(BaseModel):
     """Model class representing an initialize session request.
@@ -510,7 +509,6 @@ class InitializeSession(BaseModel):
     """
 
     bot_id: str
-    user: User
 
 class InitializeSessionChat(BaseModel):
     """Model class representing an initialize session request with a message.

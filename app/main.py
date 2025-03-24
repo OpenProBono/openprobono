@@ -18,6 +18,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from langfuse.decorators import langfuse_context, observe
 
+from app.auth import authenticate, get_current_user
 from app.bot import (
     anthropic_bot,
     anthropic_bot_stream,
@@ -94,7 +95,6 @@ from app.models import (
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
-from app.user_auth import get_current_user
 from app.vdb_tools import format_vdb_tool_results, get_browse_expr, run_vdb_tool
 
 langfuse_context.configure(release=get_git_hash())
@@ -174,6 +174,7 @@ async def process_chat_stream(r: ChatRequest, message: str):
                 "type": "response",
                 "content": error,
             }
+    yield {"type": "done"}
     # trace and store
     if full_response:
         langfuse_context.update_current_trace(output=full_response)
@@ -246,7 +247,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
 
 
 api = FastAPI(
-    dependencies=[Depends(get_current_user)]
+    dependencies=[Depends(authenticate)],
 )
 
 
@@ -298,8 +299,6 @@ def init_session(
             ),
         ]) -> dict:
     """Initialize a new session with a message."""
-    print(request.user)
-
     session_id = get_uuid_id()
     set_session_to_bot(session_id, request.bot_id)
     return {
@@ -444,11 +443,9 @@ def chat_session_stream(
                 },
             ),
         ],
-        user: User = Depends(get_current_user))  -> StreamingResponse:
+        user: Annotated[User, Depends(authenticate)])  -> StreamingResponse:
     """Continue a chat session with a message."""
-    request.user = user
-
-    session_obj = FetchSession(session_id=request.session_id, user=request.user)
+    session_obj = FetchSession(session_id=request.session_id, user=user)
     cr = fetch_session(session_obj)
 
     async def stream_response():
@@ -931,9 +928,9 @@ def delete_session_files(session_id: str, user: User = Depends(get_current_user)
 @api.post("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
     req: OpinionSearchRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(authenticate)],
 ) -> dict:
-    logger.info("User %s searching opinions with request %s", user.firebase_uid, req)
+    logger.info("User %s searching opinions", user.firebase_uid)
     try:
         results = opinion_search(req)
     except Exception as error:
@@ -946,11 +943,13 @@ def search_opinions(
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(authenticate)],
 ) -> dict:
+    logger.info("User %s adding opinion summary", user.firebase_uid)
     try:
         summary = add_opinion_summary(opinion_id)
     except Exception as error:
+        logger.exception("Error adding opinion summary")
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
@@ -958,23 +957,25 @@ def get_opinion_summary(
 
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
 def opinion_feedback(
-        request: Annotated[
-            OpinionFeedback,
-            Body(
-                openapi_examples={
-                    "submit opinion feedback": {
-                        "summary": "submit opinion feedback",
-                        "description": "Returns: {message: 'Success'} or {message: 'Failure'}",
-                        "value": {
-                            "feedback_text": "some feedback text",
-                            "opinion": "some opinion id",
-                        },
+    request: Annotated[
+        OpinionFeedback,
+        Body(
+            openapi_examples={
+                "submit opinion feedback": {
+                    "summary": "submit opinion feedback",
+                    "description": "Returns: {message: 'Success'} or {message: 'Failure'}",
+                    "value": {
+                        "feedback_text": "some feedback text",
+                        "opinion": "some opinion id",
                     },
                 },
-            ),
-        ],
-        user: User = Depends(get_current_user))  -> dict:
+            },
+        ),
+    ],
+    user: Annotated[User, Depends(authenticate)],
+)  -> dict:
     """Submit feedback to a specific session."""
+    logger.info("User %s adding feedback to opinion %s", user.firebase_uid, request.opinion_id)
     request.user = user
     return {"message": "Success" if store_opinion_feedback(request) else "Failure"}
 
@@ -994,7 +995,7 @@ def search_collection(
 @api.get("/resource_count/{collection_name}", tags=["Resource Search"])
 def resource_count(
     collection_name: str,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(authenticate)],
 ) -> dict:
     msg = "User %s counting resources in collection %s"
     logger.info(msg, user.firebase_uid, collection_name)
@@ -1004,7 +1005,7 @@ def resource_count(
 @api.post("/browse_collection", tags=["Resource Search"])
 def browse_collection(
     req: VDBManageRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(authenticate)],
     page: int = 1,
     per_page: int = 200,
 ) -> dict:
