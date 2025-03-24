@@ -9,14 +9,12 @@ from fastapi import (
     Body,
     Depends,
     FastAPI,
-    HTTPException,
-    Security,
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
-from fastapi.security import APIKeyHeader
 from langfuse.decorators import langfuse_context, observe
 
+from app.auth import authenticate, get_current_user
 from app.bot import (
     anthropic_bot,
     anthropic_bot_stream,
@@ -39,7 +37,6 @@ from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
     SESSION_DATA,
     count_resources,
-    crawl_upload_site,
     delete_expr,
     file_upload,
     get_expr,
@@ -65,7 +62,6 @@ from app.models import (
     get_uuid_id,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
-from app.user_auth import get_current_user
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 
 langfuse_context.configure(release=get_git_hash())
@@ -208,7 +204,7 @@ def process_chat(r: ChatRequest, message: str) -> dict:
 
 
 api = FastAPI(
-    dependencies=[Depends(get_current_user)]
+    dependencies=[Depends(authenticate)],
 )
 
 
@@ -846,46 +842,54 @@ def delete_session_files(session_id: str, user: User = Depends(get_current_user)
 @api.post("/search_opinions", tags=["Opinion Search"])
 def search_opinions(
     req: OpinionSearchRequest,
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(authenticate)],
 ) -> dict:
+    logger.info("User %s searching opinions", user.firebase_uid)
     try:
         results = opinion_search(req)
     except Exception as error:
+        logger.exception("Error searching opinions")
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "results": results}
 
+
 @api.get("/get_opinion_summary", tags=["Opinion Search"])
 def get_opinion_summary(
     opinion_id: int,
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(authenticate)],
 ) -> dict:
+    logger.info("User %s adding opinion summary", user.firebase_uid)
     try:
         summary = add_opinion_summary(opinion_id)
     except Exception as error:
+        logger.exception("Error adding opinion summary")
         return {"message": "Failure: Internal Error: " + str(error)}
     else:
         return {"message": "Success", "result": summary}
 
+
 @api.post(path="/opinion_feedback", tags=["Opinion Search"])
 def opinion_feedback(
-        request: Annotated[
-            OpinionFeedback,
-            Body(
-                openapi_examples={
-                    "submit opinion feedback": {
-                        "summary": "submit opinion feedback",
-                        "description": "Returns: {message: 'Success'} or {message: 'Failure'}",
-                        "value": {
-                            "feedback_text": "some feedback text",
-                            "opinion": "some opinion id",
-                        },
+    request: Annotated[
+        OpinionFeedback,
+        Body(
+            openapi_examples={
+                "submit opinion feedback": {
+                    "summary": "submit opinion feedback",
+                    "description": "Returns: {message: 'Success'} or {message: 'Failure'}",
+                    "value": {
+                        "feedback_text": "some feedback text",
+                        "opinion": "some opinion id",
                     },
                 },
-            ),
-        ],
-        user: User = Depends(get_current_user))  -> dict:
+            },
+        ),
+    ],
+    user: Annotated[User, Depends(authenticate)],
+)  -> dict:
     """Submit feedback to a specific session."""
+    logger.info("User %s adding feedback to opinion %s", user.firebase_uid, request.opinion_id)
     request.user = user
     return {"message": "Success" if store_opinion_feedback(request) else "Failure"}
 
@@ -903,16 +907,18 @@ def search_collection(
 @api.get("/resource_count/{collection_name}", tags=["Resource Search"])
 def get_resource_count(
     collection_name: str,
+    user: Annotated[User, Depends(authenticate)],
 ) -> dict:
+    logger.info("User %s counting resources in collection %s", user.firebase_uid, collection_name)
     return {"message": "Success", "resource_count": count_resources(collection_name)}
 
 
 @api.post("/browse_collection", tags=["Resource Search"])
 def browse_collection(
-        req: CollectionManageRequest,
-        page: int = 1,
-        per_page: int = 200,
-        user: User = Depends(get_current_user)
+    req: CollectionManageRequest,
+    user: Annotated[User, Depends(authenticate)],
+    page: int = 1,
+    per_page: int = 200,
 ):
     """Browse a collection."""
     from datetime import UTC, datetime
@@ -920,6 +926,8 @@ def browse_collection(
     from app.courtlistener import courtlistener_collection, jurisdiction_codes
     from app.milvusdb import fuzzy_keyword_query
     from app.models import VDBMethodEnum
+
+    logger.info("User %s browsing collection %s", user.firebase_uid, req.collection)
 
     expr = ""
     output_fields = ["text", *metadata_fields(req.collection)]
