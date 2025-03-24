@@ -1000,6 +1000,8 @@ def browse_collection(
         fields = ["metadata"]
     elif vdb.metadata_format == MilvusMetadataEnum.field:
         fields = [f.name for f in vdb.extra_fields]
+    else:
+        fields = []
     output_fields = ["text", *fields]
     if req.vdb_id in {"search_collection_vj1", "search_collection_gemini", "bailii"}:
         entity_id_key = "url"
@@ -1081,7 +1083,16 @@ def browse_collection(
                 ).replace(tzinfo=UTC)
                 expr += (" and " if expr else "")
                 expr += f"metadata['timestamp']<{before_date.timestamp()}"
-    q_iter = query_iterator(req.vdb_id, expr, output_fields, 1000)
+    try:
+        q_iter = query_iterator(req.vdb_id, expr, output_fields, 1000)
+    except:
+        logger.exception("Error getting query iterator for collection %s", req.vdb_id)
+        return {
+            "message": "Success",
+            "collection_name": vdb.name,
+            "has_next": False,
+            "results": [],
+        }
     source_ids = set()
     res = []
     has_next = True
