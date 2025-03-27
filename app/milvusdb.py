@@ -200,6 +200,9 @@ def create_collection(vdb: VDBRequest, vdb_id: str) -> Collection | None:
     auto_index["metric_type"] = "BM25"
     # create index for full text search
     coll.create_index(field_name="sparse", index_params=auto_index, metric_type="BM25")
+    # load collection into memory
+    # TODO: lazy load collection?
+    coll.load()
 
     # save params in firebase
     db_result = store_vdb(vdb, vdb_id)
@@ -707,6 +710,172 @@ def crawl_upload_site(
 
 
 @observe(capture_output=False)
+def upload_resource(
+    collection_name: str,
+    resource_type: str,
+    resource: dict | UploadFile,
+    session_id: str | None = None,
+    search_tool: SearchTool | None = None,
+    user_summary: str | None = None,
+    max_chars: int = 10000,
+    new_after_n_chars: int = 2500,
+    overlap: int = 500,
+) -> dict[str, str]:
+    """Upload a resource (URL or file) to Milvus.
+
+    Performs scraping, chunking, summarizing, embedding, and uploading processes.
+
+    Parameters
+    ----------
+    collection_name : str
+        Where the chunks will be uploaded.
+    resource_type : str
+        Type of resource - 'url' or 'file'.
+    resource : dict | UploadFile
+        The resource to upload.
+        For URLs, a search result dict; for files, an UploadFile.
+    session_id : str | None, optional
+        The session associated with the resource, by default None.
+    search_tool : SearchTool | None, optional
+        The search tool being used (required for URLs), by default None.
+    user_summary : str | None, optional
+        A summary of the resource written by the user, by default None.
+    max_chars : int, optional
+        Maximum characters per chunk, by default 10000
+    new_after_n_chars : int, optional
+        Start a new chunk after this many characters, by default 2500
+    overlap : int, optional
+        Number of characters to overlap between chunks, by default 500
+
+    Returns
+    -------
+    dict[str, str]
+        With a `message` indicating success or failure
+
+    """
+    # Process based on resource type
+    if resource_type == "url":
+        if not isinstance(resource, dict) or not search_tool:
+            error = "URL uploads require search_result dict and search_tool parameters"
+            logger.error(error)
+            return {"message": error}
+
+        search_result = resource
+        url = search_result["link"]
+        elements = scrape(url)
+        if len(elements) == 0:
+            error = f"Failure: no elements found at {url}"
+            logger.error(error)
+            return {"message": error}
+
+        texts, metadatas = chunk_elements_by_title(
+            elements,
+            max_chars,
+            new_after_n_chars,
+            overlap,
+        )
+
+        # Process vectors, summaries and additional metadata
+        # TODO: vectors, ai summary, and jurisdictions can be done in parallel,
+        # unless jurisdictions are low confidence, then they need a summary
+        vdb = load_vdb(collection_name)
+        vectors = embed_strs(texts, vdb.encoder)
+        method = search_tool.summary_method
+        ai_summary = summarize(texts, method, search_tool.chat_model)
+        jurisdictions = url_jurisdictions(url, summary=ai_summary)
+
+        # Add URL-specific metadata
+        for metadata in metadatas:
+            metadata["timestamp"] = time.time()
+            metadata["url"] = url
+            metadata["ai_summary"] = ai_summary
+            metadata["bot_and_tool_id"] = [search_tool.bot_id + search_tool.name]
+            metadata["jurisdictions"] = [j["name"] for j in jurisdictions]
+            metadata["title"] = search_result["title"]
+            metadata["source"] = search_result["source"]
+
+            # Optional metadata from search result
+            if "favicon" in search_result:
+                metadata["favicon"] = search_result["favicon"]
+
+            # Add date-related metadata if present
+            for key, value in search_result.items():
+                if "date" in key.lower():
+                    metadata[key] = value
+
+            # Add session ID if provided
+            if session_id:
+                metadata["session_id"] = session_id
+
+            # Add user summary if provided
+            if user_summary:
+                metadata["user_summary"] = user_summary
+
+    elif resource_type == "file":
+
+        logger.info(
+            "Uploading file %s to collection %s",
+            resource.filename,
+            collection_name,
+        )
+
+        # Tracing
+        langfuse_context.update_current_trace(
+            input=resource.filename,
+            session_id=session_id,
+        )
+
+        # Extract and process text
+        elements = extract_elements(resource.file, resource.filename)
+        texts, metadatas = chunk_elements_by_title(
+            elements,
+            max_chars,
+            new_after_n_chars,
+            overlap,
+        )
+
+        # Get vector embeddings
+        vdb = load_vdb(collection_name)
+        vectors = embed_strs(texts, vdb.encoder)
+
+        # Generate AI summary
+        summary_method = SummaryMethodEnum.stuff_reduce
+        chat_model = ChatModelParams()
+        if search_tool:
+            summary_method = search_tool.summary_method
+            chat_model = search_tool.chat_model
+
+        ai_summary = summarize(texts, summary_method, chat_model)
+
+        # Add file-specific metadata
+        for metadata in metadatas:
+            metadata["timestamp"] = time.time()
+            metadata["ai_summary"] = ai_summary
+            metadata["source"] = resource.filename
+
+            # Add session ID if provided
+            if session_id:
+                metadata["session_id"] = session_id
+
+            # Add user summary if provided
+            if user_summary:
+                metadata["user_summary"] = user_summary
+
+    else:
+        error = f"Unsupported resource type: {resource_type}. Use 'url' or 'file'"
+        logger.error(error)
+        return {"message": error}
+
+    # Create final data structure and upload to Milvus
+    data = [{
+        "vector": vectors[i],
+        "metadata": metadatas[i],
+        "text": texts[i],
+    } for i in range(len(texts))]
+    return upload_data(collection_name, data)
+
+
+@observe(capture_output=False)
 def upload_site(
     collection_name: str,
     search_result: dict,
@@ -738,46 +907,15 @@ def upload_site(
         With a `message` indicating success or failure
 
     """
-    url = search_result["link"]
-    elements = scrape(url)
-    if len(elements) == 0:
-        error = f"Failure: no elements found at {url}"
-        logger.error(error)
-        return {"message": error}
-    texts, metadatas = chunk_elements_by_title(
-        elements,
-        max_chars,
-        new_after_n_chars,
-        overlap,
+    return upload_resource(
+        collection_name=collection_name,
+        resource_type="url",
+        resource=search_result,
+        search_tool=search_tool,
+        max_chars=max_chars,
+        new_after_n_chars=new_after_n_chars,
+        overlap=overlap,
     )
-    # TODO: vectors, ai summary, and jurisdictions can be done in parallel,
-    # unless jurisdictions are low confidence, then they need a summary
-    vdb = load_vdb(collection_name)
-    vectors = embed_strs(texts, vdb.encoder)
-    ai_summary = summarize(texts, search_tool.summary_method, search_tool.chat_model)
-    jurisdictions = url_jurisdictions(url, summary=ai_summary)
-    bot_id = search_tool.bot_id
-    tool_name = search_tool.name
-    for metadata in metadatas:
-        metadata["timestamp"] = time.time()
-        metadata["url"] = url
-        metadata["ai_summary"] = ai_summary
-        metadata["bot_and_tool_id"] = [bot_id + tool_name]
-        metadata["jurisdictions"] = [j["name"] for j in jurisdictions]
-        metadata["title"] = search_result["title"]
-        metadata["source"] = search_result["source"]
-        if "favicon" in search_result:
-            metadata["favicon"] = search_result["favicon"]
-        # if search_result contains any keys with the word "date" in them, add those
-        for key, value in search_result.items():
-            if "date" in key.lower():
-                metadata[key] = value
-    data = [{
-        "vector": vectors[i],
-        "metadata": metadatas[i],
-        "text": texts[i],
-    } for i in range(len(texts))]
-    return upload_data(collection_name, data)
 
 
 def session_upload_ocr(
@@ -832,9 +970,9 @@ def session_upload_ocr(
 @observe(capture_input=False)
 def file_upload(
     file: UploadFile,
-    session_id: str,
+    collection_name: str,
+    session_id: str | None = None,
     summary: str | None = None,
-    collection_name: str = SESSION_DATA,
 ) -> dict[str, str]:
     """Perform an unstructured partition, chunk_by_title, and upload a file to Milvus.
 
@@ -842,12 +980,12 @@ def file_upload(
     ----------
     file : UploadFile
         The file to upload.
-    session_id : str
-        The session associated with the file.
+    collection_name : str
+        The collection where the file will be stored.
+    session_id : str, optional
+        The session associated with the file, if any. By default None.
     summary: str, optional
         A summary of the file written by the user, by default None.
-    collection_name : str, optional
-        The collection where the file will be stored, by default SessionData.
 
     Returns
     -------
@@ -855,25 +993,10 @@ def file_upload(
         With a `message` indicating success or failure
 
     """
-    logger.info("Uploading file %s to session %s", file.filename, session_id)
-    # tracing
-    langfuse_context.update_current_trace(input=file.filename, session_id=session_id)
-    # extract text
-    elements = extract_elements(file.file, file.filename)
-    # chunk text
-    texts, metadatas = chunk_elements_by_title(elements)
-    vdb = load_vdb(collection_name)
-    vectors = embed_strs(texts, vdb.encoder)
-    # add session id to metadata
-    for i in range(len(metadatas)):
-        metadatas[i]["session_id"] = session_id
-        if summary:
-            metadatas[i]["user_summary"] = summary
-        metadatas[i]["timestamp"] = time.time()
-    # upload
-    data = [{
-        "vector": vectors[i],
-        "metadata": metadatas[i],
-        "text": texts[i],
-    } for i in range(len(texts))]
-    return upload_data(collection_name, data)
+    return upload_resource(
+        collection_name=collection_name,
+        resource_type="file",
+        resource=file,
+        session_id=session_id,
+        user_summary=summary,
+    )

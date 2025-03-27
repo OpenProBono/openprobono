@@ -5,14 +5,15 @@ import asyncio
 import json
 import re
 from datetime import UTC, datetime
-from typing import Annotated, Optional, List
+from typing import Annotated, List, Optional
 
 from fastapi import (
+    BackgroundTasks,
     Body,
     Depends,
     FastAPI,
+    File,
     UploadFile,
-    BackgroundTasks,
 )
 from fastapi.responses import StreamingResponse
 from langfuse.decorators import langfuse_context, observe
@@ -56,39 +57,39 @@ from app.milvusdb import (
     create_collection,
     delete_collection,
     delete_expr,
-    file_upload,
     get_expr,
     query_iterator,
     session_upload_ocr,
+    upload_resource,
 )
 from app.models import (
+    AnthropicModelEnum,
     BotRequest,
     ChatBySession,
     ChatRequest,
     EngineEnum,
+    EvalDataset,
+    EvalSession,
     FetchSession,
     FetchSessions,
+    GoogleModelEnum,
+    HiveModelEnum,
     InitializeSession,
     InitializeSessionChat,
+    InputGeneratorRequest,
+    LabeledEvalDataset,
+    LabeledEvalSession,
+    LabelingAspect,
+    OpenAIModelEnum,
     OpinionFeedback,
     OpinionSearchRequest,
     SessionFeedback,
     User,
-    VDBRequest,
     VDBManageRequest,
+    VDBRequest,
     VDBSearchRequest,
     VDBTool,
     get_uuid_id,
-    EvalDataset,
-    EvalSession,
-    LabeledEvalDataset,
-    LabeledEvalSession,
-    LabelingAspect,
-    InputGeneratorRequest,
-    OpenAIModelEnum,
-    AnthropicModelEnum,
-    GoogleModelEnum,
-    HiveModelEnum,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
 from app.user_auth import get_current_user
@@ -688,7 +689,13 @@ def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
     """
     logger.info("User %s uploading file", user.firebase_uid)
     cr = fetch_session(FetchSession(session_id=session_id, user=user))
-    result = file_upload(file, session_id, summary)
+    result = upload_resource(
+        collection_name=SESSION_DATA,
+        resource_type="file",
+        resource=file,
+        session_id=session_id,
+        user_summary=summary,
+    )
     if result["message"] == "Success":
         cr.file_count += 1
         cr.history.append({"role": "user", "content": f"file:{file.filename}"})
@@ -736,7 +743,13 @@ def upload_files(
     fail_occurred = False
     success_occurred = False
     for i, file in enumerate(files):
-        result = file_upload(file, session_id, summaries[i])
+        result = upload_resource(
+            collection_name=SESSION_DATA,
+            resource_type="file",
+            resource=file,
+            session_id=session_id,
+            user_summary=summaries[i],
+        )
         if result["message"].startswith("Failure"):
             fail_occurred = True
             results.append({
@@ -793,11 +806,7 @@ def delete_file(filename: str, session_id: str, user: User = Depends(get_current
         f"metadata['filename']=='{filename}' and "
         f"metadata['session_id']=='{session_id}'"
     )
-    result = delete_expr(
-        SESSION_DATA,
-        expr,
-        session_id,
-    )
+    result = delete_expr(SESSION_DATA, expr, session_id)
     if result["delete_count"] == 0:
         logger.warning("session %s file %s not found", session_id, filename)
     elif result["message"] == "Success":
@@ -1234,6 +1243,201 @@ def view_public_collections(
     return {"message": "Success", "data": public_vdbs}
 
 
+@api.post("/upload_resources", tags=["Upload"])
+def upload_resources(
+    user: Annotated[User, Depends(get_current_user)],
+    resource_type: str,
+    target_id: str,
+    files: Annotated[list[UploadFile], File()] = ...,
+    urls: list[str] | None = None,
+    summaries: list[str] | None = None,
+) -> dict:
+    """Upload resources (files or URLs) to a collection or session.
+
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+    resource_type : str
+        Type of resources being added, either "file" or "url"
+    target_id : str
+        Collection ID or session ID
+    files : list[UploadFile], optional
+        Files to upload, by default None
+    urls : list[str], optional
+        URLs to scrape and add, by default None
+    summaries : list[str], optional
+        Summaries provided by the user for each resource, by default None
+
+    """
+    logger.info("User %s uploading resources to %s", user.firebase_uid, target_id)
+
+    error_msg = None
+    if resource_type not in ["file", "url"]:
+        error_msg = "Failure: resource_type must be 'file' or 'url'"
+    if resource_type == "file":
+        if not files:
+            error_msg = "Failure: no files provided"
+        if summaries and len(summaries) != len(files):
+            error_msg = (
+                f"Failure: did not find equal numbers of files and summaries, "
+                f"instead found {len(files)} files and {len(summaries)} summaries."
+            )
+    else: # url
+        if not urls:
+            error_msg = "Failure: no URLs provided"
+        if summaries and len(summaries) != len(urls):
+            error_msg = (
+                f"Failure: did not find equal numbers of URLs and summaries, "
+                f"instead found {len(urls)} URLs and {len(summaries)} summaries."
+            )
+    if error_msg:
+        logger.error(error_msg)
+        return {"message": error_msg}
+
+    is_collection = target_id.startswith("col_")
+
+    if is_collection:
+        vdb = load_vdb(target_id)
+        if vdb is None:
+            return {"message": f"Failure: collection with ID {target_id} not found"}
+    else:
+        session = fetch_session(FetchSession(session_id=target_id, user=None))
+
+    results = []
+    fail_occurred = False
+
+    if resource_type == "file":
+        for i, file in enumerate(files):
+            result = upload_resource(
+                collection_name=target_id,
+                resource_type="file",
+                resource=file,
+                session_id=None if is_collection else target_id,
+                user_summary=summaries[i] if summaries else None,
+            )
+            if result["message"] != "Success":
+                fail_occurred = True
+            elif not is_collection:
+                session.file_count += 1
+                session.history.append({"role": "user", "content": f"file:{file.filename}"})
+            results.append({"id": file.filename, "message": result["message"], "insert_count": result.get("insert_count")})
+
+        if not is_collection:
+            store_conversation_history(session)
+
+    elif resource_type == "url":
+        for i, url in enumerate(urls):
+            try:
+                # For URLs, we need to create a search result like object
+                search_result = {
+                    "link": url,
+                    "title": url,  # Use URL as title if we don't have one
+                    "source": "user_upload",
+                }
+
+                # Create a dummy search tool with basic parameters
+                # This is needed for the upload_resource function
+                from app.models import SearchTool
+                dummy_search_tool = SearchTool(name="url_upload", prompt="")
+
+                result = upload_resource(
+                    collection_name=target_id,
+                    resource_type="url",
+                    resource=search_result,
+                    session_id=None if is_collection else target_id,
+                    search_tool=dummy_search_tool,
+                    user_summary=summaries[i] if summaries else None,
+                )
+
+                if result["message"] != "Success":
+                    fail_occurred = True
+                results.append({"id": url, "message": result["message"], "insert_count": result.get("insert_count")})
+            except Exception as e:
+                logger.exception("Failed to upload resource: %s", url)
+                fail_occurred = True
+                results.append({"id": url, "message": f"Failure: {e!s}"})
+
+    return {"message": "Failure: not all resources were added" if fail_occurred else "Success", "results": results}
+
+
+@api.post("/remove_resources", tags=["Collection"])
+def remove_resources(
+    resource_ids: list[str],
+    resource_type: str,
+    vdb_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Remove resources (files or URLs) from a collection.
+
+    Parameters
+    ----------
+    resource_ids : List[str]
+        IDs of resources to delete (filenames or URLs)
+    resource_type : str
+        Type of resources being removed, either "file" or "url"
+    vdb_id : str
+        The ID of the collection to remove resources from
+    user : User
+        The authenticated user
+
+    Returns
+    -------
+    dict
+        Success message with number of resources deleted
+    """
+    logger.info("User %s removing resources from collection %s", user.firebase_uid, vdb_id)
+    
+    if resource_type not in ["file", "url"]:
+        return {"message": "Failure: resource_type must be 'file' or 'url'"}
+    
+    # Check if collection exists and user has access
+    vdb = load_vdb(vdb_id)
+    if vdb is None:
+        return {"message": f"Failure: collection with ID {vdb_id} not found"}
+    
+    results = []
+    fail_occurred = False
+    
+    for resource_id in resource_ids:
+        try:
+            # Create appropriate expression based on resource type
+            if resource_type == "file":
+                expr = f"metadata['filename']=='{resource_id}'"
+            else:  # url
+                expr = f"metadata['url']=='{resource_id}'"
+            
+            # Delete matching resources
+            result = delete_expr(vdb_id, expr)
+            
+            if result["delete_count"] == 0:
+                logger.warning("collection %s resource %s not found", vdb_id, resource_id)
+                results.append({
+                    "id": resource_id,
+                    "message": "Warning: resource not found",
+                    "delete_count": 0
+                })
+            else:
+                results.append({
+                    "id": resource_id,
+                    "message": "Success",
+                    "delete_count": result["delete_count"]
+                })
+        except Exception as e:
+            fail_occurred = True
+            results.append({
+                "id": resource_id,
+                "message": f"Failure: {str(e)}",
+                "delete_count": 0
+            })
+    
+    message = "Success"
+    if fail_occurred:
+        message = "Failure: not all resources were deleted successfully"
+    
+    return {"message": message, "results": results}
+
+
 @api.delete("/delete_collection/{collection_id}", tags=["Collection"])
 def delete_vdb(
     collection_id: str,
@@ -1290,10 +1494,7 @@ def create_vdb(
     logger.info("User %s creating a new collection: %s", user.firebase_uid, req.name)
 
     # get a unique ID for the collection
-    vdb_id = get_uuid_id().replace("-", "_")
-    # keep getting until it doesn't start with a number
-    while vdb_id[0].isdigit():
-        vdb_id = get_uuid_id().replace("-", "_")
+    vdb_id = "col_" + get_uuid_id().replace("-", "_")
 
     coll = create_collection(req, vdb_id)
 
