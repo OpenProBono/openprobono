@@ -242,7 +242,6 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
         The list of VDBTools
 
     """
-    toolset = []
     # create source lookup tools for each search tool
     search_src_tools = []
     for t in bot.search_tools:
@@ -263,7 +262,13 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
     query_src_tools = []
     for t in bot.vdb_tools:
         t.bot_id = bot_id
-        src_tool = t
+        src_tool = VDBTool(
+            name=t.name + "-get-source",
+            vdb_id=t.vdb_id,
+            method=VDBMethodEnum.get_source,
+            bot_id=bot_id,
+            prompt=VDB_SOURCE_PROMPT,
+        )
         src_tool.method = VDBMethodEnum.get_source
         src_tool.prompt = VDB_SOURCE_PROMPT
         query_src_tools.append(src_tool)
@@ -295,11 +300,12 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
                 session_id=session_id,
             ),
         ]
+    toolset = []
     match bot.chat_model.engine:
         case EngineEnum.openai:
-            toolset += [openai_tool(t) for t in bot.vdb_tools]
+            toolset = [openai_tool(t) for t in bot.vdb_tools]
         case EngineEnum.anthropic:
-            toolset += [anthropic_tool(t) for t in bot.vdb_tools]
+            toolset = [anthropic_tool(t) for t in bot.vdb_tools]
     return toolset
 
 
