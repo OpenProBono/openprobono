@@ -20,6 +20,7 @@ from app.models import (
     FetchSession,
     OpinionSearchRequest,
     SearchMethodEnum,
+    VDBManageRequest,
     VDBMethodEnum,
     VDBTool,
 )
@@ -362,21 +363,119 @@ def format_vdb_tool_results(tool_output: dict, tool: VDBTool) -> list[dict]:
             # pks need to be strings to handle in JavaScript front end
             hit["pk"] = str(hit["pk" if "pk" in hit else "id"])
 
-    if tool.vdb_id == courtlistener_collection:
-        entity_type = "opinion"
-        entity_id_key = "id"
-    elif tool.vdb_id in {search_collection, "search_collection_gemini", "bailii"}:
-        entity_type = "url"
-        entity_id_key = "url"
-    elif tool.vdb_id == SESSION_DATA:
-        entity_type = "file"
-        entity_id_key = "filename"
-    else:
-        entity_type = "unknown"
-        entity_id_key = "unknown"
+    entity_id_keys, entity_types = [], []
+
+    for hit in entities:
+        if tool.vdb_id == courtlistener_collection:
+            entity_types.append("opinion")
+            entity_id_keys.append("id")
+        elif "url" in hit["metadata"]:
+            entity_id_keys.append("url")
+            entity_types.append("url")
+        elif "id" in hit["metadata"]:
+            entity_types.append("file")
+            entity_id_keys.append("id")
+        else:
+            entity_types.append("unknown")
+            entity_id_keys.append("unknown")
 
     return [{
-        "id": "unknown" if entity_type == "unknown" else hit["metadata"][entity_id_key],
-        "type": entity_type,
-        "entity": hit,
-    } for hit in entities]
+        "id": entities[i]["metadata"][entity_id_keys[i]],
+        "type": entity_types[i],
+        "entity": entities[i],
+    } for i in range(len(entities))]
+
+
+def get_browse_expr(req: VDBManageRequest) -> str:
+    """Get the filter expression to browse a collection based on a request.
+
+    Parameters
+    ----------
+    req : VDBManageRequest
+        The request object
+
+    Returns
+    -------
+    str
+        The filter expression
+
+    """
+    expr = ""
+    if req.vdb_id == courtlistener_collection:
+        if req.source:
+            expr = f"metadata['case_name'] like '%{req.source}%'"
+        if req.keyword_query:
+            expr += (" and " if expr else "")
+            expr += " and ".join([
+                f"TEXT_MATCH(text, '{word}')"
+                for word in req.keyword_query.split()
+            ])
+        if req.jurisdictions:
+            valid_jurisdics = []
+            # look up each str in dictionary, append matches as lists
+            for juris in req.jurisdictions:
+                if juris.lower() in jurisdiction_codes:
+                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+            # clear duplicate federal district jurisdictions if they exist
+            valid_jurisdics = list(set(valid_jurisdics))
+            expr += (" and " if expr else "")
+            expr += f"metadata['court_id'] in {valid_jurisdics}"
+        if req.after_date:
+            expr += (" and " if expr else "")
+            expr += f"metadata['date_filed']>'{req.after_date}'"
+        if req.before_date:
+            expr += (" and " if expr else "")
+            expr += f"metadata['date_filed']<'{req.before_date}'"
+    else:
+        if req.source:
+            expr = (
+                f"metadata['id'] like '%{req.source}%' or "
+                f"metadata['url'] like '%{req.source}%'"
+            )
+        if req.keyword_query:
+            if req.vdb_id == "bailii":
+                expr += (" and " if expr else "")
+                expr += " and ".join([
+                    f"TEXT_MATCH(text, '{word}')"
+                    for word in req.keyword_query.split()
+                ])
+            else:
+                tool_keyword_query = req.keyword_query
+                keyword_query = fuzzy_keyword_query(tool_keyword_query)
+                expr += (" and " if expr else "")
+                expr += f"text like '% {keyword_query} %'"
+        if req.jurisdictions:
+            valid_jurisdics = [j.upper() for j in req.jurisdictions]
+            # look up each str in dictionary, append matches as lists
+            for juris in req.jurisdictions:
+                if juris.lower() in jurisdiction_codes:
+                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
+            # clear duplicate federal district jurisdictions if they exist
+            valid_jurisdics = list(set(valid_jurisdics))
+            expr += (" and " if expr else "")
+            expr += f"ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {valid_jurisdics})"
+        if req.vdb_id == "bailii":
+            if req.after_date:
+                expr += (" and " if expr else "")
+                expr += f"metadata['decision_date']>'{req.after_date}'"
+            if req.before_date:
+                expr += (" and " if expr else "")
+                expr += f"metadata['decision_date']<'{req.before_date}'"
+        else:
+            if req.after_date:
+                # convert YYYY-MM-DD to epoch time
+                after_date = datetime.strptime(
+                    req.after_date,
+                    "%Y-%m-%d",
+                ).replace(tzinfo=UTC)
+                expr += (" and " if expr else "")
+                expr += f"metadata['timestamp']>{after_date.timestamp()}"
+            if req.before_date:
+                # convert YYYY-MM-DD to epoch time
+                before_date = datetime.strptime(
+                    req.before_date,
+                    "%Y-%m-%d",
+                ).replace(tzinfo=UTC)
+                expr += (" and " if expr else "")
+                expr += f"metadata['timestamp']<{before_date.timestamp()}"
+    return expr

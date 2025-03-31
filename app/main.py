@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import UTC, datetime
 from typing import Annotated, List, Optional
 
 from fastapi import (
@@ -13,6 +12,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
@@ -93,7 +93,7 @@ from app.models import (
 )
 from app.opinion_search import add_opinion_summary, opinion_search
 from app.user_auth import get_current_user
-from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
+from app.vdb_tools import format_vdb_tool_results, get_browse_expr, run_vdb_tool
 
 langfuse_context.configure(release=get_git_hash())
 logger = setup_logger()
@@ -996,14 +996,29 @@ def browse_collection(
     user: Annotated[User, Depends(get_current_user)],
     page: int = 1,
     per_page: int = 200,
-):
-    """Browse a collection."""
-    from app.courtlistener import courtlistener_collection, jurisdiction_codes
-    from app.milvusdb import fuzzy_keyword_query
+) -> dict:
+    """Browse a collection.
+
+    Parameters
+    ----------
+    req : VDBManageRequest
+        VDBManageRequest object containing the collection name and other parameters.
+    user : Annotated[User, Depends(get_current_user)]
+        The current authenticated user.
+    page : int, optional
+        The page number to retrieve, by default 1
+    per_page : int, optional
+        The number of items to return per page, by default 200
+
+    Returns
+    -------
+    dict
+        A dictionary containing the message and results of the browse operation.
+
+    """
     from app.models import MilvusMetadataEnum, VDBMethodEnum
 
     logger.info("User %s browsing collection with request %s", user.firebase_uid, req)
-    expr = ""
     vdb = load_vdb(req.vdb_id)
     if vdb.metadata_format == MilvusMetadataEnum.json:
         fields = ["metadata"]
@@ -1012,86 +1027,7 @@ def browse_collection(
     else:
         fields = []
     output_fields = ["text", *fields]
-    if req.vdb_id in {"search_collection_vj1", "search_collection_gemini", "bailii"}:
-        entity_id_key = "url"
-    elif req.vdb_id == SESSION_DATA:
-        entity_id_key = "filename"
-    else:
-        entity_id_key = "id"
-    if req.vdb_id == courtlistener_collection:
-        if req.source:
-            expr = f"metadata['case_name'] like '%{req.source}%'"
-        if req.keyword_query:
-            expr += (" and " if expr else "")
-            expr += " and ".join([
-                f"TEXT_MATCH(text, '{word}')"
-                for word in req.keyword_query.split()
-            ])
-        if req.jurisdictions:
-            valid_jurisdics = []
-            # look up each str in dictionary, append matches as lists
-            for juris in req.jurisdictions:
-                if juris.lower() in jurisdiction_codes:
-                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
-            # clear duplicate federal district jurisdictions if they exist
-            valid_jurisdics = list(set(valid_jurisdics))
-            expr += (" and " if expr else "")
-            expr += f"metadata['court_id'] in {valid_jurisdics}"
-        if req.after_date:
-            expr += (" and " if expr else "")
-            expr += f"metadata['date_filed']>'{req.after_date}'"
-        if req.before_date:
-            expr += (" and " if expr else "")
-            expr += f"metadata['date_filed']<'{req.before_date}'"
-    else:
-        if req.source:
-            expr = f"metadata['{entity_id_key}'] like '%{req.source}%'"
-        if req.keyword_query:
-            if req.vdb_id == "bailii":
-                expr += (" and " if expr else "")
-                expr += " and ".join([
-                    f"TEXT_MATCH(text, '{word}')"
-                    for word in req.keyword_query.split()
-                ])
-            else:
-                tool_keyword_query = req.keyword_query
-                keyword_query = fuzzy_keyword_query(tool_keyword_query)
-                expr += (" and " if expr else "")
-                expr += f"text like '% {keyword_query} %'"
-        if req.jurisdictions:
-            valid_jurisdics = [j.upper() for j in req.jurisdictions]
-            # look up each str in dictionary, append matches as lists
-            for juris in req.jurisdictions:
-                if juris.lower() in jurisdiction_codes:
-                    valid_jurisdics += jurisdiction_codes[juris.lower()].split(" ")
-            # clear duplicate federal district jurisdictions if they exist
-            valid_jurisdics = list(set(valid_jurisdics))
-            expr += (" and " if expr else "")
-            expr += f"ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {valid_jurisdics})"
-        if req.vdb_id == "bailii":
-            if req.after_date:
-                expr += (" and " if expr else "")
-                expr += f"metadata['decision_date']>'{req.after_date}'"
-            if req.before_date:
-                expr += (" and " if expr else "")
-                expr += f"metadata['decision_date']<'{req.before_date}'"
-        else:
-            if req.after_date:
-                # convert YYYY-MM-DD to epoch time
-                after_date = datetime.strptime(
-                    req.after_date,
-                    "%Y-%m-%d",
-                ).replace(tzinfo=UTC)
-                expr += (" and " if expr else "")
-                expr += f"metadata['timestamp']>{after_date.timestamp()}"
-            if req.before_date:
-                # convert YYYY-MM-DD to epoch time
-                before_date = datetime.strptime(
-                    req.before_date,
-                    "%Y-%m-%d",
-                ).replace(tzinfo=UTC)
-                expr += (" and " if expr else "")
-                expr += f"metadata['timestamp']<{before_date.timestamp()}"
+    expr = get_browse_expr(req)
     try:
         q_iter = query_iterator(req.vdb_id, expr, output_fields, 1000)
     except:
@@ -1112,7 +1048,10 @@ def browse_collection(
             has_next = False
             break
         for hit in res:
-            source_id = hit["metadata"][entity_id_key]
+            if "url" in hit["metadata"]:
+                source_id = hit["metadata"]["url"]
+            else:
+                source_id = hit["metadata"]["id"]
             if source_id not in source_ids:
                 source_ids.add(source_id)
                 if len(source_ids) == (page - 1) * per_page:
@@ -1125,7 +1064,11 @@ def browse_collection(
             "results": [],
         }
     last_id = None
-    res = [hit for hit in res if hit["metadata"][entity_id_key] not in source_ids]
+    res = [
+        hit for hit in res
+        if ("id" in hit["metadata"] and hit["metadata"]["id"] not in source_ids)
+        or ("url" in hit["metadata"] and hit["metadata"]["url"] not in source_ids)
+    ]
     page_results = []
     while len(source_ids) < page * per_page:
         if not res:
@@ -1134,7 +1077,10 @@ def browse_collection(
                 has_next = False
                 break
         for hit in res:
-            source_id = hit["metadata"][entity_id_key]
+            if "id" in hit["metadata"]:
+                source_id = hit["metadata"]["id"]
+            else:
+                source_id = hit["metadata"]["url"]
             if source_id not in source_ids:
                 last_id = source_id
                 source_ids.add(source_id)
@@ -1144,7 +1090,10 @@ def browse_collection(
         res = []
     q_iter.close()
     last_id_expr = last_id if isinstance(last_id, int) else f"'{last_id}'"
-    expr = f"metadata['{entity_id_key}']=={last_id_expr}"
+    expr = (
+        f"metadata['id']=={last_id_expr} or "
+        f"metadata['url']=={last_id_expr}"
+    )
     q_iter = query_iterator(req.vdb_id, expr, output_fields, 1000)
     last_id_chunks = []
     res = q_iter.next()
@@ -1154,7 +1103,8 @@ def browse_collection(
     q_iter.close()
     page_results = [
         hit for hit in page_results
-        if hit["metadata"][entity_id_key] != last_id
+        if ("id" in hit["metadata"] and hit["metadata"]["id"] != last_id)
+        or ("url" in hit["metadata"] and hit["metadata"]["url"] != last_id)
     ]
     tool_output = {"message": "Success", "result": page_results + last_id_chunks}
     vdb_tool = VDBTool(
@@ -1249,7 +1199,7 @@ def upload_resources(
     resource_type: str,
     target_id: str,
     files: Annotated[list[UploadFile], File()] = ...,
-    urls: list[str] | None = None,
+    urls: Annotated[list[str], Form()] = ...,
     summaries: list[str] | None = None,
 ) -> dict:
     """Upload resources (files or URLs) to a collection or session.

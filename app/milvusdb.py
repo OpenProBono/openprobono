@@ -787,6 +787,7 @@ def upload_resource(
         # Add URL-specific metadata
         for metadata in metadatas:
             metadata["timestamp"] = time.time()
+            metadata["id"] = url
             metadata["url"] = url
             metadata["ai_summary"] = ai_summary
             metadata["bot_and_tool_id"] = [search_tool.bot_id + search_tool.name]
@@ -851,7 +852,7 @@ def upload_resource(
         for metadata in metadatas:
             metadata["timestamp"] = time.time()
             metadata["ai_summary"] = ai_summary
-            metadata["source"] = resource.filename
+            metadata["id"] = resource.filename
 
             # Add session ID if provided
             if session_id:
