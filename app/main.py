@@ -14,7 +14,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from langfuse.decorators import langfuse_context, observe
 
-from app.auth import authenticate, get_current_user
+from app.auth import authenticate
 from app.bot import (
     anthropic_bot,
     anthropic_bot_stream,
@@ -232,10 +232,8 @@ def chat(
                 },
             ),
         ],
-        user: User = Depends(get_current_user)) -> dict:
+        user: User = Depends(authenticate)) -> dict:
     """Call a bot with history (only for backwards compat, could be deprecated)."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
     return process_chat(request, "")
 
@@ -257,10 +255,8 @@ def init_session(
                 },
             ),
         ],
-        user: User = Depends(get_current_user)) -> dict:
+        user: User = Depends(authenticate)) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_id = get_uuid_id()
@@ -290,10 +286,8 @@ def init_session_chat(
                 },
             ),
         ],
-        user: User = Depends(get_current_user)) -> dict:
+        user: User = Depends(authenticate)) -> dict:
     """Initialize a new session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_id = get_uuid_id()
@@ -334,7 +328,7 @@ def init_session_chat_stream(
                 },
             ),
         ],
-        user: User = Depends(get_current_user)) -> dict:
+        user: User = Depends(authenticate)) -> dict:
     """Initialize a new session with a message."""
     print(user)
     print("asvlakjlk")
@@ -375,10 +369,8 @@ def chat_session(
                 },
             ),
         ],
-        user: User = Depends(get_current_user))  -> dict:
+        user: User = Depends(authenticate))  -> dict:
     """Continue a chat session with a message."""
-    print(user)
-    print("asvlakjlk")
     request.user = user
 
     session_obj = FetchSession(session_id=request.session_id, user=request.user)
@@ -413,7 +405,7 @@ def chat_session_stream(
                 },
             ),
         ],
-        user: User = Depends(get_current_user))  -> StreamingResponse:
+        user: User = Depends(authenticate))  -> StreamingResponse:
     """Continue a chat session with a message."""
     request.user = user
 
@@ -444,7 +436,7 @@ def get_session(
                 },
             ),
         ],
-        user: User = Depends(get_current_user))  -> dict:
+        user: User = Depends(authenticate))  -> dict:
     """Fetch the chat history and details of a session."""
     request.user = user
 
@@ -468,7 +460,7 @@ def get_formatted_session_history(
             },
         ),
     ],
-    user: User = Depends(get_current_user),
+    user: User = Depends(authenticate),
 )  -> dict:
     """Fetch the formatted history of a session for front end display."""
     request.user = user
@@ -496,7 +488,7 @@ def session_feedback(
                 },
             ),
         ],
-        user: User = Depends(get_current_user))  -> dict:
+        user: User = Depends(authenticate))  -> dict:
     """Submit feedback to a specific session."""
     request.user = user
 
@@ -570,9 +562,10 @@ def create_bot(
                     },
                 },
             ),
-        ]) -> dict:
+        ],
+        user: User = Depends(authenticate)) -> dict:
     """Create a new bot."""
-
+    request.user = user
     bot_id = get_uuid_id()
     store_bot(request, bot_id)
 
@@ -580,19 +573,19 @@ def create_bot(
 
 
 @api.post("/view_bot", tags=["Bot"])
-def view_bot(bot_id: str, user: User = Depends(get_current_user)) -> dict:
+def view_bot(bot_id: str, user: User = Depends(authenticate)) -> dict:
     logger.info("User %s viewing bot %s", user.firebase_uid, bot_id)
     return {"message": "Success", "data": load_bot(bot_id)}
 
 
 @api.post("/view_bots", tags=["Bot"])
-def view_bots(user: User = Depends(get_current_user)) -> dict:
+def view_bots(user: User = Depends(authenticate)) -> dict:
     return {"message": "Success", "data": browse_bots(user)}
 
 
 @api.post("/upload_file", tags=["User Upload"])
 def upload_file(file: UploadFile, session_id: str, summary: str | None = None,
-                user: User = Depends(get_current_user)) -> dict:
+                user: User = Depends(authenticate)) -> dict:
     """File upload by user.
 
     Parameters
@@ -627,7 +620,7 @@ def upload_files(
     files: list[UploadFile],
     session_id: str,
     summaries: list[str] | None = None,
-    user: User = Depends(get_current_user),
+    user: User = Depends(authenticate),
 ) -> dict:
     """Upload multiple files by user.
 
@@ -688,7 +681,7 @@ def upload_files(
 @api.post("/upload_file_ocr", tags=["User Upload"])
 def vectordb_upload_ocr(file: UploadFile,
         session_id: str, summary: str | None = None,
-        user: User = Depends(get_current_user)) -> dict:
+        user: User = Depends(authenticate)) -> dict:
     """Upload a file by user and use OCR to extract info."""
     logger.info("User %s uploading file with OCR", user.firebase_uid)
     cr = fetch_session(FetchSession(session_id=session_id, user=user))
@@ -700,7 +693,7 @@ def vectordb_upload_ocr(file: UploadFile,
 
 
 @api.post("/delete_file", tags=["Vector Database"])
-def delete_file(filename: str, session_id: str, user: User = Depends(get_current_user)) -> dict:
+def delete_file(filename: str, session_id: str, user: User = Depends(authenticate)) -> dict:
     """Delete a file from the sessions database.
 
     Parameters
@@ -733,7 +726,7 @@ def delete_file(filename: str, session_id: str, user: User = Depends(get_current
 
 
 @api.post("/delete_files", tags=["Vector Database"])
-def delete_files(filenames: list[str], session_id: str, user: User = Depends(get_current_user)) -> dict:
+def delete_files(filenames: list[str], session_id: str, user: User = Depends(authenticate)) -> dict:
     """Delete multiple files from the database.
 
     Parameters
@@ -766,7 +759,7 @@ def delete_files(filenames: list[str], session_id: str, user: User = Depends(get
 
 
 @api.post("/get_session_files", tags=["Vector Database"])
-def get_session_files(session_id: str, user: User = Depends(get_current_user)) -> dict:
+def get_session_files(session_id: str, user: User = Depends(authenticate)) -> dict:
     """Get names of all files associated with a session.
 
     Parameters
@@ -808,7 +801,7 @@ def get_session_files(session_id: str, user: User = Depends(get_current_user)) -
 
 
 @api.post("/delete_session_files", tags=["Vector Database"])
-def delete_session_files(session_id: str, user: User = Depends(get_current_user)) -> dict:
+def delete_session_files(session_id: str, user: User = Depends(authenticate)) -> dict:
     """Delete all files associated with a session.
 
     Parameters

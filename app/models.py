@@ -176,7 +176,7 @@ class BotRequest(BaseModel):
     search_tools: list[SearchTool] = []
     vdb_tools: list[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
-    user: User
+    user: User = None
 
 
 class OpinionSearchRequest(BaseModel):
@@ -285,7 +285,7 @@ class OpinionFeedback(BaseModel):
 
     feedback_text: str
     opinion_id: int
-    user: User
+    user: User = None
 
 class LISTTerm(BaseModel):
     """Model class representing a term in the LIST taxonomy.
@@ -398,7 +398,7 @@ class ChatRequest(BaseModel):
     history: list
     bot_id: str
     session_id: str = None
-    user: User
+    user: User = None
     timestamp: str = ""
     title: str = ""
     file_count: int = 0
@@ -417,7 +417,7 @@ class ChatBySession(BaseModel):
 
     message: str
     session_id: str
-    user: User
+    user: User = None
 
 class InitializeSession(BaseModel):
     """Model class representing an initialize session request.
@@ -430,7 +430,7 @@ class InitializeSession(BaseModel):
     """
 
     bot_id: str
-    user: User
+    user: User = None
 
 class InitializeSessionChat(BaseModel):
     """Model class representing an initialize session request with a message.
@@ -445,7 +445,7 @@ class InitializeSessionChat(BaseModel):
 
     message: str
     bot_id: str
-    user: User
+    user: User = None
 
 
 class FetchSession(BaseModel):
@@ -459,7 +459,7 @@ class FetchSession(BaseModel):
     """
 
     session_id: str
-    user: User
+    user: User = None
 
 class SessionFeedback(BaseModel):
     """Model class representing a session feedback request.
@@ -480,4 +480,4 @@ class SessionFeedback(BaseModel):
     feedback_type: FeedbackType = FeedbackType.generic
     message_index: int = -1
     categories: list[str] = []
-    user: User
+    user: User = None
