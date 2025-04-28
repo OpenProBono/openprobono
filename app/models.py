@@ -79,6 +79,9 @@ class GoogleModelEnum(str, Enum):
 
     gemini_1_5_flash = "gemini-1.5-flash"
     gemini_1_5_pro = "gemini-1.5-pro"
+    gemini_2_5_pro = "gemini-2.5-pro-exp-03-25"
+    gemini_2_flash = "gemini-2.0-flash"
+    gemini_2_flash_lite = "gemini-2.0-flash-lite"
 
 
 @unique
@@ -102,8 +105,15 @@ class OpenAIModelEnum(str, Enum):
     gpt_4o_mini = "gpt-4o-mini"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
+    gpt_4_1 = "gpt-4.1-2025-04-14"
+    gpt_4_1_mini = "gpt-4.1-mini-2025-04-14"
+    gpt_4_1_nano = "gpt-4.1-nano-2025-04-14"
     o1_preview = "o1-preview"
-    o1_mini = "o1-mini"
+    o1 = "o1-2024-12-17"
+    o1_mini = "o1-mini-2024-09-12"
+    o3 = "o3-2025-04-16"
+    o4_mini = "o4-mini-2025-04-16"
+    o3_mini = "o3-mini-2025-01-31"
     mod_stable = "text-moderation-stable"
     mod_latest = "text-moderation-latest"
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down

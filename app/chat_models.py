@@ -4,20 +4,25 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-import google.generativeai as genai
 import requests
 from anthropic import Anthropic
 from anthropic import Stream as AnthropicStream
+from google.genai import Client
+from google.genai.types import GenerateContentConfig
 from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from openai import Stream as OpenAIStream
 
-from app.models import ChatModelParams, EngineEnum, HiveModelEnum
+from app.logger import setup_logger
+from app.models import ChatModelParams, EngineEnum, HiveModelEnum, OpenAIModelEnum
 from app.prompts import HIVE_QA_PROMPT
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from anthropic.types import Message as AnthropicMessage
     from anthropic.types import RawMessageStreamEvent
+    from google.genai.types import GenerateContentResponse
     from openai.types.chat import ChatCompletion
     from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
@@ -30,12 +35,23 @@ TOOL_CHOICE = "auto"
 NOT_GIVEN = "NOT_GIVEN"
 ANTHROPIC_CLIENT = Anthropic()
 OPENAI_CLIENT = OpenAI()
+GOOGLE_CLIENT = Client(api_key=os.environ["GEMINI_API_KEY"])
+OPENAI_REASONING_MODELS = {
+    OpenAIModelEnum.o1,
+    OpenAIModelEnum.o1_mini,
+    OpenAIModelEnum.o1_preview,
+    OpenAIModelEnum.o3,
+    OpenAIModelEnum.o3_mini,
+    OpenAIModelEnum.o4_mini,
+}
+
+logger = setup_logger()
 
 def chat(
     messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> tuple[str, list[str]] | ChatCompletion | AnthropicMessage | str:
+) -> ChatCompletion | AnthropicMessage | GenerateContentResponse | tuple[str, list[str]]:
     """Chat with an LLM.
 
     Parameters
@@ -49,7 +65,7 @@ def chat(
 
     Returns
     -------
-    tuple[str, list[str]] | ChatCompletion | AnthropicMessage | str
+    ChatCompletion | AnthropicMessage | GenerateContentResponse | tuple[str, list[str]]
         The response from the LLM. Depends on engine.
 
     """
@@ -58,17 +74,17 @@ def chat(
             return chat_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
             return chat_anthropic(messages, chatmodel.model, **kwargs)
+        case EngineEnum.google:
+            return chat_google(messages, chatmodel.model, **kwargs)
         case EngineEnum.hive:
             return chat_hive(messages, chatmodel.model, **kwargs)
-        case EngineEnum.google:
-            return chat_gemini(messages, chatmodel.model, **kwargs)
 
 
 def chat_stream(
     messages: list[dict],
     chatmodel: ChatModelParams,
     **kwargs: dict,
-) -> OpenAIStream[ChatCompletionChunk] | AnthropicStream[RawMessageStreamEvent]:
+) -> OpenAIStream[ChatCompletionChunk] | AnthropicStream[RawMessageStreamEvent] | Iterator[GenerateContentResponse]:
     """Chat with an LLM with streaming enabled.
 
     Parameters
@@ -82,8 +98,8 @@ def chat_stream(
 
     Returns
     -------
-    Stream[ChatCompletionChunk] | Stream[RawMessageStreamEvent]
-        The response from the LLM. Depends on engine.
+    Stream[ChatCompletionChunk] | Stream[RawMessageStreamEvent] | Iterator[GenerateContentResponse]
+        The response chunks from the LLM. Depends on engine.
 
     """
     match chatmodel.engine:
@@ -91,6 +107,8 @@ def chat_stream(
             return chat_stream_openai(messages, chatmodel.model, **kwargs)
         case EngineEnum.anthropic:
             return chat_stream_anthropic(messages, chatmodel.model, **kwargs)
+        case EngineEnum.google:
+            return chat_stream_google(messages, chatmodel.model, **kwargs)
 
 
 def chat_str(messages: list[dict], chatmodel: ChatModelParams, **kwargs: dict) -> str:
@@ -119,7 +137,7 @@ def chat_str(messages: list[dict], chatmodel: ChatModelParams, **kwargs: dict) -
         case EngineEnum.hive:
             return chat_str_hive(messages, chatmodel.model, **kwargs)
         case EngineEnum.google:
-            return chat_gemini(messages, chatmodel.model, **kwargs)
+            return chat_str_google(messages, chatmodel.model, **kwargs)
     raise ValueError(chatmodel)
 
 
@@ -190,11 +208,14 @@ def chat_str_hive(messages: list[dict], model: str, **kwargs: dict) -> str:
     return text
 
 
-def set_kwargs_openai(kwargs: dict) -> None:
+def set_kwargs_openai(kwargs: dict, model: str) -> None:
     """Set default values for openai.Completion API call."""
     if "max_tokens" not in kwargs:
-        kwargs["max_tokens"] = MAX_TOKENS
-    if "temperature" not in kwargs:
+        key = "max_tokens"
+        if model in OPENAI_REASONING_MODELS:
+            key = "max_completion_tokens"
+        kwargs[key] = MAX_TOKENS
+    if "temperature" not in kwargs and model not in OPENAI_REASONING_MODELS:
         kwargs["temperature"] = TEMPERATURE
     if "seed" not in kwargs:
         kwargs["seed"] = SEED
@@ -221,7 +242,7 @@ def chat_openai(messages: list[dict], model: str, **kwargs: dict) -> ChatComplet
         The response from the LLM.
 
     """
-    set_kwargs_openai(kwargs)
+    set_kwargs_openai(kwargs, model)
     response: ChatCompletion = OPENAI_CLIENT.chat.completions.create(
         model=model,
         messages=messages,
@@ -265,7 +286,7 @@ def chat_stream_openai(
         The response from the LLM.
 
     """
-    set_kwargs_openai(kwargs)
+    set_kwargs_openai(kwargs, model)
     return OPENAI_CLIENT.chat.completions.create(
         model=model,
         messages=messages,
@@ -375,8 +396,12 @@ def chat_str_anthropic(messages: list[dict], model: str, **kwargs: dict) -> str:
 
 
 @observe(as_type="generation")
-def chat_gemini(messages: list[dict], model: str, **kwargs: dict) -> str:
-    """Chat with a Gemini LLM.
+def chat_google(
+    messages: list[dict],
+    model: str,
+    **kwargs: dict,
+) -> GenerateContentResponse:
+    """Chat with a Google LLM.
 
     Parameters
     ----------
@@ -389,45 +414,45 @@ def chat_gemini(messages: list[dict], model: str, **kwargs: dict) -> str:
 
     Returns
     -------
-    str
+    GenerateContentResponse
         The response from the LLM
 
     """
-    messages = [{"role":msg["role"], "parts":[msg["content"]]} for msg in messages]
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-
-    # Create the model
-    # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
-    set_kwargs_gemini(kwargs)
-    generation_config = {"response_mime_type": "text/plain"} | kwargs
-
-    llm = genai.GenerativeModel(
-        model_name=model,
-        generation_config=generation_config,
-        # safety_settings = Adjust safety settings
-        # See https://ai.google.dev/gemini-api/docs/safety-settings
+    formatted_messages = format_messages_for_google(messages)
+    set_kwargs_google(kwargs)
+    config = GenerateContentConfig(response_mime_type="text/plain", **kwargs)
+    response = GOOGLE_CLIENT.models.generate_content(
+        model=model,
+        contents=formatted_messages,
+        config=config,
     )
+    usage = {
+        "input": response.usage_metadata.prompt_token_count,
+        "output": response.usage_metadata.candidates_token_count,
+        "total": response.usage_metadata.total_token_count,
+    }
+    langfuse_context.update_current_observation(
+        input=messages,
+        output=response.text,
+        metadata=kwargs,
+        model=model,
+        usage=usage,
+    )
+    return response
 
-    chat_session = llm.start_chat(history=messages)
-    response_text = []
-    for content in messages[-1]["parts"]:
-        response = chat_session.send_message(content)
-        response_text.append(response.text.strip())
-    return "\n".join(response_text)
 
-
-@observe(as_type="generation")
-def chat_single_gemini(
-    message: str,
+@observe(capture_input=False, capture_output=False)
+def chat_stream_google(
+    messages: list[dict],
     model: str,
     **kwargs: dict,
-) -> str:
-    """Chat with a Gemini LLM.
+) -> Iterator[GenerateContentResponse]:
+    """Chat with a Gemini LLM with streaming.
 
     Parameters
     ----------
-    message : str
-        The single message
+    messages : list[dict]
+        The conversation history.
     model : str
         The name of the model.
     kwargs : dict
@@ -435,28 +460,73 @@ def chat_single_gemini(
 
     Returns
     -------
-    str
-        The response from the LLM
+    Iterator[GenerateContentResponse]
+        The streamed response from the LLM
 
     """
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-
-    # Create the model
-    # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
-    set_kwargs_gemini(kwargs)
-    generation_config = {"response_mime_type": "text/plain"} | kwargs
-
-    llm = genai.GenerativeModel(
-        model_name=model,
-        # generation_config=generation_config,
-        # safety_settings = Adjust safety settings
-        # See https://ai.google.dev/gemini-api/docs/safety-settings
+    formatted_messages = format_messages_for_google(messages)
+    set_kwargs_google(kwargs)
+    config = GenerateContentConfig(response_mime_type="text/plain", **kwargs)
+    return GOOGLE_CLIENT.models.generate_content_stream(
+        model=model,
+        contents=formatted_messages,
+        config=config,
     )
 
-    response_text = llm.generate_content(message).text.strip()
-    return response_text
 
-def set_kwargs_gemini(kwargs: dict) -> None:
+def chat_str_google(messages: list[dict], model: str, **kwargs: dict) -> str:
+    """Chat with an LLM using the openai engine and get a string response."""
+    response = chat_google(messages, model, **kwargs)
+    return response.text
+
+
+def format_messages_for_google(messages: list[dict]) -> list[dict]:
+    """Format messages for the Gemini API.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation history in standard format.
+
+    Returns
+    -------
+    list[dict]
+        The conversation history formatted for Gemini.
+
+    """
+    formatted_messages = []
+    logger.info(messages)
+    for msg in messages:
+        if "content" in msg:
+            # Simple text message
+            formatted_messages.append({
+                "role": "model" if msg["role"] == "assistant" else "user",
+                "parts": [{"text": msg["content"]}],
+            })
+        elif msg["role"] == "tool_call":
+            formatted_messages.append({
+                "role": "model",
+                "parts": [{
+                    "function_call": {
+                        "name": msg["name"],
+                        "args": msg["args"],
+                    },
+                }],
+            })
+        elif msg["role"] == "tool": # tool result
+            formatted_messages.append({
+                "role": "model",
+                "parts": [{
+                    "function_response": {
+                        "name": msg["name"],
+                        "response": msg["content"],
+                    },
+                }],
+            })
+    return formatted_messages
+
+
+def set_kwargs_google(kwargs: dict) -> None:
     """Set default values for genai.ChatSession API call."""
     if "max_output_tokens" not in kwargs:
         kwargs["max_output_tokens"] = MAX_TOKENS
@@ -464,3 +534,5 @@ def set_kwargs_gemini(kwargs: dict) -> None:
         kwargs["temperature"] = TEMPERATURE
     if "top_p" not in kwargs:
         kwargs["top_p"] = TOP_P
+    if "seed" not in kwargs:
+        kwargs["seed"] = SEED

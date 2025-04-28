@@ -5,6 +5,7 @@ from contextvars import copy_context
 from threading import Lock
 
 import requests
+from google.genai.types import Tool
 from langfuse.decorators import langfuse_context, observe
 from serpapi.google_search import GoogleSearch
 
@@ -318,92 +319,13 @@ def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
             "num": num_results,
         }).get_dict())
 
-def openai_tool(t: SearchTool) -> dict:
-    """Create a tool for openai agents to use.
 
-    Parameters
-    ----------
-    t : SearchTool
-        The SearchTool object which describes the tool
-
-    Returns
-    -------
-    dict
-        The description of tool created to be used by agents
-
-    """
-    body = {
-        "type": "function",
-        "function": {
-            "name": t.name,
-            "description": t.prompt,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "qr": {
-                        "type": "string",
-                        "description": "The search text",
-                    },
-                },
-                "required": ["qr"],
-            },
-        },
-    }
-    if t.method == SearchMethodEnum.courtlistener:
-        # arg definitions
-        body["function"]["parameters"]["properties"].update(courtlistener_tool_args)
-        # modify query text for semantic + keyword queries
-        body["function"]["parameters"]["properties"]["qr"]["description"] = (
-            "A semantic query to search for general concepts and terms."
-        )
-        # default tool definition
-        if not t.prompt:
-            body["function"]["description"] = FILTERED_CASELAW_PROMPT
-    if t.method == SearchMethodEnum.dynamic_serpapi:
-        # add jurisdictions argument
-        body["function"]["parameters"]["properties"].update({
-            "jurisdictions": courtlistener_tool_args["jurisdictions"],
-        })
-        # modify query text to include jurisdiction in both args
-        body["function"]["parameters"]["properties"]["qr"]["description"] = (
-            "The search text. Include the jurisdiction here as well, if provided."
-        )
-    if t.method == SearchMethodEnum.bailii:
-        # Update qr as semantic query and add advanced_query parameter
-        body["function"]["parameters"]["properties"]["qr"]["description"] = (
-            "A semantic query to search for general concepts and terms."
-        )
-        # Add the advanced_query parameter
-        body["function"]["parameters"]["properties"]["advanced_query"] = {
-            "type": "string",
-            "description": "The advanced search query with boolean operators. " + ADVANCED_SEARCH_DESC,
-        }
-        # Add the after_date parameter using courtlistener prompt
-        body["function"]["parameters"]["properties"]["after-date"] = courtlistener_tool_args["after-date"]
-        # Add the before_date parameter using courtlistener prompt
-        body["function"]["parameters"]["properties"]["before-date"] = courtlistener_tool_args["before-date"]
-        # Make advanced_query required
-        body["function"]["parameters"]["required"].append("advanced_query")
-    return body
-
-def anthropic_tool(t: SearchTool) -> dict:
-    """Create a tool for anthropic agents to use.
-
-    Parameters
-    ----------
-    t : SearchTool
-        The SearchTool object which describes the tool
-
-    Returns
-    -------
-    dict
-        The description of tool created to be used by agents
-
-    """
-    body = {
+def build_tool_body(t: SearchTool, engine: EngineEnum) -> dict:
+    """Construct the tool body for OpenAI, Anthropic, or Google."""
+    base_structure = {
         "name": t.name,
         "description": t.prompt,
-        "input_schema": {
+        "parameters" if engine != EngineEnum.anthropic else "input_schema": {
             "type": "object",
             "properties": {
                 "qr": {
@@ -414,42 +336,34 @@ def anthropic_tool(t: SearchTool) -> dict:
             "required": ["qr"],
         },
     }
+
+    params_key = "parameters" if engine != EngineEnum.anthropic else "input_schema"
+    properties = base_structure[params_key]["properties"]
+    required = base_structure[params_key]["required"]
+
     if t.method == SearchMethodEnum.courtlistener:
-        # add courtlistener arg definitions
-        body["input_schema"]["properties"].update(courtlistener_tool_args)
-        # modify query text for semantic + keyword queries
-        body["input_schema"]["properties"]["qr"]["description"] = (
-            "A semantic query to search for general concepts and terms."
-        )
-        # default tool definition
+        properties.update(courtlistener_tool_args)
+        properties["qr"]["description"] = "A semantic query to search for general concepts and terms."
         if not t.prompt:
-            body["description"] = FILTERED_CASELAW_PROMPT
-    if t.method == SearchMethodEnum.dynamic_serpapi:
-        # add jurisdictions argument
-        body["input_schema"]["properties"].update({
-            "jurisdictions": courtlistener_tool_args["jurisdictions"],
-        })
-        # modify query text to include jurisdiction in both args
-        body["input_schema"]["properties"]["qr"]["description"] = (
-            "The search text. Include the jurisdiction here as well, if provided."
-        )
-    if t.method == SearchMethodEnum.bailii:
-        # Update qr as semantic query and add advanced_query parameter
-        body["input_schema"]["properties"]["qr"]["description"] = (
-            "A semantic query to search for general concepts and terms."
-        )
-        # Add the advanced_query parameter
-        body["input_schema"]["properties"]["advanced_query"] = {
+            base_structure["description"] = FILTERED_CASELAW_PROMPT
+
+    elif t.method == SearchMethodEnum.dynamic_serpapi:
+        properties.update({"jurisdictions": courtlistener_tool_args["jurisdictions"]})
+        properties["qr"]["description"] = "The search text. Include the jurisdiction here as well, if provided."
+
+    elif t.method == SearchMethodEnum.bailii:
+        properties["qr"]["description"] = "A semantic query to search for general concepts and terms."
+        properties["advanced_query"] = {
             "type": "string",
             "description": "The advanced search query with boolean operators. " + ADVANCED_SEARCH_DESC,
         }
-        # Add the after_date parameter using courtlistener prompt
-        body["input_schema"]["properties"]["after-date"] = courtlistener_tool_args["after-date"]
-        # Add the before_date parameter using courtlistener prompt
-        body["input_schema"]["properties"]["before-date"] = courtlistener_tool_args["before-date"]
-        # Make advanced_query required
-        body["input_schema"]["required"].append("advanced_query")
-    return body
+        properties["after-date"] = courtlistener_tool_args["after-date"]
+        properties["before-date"] = courtlistener_tool_args["before-date"]
+        required.append("advanced_query")
+
+    if engine == EngineEnum.openai:
+        return {"type": "function", "function": base_structure}
+    return base_structure
 
 
 @observe(capture_output=False)
@@ -525,6 +439,7 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
             )
     return function_response
 
+
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
     """Create a search toolset for the bot from all the search tools.
 
@@ -544,11 +459,11 @@ def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
     toolset = []
     for t in bot.search_tools:
         t.bot_id = bot_id
-        match bot.chat_model.engine:
-            case EngineEnum.openai:
-                toolset.append(openai_tool(t))
-            case EngineEnum.anthropic:
-                toolset.append(anthropic_tool(t))
+        tool_def = build_tool_body(t, bot.chat_model.engine)
+        if bot.chat_model.engine == EngineEnum.google:
+            toolset.append(Tool(function_declarations=[tool_def]))
+        else:
+            toolset.append(tool_def)
     return toolset
 
 

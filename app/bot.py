@@ -19,12 +19,14 @@ from app.bot_helper import (
 )
 from app.chat_models import chat, chat_stream
 from app.logger import setup_logger
+from app.models import get_uuid_id
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Iterator
 
     from anthropic import Stream as AnthropicStream
     from anthropic.types import Message as AnthropicMessage
+    from google.genai import types as genai_types
     from openai import Stream as OpenAIStream
     from openai.types.chat import ChatCompletionMessage
 
@@ -562,3 +564,276 @@ def anthropic_tools_stream(
                 usage=usage,
             )
             return
+
+
+@observe(capture_input=False)
+def google_bot(r: ChatRequest, bot: BotRequest) -> str:
+    """Call bot using Google engine.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        ChatRequest object, containing the conversation and session data
+    bot : BotRequest
+        BotRequest object, containing the bot data
+
+    Returns
+    -------
+    str
+        The response from the bot
+
+    """
+    initial_response = handle_empty_or_moderated(r.history[-1]["content"])
+    if initial_response:
+        return initial_response
+    kwargs = setup_common(r, bot)
+    response = chat(r.history, bot.chat_model, **kwargs)
+    return google_tools(r.history, response, bot, **kwargs)
+
+
+def google_tools(
+    messages: list[dict],
+    response: genai_types.GenerateContentResponse,
+    bot: BotRequest,
+    **kwargs: dict,
+) -> str:
+    """Handle tool calls in the conversation for Google engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation messages
+    response
+        The initial response
+    bot : BotRequest
+        BotRequest object
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Returns
+    -------
+    str
+        The response message from the bot, should be final response.
+
+    """
+    # Extract text response if there's no function call
+    if response.candidates or not response.candidates[0].content.parts[0].function_call:
+        return response.text
+
+    tools_used = 0
+    # get the bot's source list up to this point in the conversation
+    all_sources = []
+    src_msgs = [
+        msg for msg in messages
+        if msg["role"] == "user" and \
+        isinstance(msg["content"], str) and msg["content"].startswith("**Sources**:\n")
+    ]
+    for src_msg in src_msgs:
+        numbered_srcs = src_msg["content"].split("\n")[1:] # ignore first line
+        srcs = [num_src.split(" ")[1] for num_src in numbered_srcs]
+        all_sources += srcs
+
+    while tools_used < MAX_NUM_TOOLS:
+        # Extract function calls
+        function_calls: list[genai_types.FunctionCall] = []
+        for candidate in response.candidates:
+            function_calls += [
+                part.function_call
+                for part in candidate.content.parts
+                if part.function_call is not None
+            ]
+
+        if not function_calls:
+            break
+
+        new_sources = execute_tool_calls(function_calls, bot, messages, stream=False)
+        tools_used += len(function_calls)
+        update_sources(messages, new_sources, all_sources)
+        response = chat(messages, bot.chat_model, **kwargs)
+
+        # # Process each function call
+        # for function_call in function_calls:
+        #     # Execute the tool
+        #     tool_call_id, tool_response, formatted_results = "", "", []
+        #     try:
+        #         tool_call_id, tool_response, formatted_results = execute_tool_call(
+        #             function_call,
+        #             bot,
+        #         )
+        #     except Exception as e:
+        #         logger.exception("Error executing Google function call")
+        #         tool_response = f"Error: {e!s}"
+
+        #     # Add tool call to conversation history
+        #     messages.append({
+        #         "role": "assistant",
+        #         "parts": [{"function_call": function_call}],
+        #     })
+
+        #     # Add tool response to conversation
+        #     messages.append({
+        #         "role": "user",
+        #         "parts": [{
+        #             "function_response": {
+        #                 "name": function_call.name,
+        #                 "response": {"result": tool_response},
+        #             },
+        #         }],
+        #     })
+
+        #     tools_used += 1
+
+        #     # Add sources
+        #     new_sources = [str(res["id"]) for res in formatted_results]
+        #     update_sources(messages, new_sources, all_sources)
+
+        # # Get another response with the tool results
+        # response = chat(messages, bot.chat_model, **kwargs)
+
+    return response.text
+
+
+@observe(capture_input=False, capture_output=False)
+def google_bot_stream(r: ChatRequest, bot: BotRequest) -> Generator[dict, None, None]:
+    """Call streaming bot using Google engine.
+
+    Parameters
+    ----------
+    r : ChatRequest
+        ChatRequest object, containing the conversation and session data
+    bot : BotRequest
+        BotRequest object, containing the bot data
+
+    Yields
+    ------
+    dict
+        The response chunks from the bot
+
+    """
+    initial_response = handle_empty_or_moderated(r.history[-1]["content"])
+    if initial_response:
+        yield {
+            "type": "response",
+            "content": initial_response,
+        }
+        return
+    kwargs = setup_common(r, bot)
+    response = chat_stream(r.history, bot.chat_model, **kwargs)
+    yield from google_tools_stream(r.history, response, bot, **kwargs)
+
+
+@observe(capture_input=False, as_type="generation")
+def google_tools_stream(
+    messages: list[dict],
+    response: Iterator[genai_types.GenerateContentResponse],  # Google streaming response
+    bot: BotRequest,
+    **kwargs: dict,
+) -> Generator[dict, None, None]:
+    """Handle tool calls in the conversation for Google engine.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        The conversation messages
+    response: Iterator[genai_types.GenerateContentResponse]
+        The initial response stream
+    bot : BotRequest
+        BotRequest object
+    kwargs : dict
+        Keyword arguments for the LLM.
+
+    Yields
+    ------
+    dict
+        The response chunks from the Google LLM
+
+    """
+    tools_used = 0
+    usage = {"input": 0, "output": 0, "total": 0}
+    # get the bot's source list up to this point in the conversation
+    all_sources = []
+    src_msgs = [
+        msg for msg in messages
+        if msg["role"] == "user" and \
+        isinstance(msg["content"], str) and msg["content"].startswith("**Sources**:\n")
+    ]
+    for src_msg in src_msgs:
+        numbered_srcs = src_msg["content"].split("\n")[1:] # ignore first line
+        srcs = [num_src.split(" ")[1] for num_src in numbered_srcs]
+        all_sources += srcs
+
+    while tools_used < MAX_NUM_TOOLS:
+        # Process the response
+        function_calls: list[genai_types.FunctionCall] = []
+        content = ""
+        for chunk in response:
+            # count any usage
+            if chunk.usage_metadata:
+                usage["input"] += chunk.usage_metadata.prompt_token_count or 0
+                usage["output"] += chunk.usage_metadata.candidates_token_count or 0
+                usage["total"] += chunk.usage_metadata.total_token_count or 0
+            if not chunk.function_calls:
+                # yield any text
+                if chunk.text:
+                    content += chunk.text
+                    if content.endswith("\n"):
+                        yield {
+                            "type": "response",
+                            "content": content,
+                        }
+                        content = ""
+                continue
+            # find any tool calls
+            for function_call in chunk.function_calls:
+                # Add tool call to conversation history
+                if not function_call.id:
+                    function_call.id = get_uuid_id()
+                messages.append({
+                    "role": "tool_call",
+                    "id": function_call.id,
+                    "name": function_call.name,
+                    "args": function_call.args,
+                })
+                function_calls.append(function_call)
+
+        if content:
+            yield {"type": "response", "content": content}
+
+        if not function_calls:
+            break
+
+        logger.info("Found tool calls: %s", function_calls)
+
+        # Run the tools
+        new_sources = yield from execute_tool_calls(
+            function_calls,
+            bot,
+            messages,
+            stream=True,
+        )
+        tools_used += len(function_calls)
+
+        if new_sources: # update source list and send source list to LLM
+            # remove duplicate sources while maintaining original order
+            srcset = set(all_sources)
+            new_sources = [
+                src
+                for src in new_sources
+                if not (src in srcset or srcset.add(src))
+            ]
+            # only add the new sources to the bots source list
+            source_list = "\n".join([
+                f"[{i}] {src}"
+                for i, src in enumerate(new_sources, start=len(all_sources) + 1)
+            ])
+            all_sources += new_sources
+            # append the source list
+            if source_list:
+                msg = {"role": "user", "content": "**Sources**:\n" + source_list}
+                messages.append(msg)
+        response = chat_stream(messages, bot.chat_model, **kwargs)
+    # Add usage statistics
+    langfuse_context.update_current_observation(
+        model=bot.chat_model.model,
+        usage=usage,
+    )

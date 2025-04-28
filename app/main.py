@@ -21,6 +21,8 @@ from langfuse.decorators import langfuse_context, observe
 from app.bot import (
     anthropic_bot,
     anthropic_bot_stream,
+    google_bot,
+    google_bot_stream,
     openai_bot,
     openai_bot_stream,
 )
@@ -154,6 +156,13 @@ async def process_chat_stream(r: ChatRequest, message: str):
                 yield chunk
                 # Add a small delay to avoid blocking the event loop
                 await asyncio.sleep(0)
+        case EngineEnum.google:
+            for chunk in google_bot_stream(r, bot):
+                if isinstance(chunk, dict) and chunk["type"] == "response":
+                    full_response += chunk["content"]
+                yield chunk
+                # Add a small delay to avoid blocking the event loop
+                await asyncio.sleep(0)
         case _:
             error = "Failure: Invalid bot engine for streaming"
             logger.error(error)
@@ -217,6 +226,8 @@ def process_chat(r: ChatRequest, message: str) -> dict:
                 output = openai_bot(r, bot)
             case EngineEnum.anthropic:
                 output = anthropic_bot(r, bot)
+            case EngineEnum.google:
+                output = google_bot(r, bot)
             case _:
                 error = f"Failure: invalid bot engine {bot.chat_model.engine}"
                 langfuse_context.update_current_observation(

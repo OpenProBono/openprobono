@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from google.genai.types import Tool
 from langfuse.decorators import observe
 
 from app.bailii import BAILII_COLLECTION
@@ -141,6 +142,49 @@ def anthropic_tool(tool: VDBTool) -> dict:
             "required": [property_name],
         },
     }
+
+
+def google_tool(tool: VDBTool) -> Tool:
+    """Create a VDBTool definition for the Google API.
+
+    Parameters
+    ----------
+    tool : VDBTool
+        Tool parameters
+
+    Returns
+    -------
+    Tool
+        The tool definition
+
+    """
+    prompt = tool.prompt if tool.prompt else tool_prompt(tool)
+    match tool.method:
+        case VDBMethodEnum.query:
+            property_name = "query"
+            property_desc = "the query text for vector search"
+        case VDBMethodEnum.get_source:
+            property_name = "source_id"
+            property_desc = (
+                "The source identifier for the document to retrieve. "
+                "Depending on the type of source, this may be an integer "
+                "ID, filename, or URL."
+            )
+    tool_def = {
+        "name": tool.name,
+        "description": prompt,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                property_name: {
+                    "type": "string",
+                    "description": property_desc,
+                },
+            },
+            "required": [property_name],
+        },
+    }
+    return Tool(function_declarations=[tool_def])
 
 @observe(capture_output=False)
 def run_vdb_tool(t: VDBTool, function_args: dict) -> dict:
@@ -306,6 +350,8 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
             toolset = [openai_tool(t) for t in bot.vdb_tools]
         case EngineEnum.anthropic:
             toolset = [anthropic_tool(t) for t in bot.vdb_tools]
+        case EngineEnum.google:
+            toolset = [google_tool(t) for t in bot.vdb_tools]
     return toolset
 
 
