@@ -12,6 +12,7 @@ from fastapi import (
     FastAPI,
     UploadFile,
     BackgroundTasks,
+    Form,
 )
 from fastapi.responses import StreamingResponse
 from langfuse.decorators import langfuse_context, observe
@@ -1502,28 +1503,18 @@ def update_labeled_session_endpoint(
 
 @api.post("/input_generator", tags=["Evaluation"])
 def input_generator_endpoint(
-    request: Annotated[
-        InputGeneratorRequest,
-        Body(
-            openapi_examples={
-                "generate inputs": {
-                    "summary": "Generate a list of inputs based on a prompt",
-                    "description": "Returns a list of generated inputs based on the provided prompt",
-                    "value": {
-                        "prompt": "Generate legal questions about contract law"
-                    },
-                },
-            },
-        ),
-    ],
+    prompt: str,
+    file: UploadFile | None = None,
     user: User = Depends(get_current_user)
 ) -> dict:
-    """Generate a list of inputs based on a prompt using GPT-4o.
+    """Generate a list of inputs based on a prompt and optionally a file.
     
     Parameters
     ----------
-    request : InputGeneratorRequest
-        The request containing the prompt
+    prompt : str
+        The prompt to use for generating inputs (required even with file upload)
+    file : UploadFile | None
+        Optional file containing inputs
     user : User
         The authenticated user
         
@@ -1532,42 +1523,43 @@ def input_generator_endpoint(
     dict
         A dictionary containing the generated inputs
     """
-    # Set up the request with the user
-    request.user = user
-    
-    # Create the messages for the GPT-4o call
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant that generates a list of inputs based on prompts."},
-        {"role": "user", "content": f"Generate a list of inputs based on the following prompt:\n\n{request.prompt}"}
-    ]
-    
-    # Call GPT-4o using the chat_str_openai function
     try:
+        # Create the messages for the GPT-4o call
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that generates a list of inputs based on the instructions."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        # If file exists, append its raw content to the prompt
+        if file:
+            file_content = file.file.read().decode('utf-8')
+            messages[1]["content"] += f"\n\n\n{file_content}"
+        
+        # Call GPT-4o using the chat_str_openai function
         response = chat_str_openai(
             messages=messages,
-            model=OpenAIModelEnum.gpt_4o.value,
-            temperature=0.7  # Use a slightly higher temperature for creativity
+            model=OpenAIModelEnum.o3_mini.value,
+            temperature=0.0
         )
         
         # Parse the response into a list of strings
-        # First, try to parse as a list if it looks like one
         if response.startswith("1.") or response.startswith("-") or response.startswith("*"):
             # Split by newlines and clean up
-            inputs = [line.strip() for line in response.split("\n") 
-                     if line.strip() and not line.strip().isdigit()]
+            generated_inputs = [line.strip() for line in response.split("\n") 
+                              if line.strip() and not line.strip().isdigit()]
             
             # Remove numbering or bullet points
-            inputs = [re.sub(r"^\d+\.\s*|\*\s*|-\s*", "", line) for line in inputs]
+            generated_inputs = [re.sub(r"^\d+\.\s*|\*\s*|-\s*", "", line) for line in generated_inputs]
         else:
             # If not in list format, split by newlines
-            inputs = [line.strip() for line in response.split("\n") if line.strip()]
+            generated_inputs = [line.strip() for line in response.split("\n") if line.strip()]
         
         # Filter out any empty strings
-        inputs = [input_str for input_str in inputs if input_str]
+        generated_inputs = [input_str for input_str in generated_inputs if input_str]
         
         return {
             "message": "Success",
-            "inputs": inputs
+            "inputs": generated_inputs
         }
     except Exception as e:
         return {

@@ -12,7 +12,7 @@ from langfuse.decorators import langfuse_context, observe
 from openai import OpenAI
 from openai import Stream as OpenAIStream
 
-from app.models import ChatModelParams, EngineEnum, HiveModelEnum
+from app.models import ChatModelParams, EngineEnum, HiveModelEnum, OpenAIModelEnum
 from app.prompts import HIVE_QA_PROMPT
 
 if TYPE_CHECKING:
@@ -190,12 +190,31 @@ def chat_str_hive(messages: list[dict], model: str, **kwargs: dict) -> str:
     return text
 
 
-def set_kwargs_openai(kwargs: dict) -> None:
-    """Set default values for openai.Completion API call."""
-    if "max_tokens" not in kwargs:
-        kwargs["max_tokens"] = MAX_TOKENS
-    if "temperature" not in kwargs:
-        kwargs["temperature"] = TEMPERATURE
+def set_kwargs_openai(kwargs: dict, model: str) -> None:
+    """Set default values for openai.Completion API call.
+    
+    Parameters
+    ----------
+    kwargs : dict
+        The keyword arguments to set defaults for
+    model : str
+        The model name being used
+    """
+    if(model == OpenAIModelEnum.o3_mini.value):
+        if("max_tokens" in kwargs):
+            kwargs["max_completion_tokens"] = kwargs["max_tokens"]
+            del kwargs["max_tokens"]
+        else:
+            kwargs["max_completion_tokens"] = MAX_TOKENS
+        
+        if "temperature" in kwargs:
+            del kwargs["temperature"]
+            
+    else:
+        if "max_tokens" not in kwargs:
+            kwargs["max_tokens"] = MAX_TOKENS
+        if "temperature" not in kwargs:
+            kwargs["temperature"] = TEMPERATURE
     if "seed" not in kwargs:
         kwargs["seed"] = SEED
     if "tools" in kwargs and "tool_choice" not in kwargs:
@@ -221,7 +240,7 @@ def chat_openai(messages: list[dict], model: str, **kwargs: dict) -> ChatComplet
         The response from the LLM.
 
     """
-    set_kwargs_openai(kwargs)
+    set_kwargs_openai(kwargs, model)
     response: ChatCompletion = OPENAI_CLIENT.chat.completions.create(
         model=model,
         messages=messages,
@@ -265,7 +284,7 @@ def chat_stream_openai(
         The response from the LLM.
 
     """
-    set_kwargs_openai(kwargs)
+    set_kwargs_openai(kwargs, model)
     return OPENAI_CLIENT.chat.completions.create(
         model=model,
         messages=messages,

@@ -104,6 +104,7 @@ class OpenAIModelEnum(str, Enum):
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
     o1_preview = "o1-preview"
     o1_mini = "o1-mini"
+    o3_mini = "o3-mini"
     mod_stable = "text-moderation-stable"
     mod_latest = "text-moderation-latest"
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down
@@ -507,6 +508,13 @@ class FetchSessions(BaseModel):
         """Validate that at least one of bot_id or firebase_uid is provided."""
         if self.bot_id is None and self.firebase_uid is None:
             raise ValueError("At least one of bot_id or firebase_uid must be provided")
+
+class InputDataset(BaseModel): #build this out
+    """Model for an input dataset."""
+    name: str
+    description: str = ""
+    inputs: List[str]
+    user: User
 
 class EvalSession(BaseModel):
     """Model for a session in an evaluation dataset."""
