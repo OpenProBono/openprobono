@@ -6,7 +6,7 @@ from contextvars import copy_context
 
 from langfuse.decorators import langfuse_context, observe
 
-from app.chat_models import chat_single_gemini, chat_str
+from app.chat_models import chat_str
 from app.encoders import max_token_indices
 from app.models import (
     ChatModelParams,
@@ -290,8 +290,12 @@ def summarize_gemini_full(docs: list[str]) -> str:
     for text in docs:
         fulltext += text
         fulltext += "\n"
-    chat_model = ChatModelParams(engine=EngineEnum.google, model=GoogleModelEnum.gemini_1_5_flash)
-    return chat_single_gemini(SUMMARY_PROMPT.format(text=fulltext), chat_model.model)
+    chat_model = ChatModelParams(
+        engine=EngineEnum.google,
+        model=GoogleModelEnum.gemini_1_5_flash,
+    )
+    msg = {"role": "user", "content": SUMMARY_PROMPT.format(text=fulltext)}
+    return chat_str([msg], chat_model)
 
 
 @observe(capture_input=False)

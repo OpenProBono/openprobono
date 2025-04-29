@@ -1,17 +1,20 @@
 """Classes for creating/loading knowledge bases, primarily for evaluation."""
 from __future__ import annotations
 
-import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import Generator, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from unstructured.chunking.title import chunk_by_title
 from unstructured.documents.elements import Element, ElementMetadata, Text
 from unstructured.partition.auto import partition
 
+from app.db import load_vdb
 from app.encoders import embed_strs
-from app.milvusdb import get_expr, load_vdb_param, upload_data
+from app.milvusdb import get_expr, upload_data
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 class KnowledgeBase(Protocol):
@@ -36,7 +39,7 @@ class KnowledgeBase(Protocol):
 
     def populate_database(
         self: KnowledgeBase,
-        collection_name: str,
+        vdb_id: str,
         chunk_hardmax: int,
         chunk_softmax: int,
         overlap: int,
@@ -47,8 +50,8 @@ class KnowledgeBase(Protocol):
         ----------
         self : KnowledgeBase
             The current instance of KnowledgeBase.
-        collection_name : str
-            The name of the milvus Collection to populate.
+        vdb_id : str
+            The ID of the milvus Collection to populate.
         chunk_hardmax : int
             The maximum number of characters to use when chunking.
         chunk_softmax : int
@@ -62,7 +65,8 @@ class KnowledgeBase(Protocol):
             Whether or not the database was populated successfully.
 
         """
-        encoder = load_vdb_param(collection_name, "encoder")
+        vdb = load_vdb(vdb_id)
+        encoder = vdb.encoder
         for _, elements in self.generate_elements():
             chunks = chunk_by_title(
                 elements,
@@ -81,7 +85,7 @@ class KnowledgeBase(Protocol):
                 "metadata": metadatas[i],
                 "text": texts[i],
             } for i in range(len(texts))]
-            result = upload_data(collection_name, data)
+            result = upload_data(vdb_id, data)
             if result["message"] != "Success":
                 return False
         return True

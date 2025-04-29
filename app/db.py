@@ -1,25 +1,32 @@
 """Written by Arman Aydemir. Used to access and store data in the Firestore database."""
 from __future__ import annotations
 
+import datetime
 import os
 from json import loads
+from typing import List, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from langfuse.decorators import observe
 
+from app.logger import setup_logger
 from app.models import (
     BotRequest,
     ChatRequest,
-    EncoderParams,
+    EvalDataset,
     FetchSession,
-    MilvusMetadataEnum,
+    LabeledEvalDataset,
+    LabelingType,
     OpinionFeedback,
     SessionFeedback,
     User,
+    VDBRequest,
     get_uuid_id,
 )
+
+logger = setup_logger()
 
 # which version of db we are using
 DB_VERSION = "_vf16"
@@ -28,6 +35,10 @@ MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
+EVAL_DATASET_COLLECTION = "eval_datasets"
+
+# used to cache VDB params from firebase
+ID_VDB = {}
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -140,9 +151,9 @@ def store_opinion_feedback(r: OpinionFeedback) -> bool:
 
     """
     # TODO: generalize to store_vdb_source_feedback()
-    collection_name = "test_firebase"
+    vdb_id = "test_firebase"
     milvus = db.collection(MILVUS_COLLECTION)
-    milvus_coll = milvus.document(collection_name)
+    milvus_coll = milvus.document(vdb_id)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     source = coll_sources.document(str(r.opinion_id))
     if not source.get().exists:
@@ -162,7 +173,7 @@ def set_session_to_bot(session_id: str, bot_id: str) -> bool:
         session_id (str): the session uuid
         bot_id (str): the bot uuid
 
-    Returns:
+    Returns
     -------
         bool: True if successful, False otherwise
 
@@ -200,6 +211,54 @@ def fetch_session(r: FetchSession) -> ChatRequest:
         title=session_data.get("title", ""),
         file_count=session_data.get("file_count", 0),
     )
+
+def fetch_sessions_by(bot_id: Optional[str], firebase_uid: Optional[str], user: User) -> List[dict]:
+    """
+    Fetch sessions from Firebase that match the given criteria.
+    
+    Parameters
+    ----------
+    bot_id : Optional[str]
+        The bot ID to filter sessions by. If None, returns sessions for the user regardless of bot.
+    firebase_uid : Optional[str]
+        The Firebase UID of the user whose sessions are being fetched.
+    user : User
+        The authenticated user making the request.
+    
+    Returns
+    -------
+    List[dict]
+        A list of session dicts that match the criteria, sorted by timestamp (newest first).
+    """
+    if(bot_id is None and firebase_uid is None):
+        return []
+    
+    sessions_ref = db.collection(CONVERSATION_COLLECTION + DB_VERSION)
+    
+    # Start with base query
+    query = sessions_ref
+    
+    if bot_id:
+        # Get the bot to check ownership
+        
+        bot = load_bot(bot_id)
+        if not bot or bot.user.firebase_uid != user.firebase_uid:
+            # If not bot owner, only return sessions for this user and bot
+            query = query.where("bot_id", "==", bot_id).where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
+        else:
+            # Bot owner can see all sessions for their bot
+            query = query.where("bot_id", "==", bot_id)
+    else:
+        # No bot specified, only return user's sessions
+        query = query.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
+    docs = query.get()
+    sessions = [doc.to_dict() for doc in docs]
+    return sessions
 
 def store_bot(r: BotRequest, bot_id: str) -> bool:
     """Store the bot in the database.
@@ -253,55 +312,86 @@ def browse_bots(user: User) -> dict:
     Returns
     -------
     dict
-        the bots, indexed by bot id
+        the bots, indexed by bot id, sorted by timestamp (newest first)
 
     """
     bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
-    query = bot_ref.where(filter=FieldFilter("public", "==", True))
+    
+    # Filter bots by the user's firebase_uid
+    logger.debug("Filtering bots for firebase_uid: %s", user.firebase_uid)
+    query = bot_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
     data = query.get()
+    logger.debug("Found %d bots for user %s", len(data), user.firebase_uid)
     data_dict = {}
     for datum in data:
         data_dict[datum.id] = datum.to_dict()
     return data_dict
 
-def load_vdb(collection_name: str) -> dict:
-    """Load the parameters for a collection from the database.
-
-    Parameters
-    ----------
-    collection_name : str
-        The name of the collection that uses the parameters.
+def browse_public_bots() -> dict:
+    """Browse all public bots.
 
     Returns
     -------
     dict
-        The collection parameters: encoder, metadata_format, fields.
+        the public bots, indexed by bot id, sorted by timestamp (newest first)
+    """
+    bot_ref = db.collection(BOT_COLLECTION + DB_VERSION)
+    
+    # Filter bots where public is True
+    query = bot_ref.where(filter=FieldFilter("public", "==", True))
+    
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
+    data = query.get()
+    logger.debug("Found %d public bots", len(data))
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
+
+def load_vdb(vdb_id: str) -> VDBRequest | None:
+    """Load the parameters for a collection from the database.
+
+    Parameters
+    ----------
+    vdb_id : str
+        The ID of the collection that uses the parameters.
+
+    Returns
+    -------
+    VDBRequest
+        The VDB object.
+    None
+        If the collection cannot be found.
 
     """
-    data = db.collection(MILVUS_COLLECTION).document(collection_name).get()
+    # check if the VDB is cached
+    if vdb_id in ID_VDB:
+        return ID_VDB[vdb_id]
+    # it's not; load it
+    data = db.collection(MILVUS_COLLECTION).document(vdb_id).get()
     if data.exists:
-        return data.to_dict()
+        vdb = VDBRequest(**data.to_dict())
+        # cache it
+        ID_VDB[vdb_id] = vdb
+        return vdb
 
     return None
 
-def store_vdb(
-    collection_name: str,
-    encoder: EncoderParams,
-    metadata_format: MilvusMetadataEnum,
-    fields: list | None = None,
-) -> bool:
+def store_vdb(vdb: VDBRequest, vdb_id: str) -> bool:
     """Store the configuration of a Milvus collection in the database.
 
     Parameters
     ----------
-    collection_name : str
-        The collection that uses the configuration.
-    encoder : EncoderParams
-        The EncoderParams object to store.
-    metadata_format : MilvusMetadataEnum
-        The MilvusMetadataEnum object to store.
-    fields : list
-        The list of field names to store if metadata_format is field.
+    vdb : VDBRequest
+        The request object containing the collection parameters to store.
+    vdb_id: str
+        The ID of the VDB.
 
     Returns
     -------
@@ -309,18 +399,20 @@ def store_vdb(
         True if successful, False otherwise.
 
     """
-    data = {
-        "encoder": encoder.model_dump(),
-        "metadata_format": metadata_format,
-        "timestamp": firestore.SERVER_TIMESTAMP,
-    }
-    if fields is not None:
-        data["fields"] = fields
-    db.collection(MILVUS_COLLECTION).document(collection_name).set(data)
-    return True
+    data = vdb.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+    try:
+        db.collection(MILVUS_COLLECTION).document(vdb_id).set(data)
+    except Exception:
+        logger.exception("Error storing VDB in Firebase")
+        return False
+    else:
+        # cache vdb in dictionary
+        ID_VDB[vdb_id] = vdb
+        return True
 
 def load_vdb_source(
-    collection_name: str,
+    vdb_id: str,
     source_id: int,
 ) -> firestore.firestore.DocumentReference:
     """Load source data for entities in a Milvus collection from Firebase.
@@ -329,8 +421,8 @@ def load_vdb_source(
 
     Parameters
     ----------
-    collection_name : str
-        The name of the Milvus collection containing the source.
+    vdb_id : str
+        The ID of the Milvus collection containing the source.
     source_id : int
         The id of the source.
 
@@ -341,12 +433,12 @@ def load_vdb_source(
 
     """
     milvus = db.collection(MILVUS_COLLECTION)
-    milvus_coll = milvus.document(collection_name)
+    milvus_coll = milvus.document(vdb_id)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     return coll_sources.document(str(source_id))
 
 def load_vdb_chunk(
-    collection_name: str,
+    vdb_id: str,
     source_id: int,
     chunk_id: int,
 ) -> firestore.firestore.DocumentReference:
@@ -356,8 +448,8 @@ def load_vdb_chunk(
 
     Parameters
     ----------
-    collection_name : str
-        The name of the Milvus collection containing the chunk.
+    vdb_id : str
+        The ID of the Milvus collection containing the chunk.
     source_id : int
         The id of the source from which the chunk originated.
     chunk_id : int
@@ -370,11 +462,118 @@ def load_vdb_chunk(
 
     """
     milvus = db.collection(MILVUS_COLLECTION)
-    milvus_coll = milvus.document(collection_name)
+    milvus_coll = milvus.document(vdb_id)
     coll_sources = milvus_coll.collection(MILVUS_SOURCES)
     source = coll_sources.document(str(source_id))
     source_chunks = source.collection(MILVUS_CHUNKS)
     return source_chunks.document(str(chunk_id))
+
+def browse_vdbs(user: User) -> dict:
+    """Browse VDBs created by a given user.
+
+    Parameters
+    ----------
+    user : User
+        the user to filter on
+
+    Returns
+    -------
+    dict
+        the VDBs created by the given user, indexed by vdb id, sorted by timestamp (newest first)
+
+    """
+    vdb_ref = db.collection(MILVUS_COLLECTION)
+
+    # Filter bots by the user's firebase_uid
+    logger.debug("Filtering VDBs for firebase_uid: %s", user.firebase_uid)
+    query = vdb_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+
+    data = query.get()
+    logger.debug("Found %d VDBs for user %s", len(data), user.firebase_uid)
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
+
+def browse_public_vdbs() -> dict:
+    """Browse all public VDBs.
+
+    Returns
+    -------
+    dict
+        the public VDBs, indexed by VDB id, sorted by timestamp (newest first)
+
+    """
+    vdb_ref = db.collection(MILVUS_COLLECTION)
+
+    # Filter bots where public is True
+    query = vdb_ref.where(filter=FieldFilter("public", "==", True))
+
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+
+    data = query.get()
+    logger.debug("Found %d public VDBs", len(data))
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    return data_dict
+
+def delete_vdb(vdb_id: str, user: User) -> bool:
+    """Delete a VDB collection from the database.
+
+    Only the user who created the VDB can delete it.
+
+    Parameters
+    ----------
+    vdb_id : str
+        The ID of the VDB to delete
+    user : User
+        The user requesting the deletion
+
+    Returns
+    -------
+    bool
+        True if deletion was successful, False otherwise
+
+    """
+    # First, load the VDB to check ownership
+    vdb = load_vdb(vdb_id)
+
+    # If VDB doesn't exist, return False
+    if not vdb:
+        logger.warning(
+            "Attempted to delete non-existent VDB %s by user %s",
+            vdb_id,
+            user.firebase_uid,
+        )
+        return False
+
+    # Check if the requesting user is the VDB creator
+    if vdb.user.firebase_uid != user.firebase_uid:
+        logger.warning(
+            "Unauthorized deletion attempt of VDB %s by user %s",
+            vdb_id,
+            user.firebase_uid,
+        )
+        return False
+
+    # Delete the VDB
+    try:
+        db.collection(MILVUS_COLLECTION).document(vdb_id).delete()
+        logger.info(
+            "VDB %s successfully deleted by user %s",
+            vdb_id,
+            user.firebase_uid,
+        )
+    except Exception:
+        logger.exception("Exception while deleting VDB %s", vdb_id)
+        return False
+    else:
+        return True
 
 def get_batch() -> firestore.firestore.WriteBatch:
     """Get a batch object for use with Firestore.
@@ -390,6 +589,53 @@ def get_batch() -> firestore.firestore.WriteBatch:
     """
     return db.batch()
 
+def upload_data_firebase(
+    vdb_id: str,
+    data: list[dict],
+    source_ids: set | None = None,
+) -> dict:
+    """Insert chunk data into Firebase.
+
+    Parameters
+    ----------
+    vdb_id : str
+        The ID of the Firebase collection.
+    data : list[dict]
+        Each element must contain `text`, `chunk_index`, `source_id`.
+    source_ids : set | None, optional
+        A set of source_ids that have already been inserted into the database,
+        by default None.
+
+    Returns
+    -------
+    dict
+        Containing a message and insert count
+
+    """
+    if source_ids is None:
+        source_ids = set()
+    db_batch = get_batch()
+    insert_count = len(data)
+    for i in range(insert_count):
+        text = data[i]["text"]
+        chunk_idx = data[i]["chunk_index"]
+        source_id = data[i]["source_id"]
+        if source_id not in source_ids:
+            source_ids.add(source_id)
+            db_source = load_vdb_source(vdb_id, source_id)
+            del data[i]["text"]
+            del data[i]["chunk_index"]
+            del data[i]["source_id"]
+            db_batch.set(db_source, data[i])
+        chunk_data = {"text": text, "chunk_index": chunk_idx}
+        db_chunk = load_vdb_chunk(vdb_id, source_id, data[i]["pk"])
+        db_batch.set(db_chunk, chunk_data)
+        if i % 1000 == 0:
+            db_batch.commit()
+            db_batch = get_batch()
+    db_batch.commit()
+    logger.info("Collection uploaded data to Firebase: %s", vdb_id)
+    return {"message": "Success", "insert_count": insert_count}
 
 @observe()
 def get_cached_response(bot_id: str, firebase_uid: str, message: str) -> str | None:
@@ -428,3 +674,263 @@ def get_cached_response(bot_id: str, firebase_uid: str, message: str) -> str | N
         if len(user_messages) == 1 and user_messages[0]["content"] == message:
             return d["history"][-1]["content"]
     return None
+
+def delete_bot(bot_id: str, user: User) -> bool:
+    """Delete a bot from the database.
+    
+    Only the user who created the bot can delete it.
+
+    Parameters
+    ----------
+    bot_id : str
+        The ID of the bot to delete
+    user : User
+        The user requesting the deletion
+
+    Returns
+    -------
+    bool
+        True if deletion was successful, False otherwise
+    """
+    # First, load the bot to check ownership
+    bot = load_bot(bot_id)
+    
+    # If bot doesn't exist, return False
+    if not bot:
+        logger.warning("Attempted to delete non-existent bot %s by user %s", 
+                      bot_id, user.firebase_uid)
+        return False
+    
+    # Check if the requesting user is the bot creator
+    if bot.user.firebase_uid != user.firebase_uid:
+        logger.warning("Unauthorized deletion attempt of bot %s by user %s", 
+                      bot_id, user.firebase_uid)
+        return False
+    
+    # Delete the bot
+    try:
+        db.collection(BOT_COLLECTION + DB_VERSION).document(bot_id).delete()
+        logger.info("Bot %s successfully deleted by user %s", 
+                   bot_id, user.firebase_uid)
+        return True
+    except Exception as e:
+        logger.error("Error deleting bot %s: %s", bot_id, str(e))
+        return False
+
+def store_eval_dataset(dataset: EvalDataset, dataset_id: str) -> bool:
+    """Store an evaluation dataset in the database.
+
+    Parameters
+    ----------
+    dataset : EvalDataset
+        The dataset object to store.
+    dataset_id : str
+        The dataset id to use.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    data = dataset.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+    db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    return True
+
+def get_user_datasets(user: User) -> dict:
+    """Get all evaluation datasets for a user.
+
+    Parameters
+    ----------
+    user : User
+        The user whose datasets to retrieve.
+
+    Returns
+    -------
+    dict
+        Dictionary of datasets indexed by dataset_id, sorted by timestamp (newest first).
+    """
+    dataset_ref = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION)
+    
+    # Filter datasets by the user's firebase_uid
+    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
+    data = query.get()
+    logger.debug("Found %d datasets for user %s", len(data), user.firebase_uid)
+    
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    
+    return data_dict
+
+def get_dataset(dataset_id: str) -> Optional[EvalDataset]:
+    """Get a specific evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to retrieve.
+
+    Returns
+    -------
+    Optional[EvalDataset]
+        The dataset if found, None otherwise.
+    """
+    dataset = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
+    if dataset.exists:
+        return EvalDataset(**dataset.to_dict())
+    return None
+
+# Constants for labeled evaluation datasets
+LABELED_EVAL_DATASET_COLLECTION = "labeled_eval_datasets_"
+
+def store_labeled_eval_dataset(dataset: LabeledEvalDataset, dataset_id: str) -> bool:
+    """Store a labeled evaluation dataset in the database.
+
+    Parameters
+    ----------
+    dataset : LabeledEvalDataset
+        The labeled dataset object to store.
+    dataset_id : str
+        The dataset id to use.
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    # Update timestamps
+    dataset.updated_at = firestore.SERVER_TIMESTAMP
+    if not dataset.created_at:
+        dataset.created_at = firestore.SERVER_TIMESTAMP
+    
+    # Calculate progress
+    if dataset.sessions:
+        labeled_count = sum(1 for session in dataset.sessions if session.labeled)
+        total_count = len(dataset.sessions)
+        dataset.progress = (labeled_count / total_count) * 100
+        dataset.completed = labeled_count == total_count
+    
+    data = dataset.model_dump()
+    db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    return True
+
+def get_labeled_dataset(dataset_id: str) -> Optional[LabeledEvalDataset]:
+    """Get a specific labeled evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the labeled dataset to retrieve.
+
+    Returns
+    -------
+    Optional[LabeledEvalDataset]
+        The labeled dataset if found, None otherwise.
+    """
+    dataset = db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
+    if dataset.exists:
+        return LabeledEvalDataset(**dataset.to_dict())
+    return None
+
+def get_user_labeled_datasets(user: User) -> dict:
+    """Get all labeled evaluation datasets for a user.
+
+    Parameters
+    ----------
+    user : User
+        The user whose labeled datasets to retrieve.
+
+    Returns
+    -------
+    dict
+        Dictionary of labeled datasets indexed by dataset_id, sorted by updated_at timestamp (newest first).
+    """
+    dataset_ref = db.collection(LABELED_EVAL_DATASET_COLLECTION + DB_VERSION)
+    
+    # Filter datasets by the user's firebase_uid
+    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    # Order by updated_at timestamp in descending order (newest first)
+    query = query.order_by("updated_at", direction=firestore.Query.DESCENDING)
+    
+    data = query.get()
+    logger.debug("Found %d labeled datasets for user %s", len(data), user.firebase_uid)
+    
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = datum.to_dict()
+    
+    return data_dict
+
+def update_labeled_session(dataset_id: str, session_id: str, 
+                          aspect_ratings: dict,
+                          notes: Optional[str] = None,
+                          user: User = None) -> bool:
+    """Update a labeled session within a labeled evaluation dataset.
+
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the labeled dataset.
+    session_id : str
+        The ID of the session to update.
+    aspect_ratings : dict
+        Dictionary mapping aspect_id to rating value (can be int for ranking, bool for thumbs, float for score)
+    notes : Optional[str], optional
+        Evaluation notes, by default None
+    user : User, optional
+        The user making the update, by default None
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    # Get the dataset
+    dataset = get_labeled_dataset(dataset_id)
+    if not dataset:
+        return False
+    
+    # Check user permission
+    if user and dataset.user.firebase_uid != user.firebase_uid:
+        return False
+    
+    # Find and update the session
+    for i, session in enumerate(dataset.sessions):
+        if session.session_id == session_id:
+            # Update ratings for each aspect
+            for aspect_id, rating in aspect_ratings.items():
+                # Find the aspect in the session's aspects list
+                for j, aspect in enumerate(session.aspects):
+                    if aspect.aspect_id == aspect_id:
+                        # Store the rating based on the aspect type
+                        if aspect.type == LabelingType.rank:
+                            dataset.sessions[i].aspects[j].rank_value = rating
+                        elif aspect.type == LabelingType.thumbs:
+                            dataset.sessions[i].aspects[j].thumbs_value = rating
+                        elif aspect.type == LabelingType.score:
+                            dataset.sessions[i].aspects[j].score_value = rating
+                        break
+            
+            # Update notes if provided
+            if notes is not None:
+                dataset.sessions[i].notes = notes
+            
+            # Mark as labeled
+            dataset.sessions[i].labeled = True
+            
+            # Update progress
+            labeled_count = sum(1 for s in dataset.sessions if s.labeled)
+            dataset.progress = (labeled_count / len(dataset.sessions)) * 100
+            dataset.completed = labeled_count == len(dataset.sessions)
+            dataset.updated_at = datetime.datetime.now()
+            
+            # Store the updated dataset
+            return store_labeled_eval_dataset(dataset, dataset_id)
+    
+    return False

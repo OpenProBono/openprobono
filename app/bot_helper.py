@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import Context, copy_context
 from typing import TYPE_CHECKING
 
+from anthropic.types.tool_use_block import ToolUseBlock
+from google.genai import types as genai_types
 from langfuse.decorators import langfuse_context, observe
 from openai.types.chat import ChatCompletionMessageToolCall
 
@@ -31,7 +33,6 @@ from app.vdb_tools import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from anthropic.types.tool_use_block import ToolUseBlock
     from openai import Stream as OpenAIStream
 
 logger = setup_logger()
@@ -61,10 +62,7 @@ def stream_openai_response(response: OpenAIStream):
                     content = ""
 
     if content:
-        yield {
-            "type": "response",
-            "content": content,
-        }
+        yield {"type": "response", "content": content}
 
     tool_calls, current_dict = [], {}
     if(no_yield):
@@ -145,15 +143,18 @@ def setup_common(r: ChatRequest, bot: BotRequest) -> dict:
     """
     toolset = search_toolset_creator(bot, r.bot_id)
     toolset += vdb_toolset_creator(bot, r.bot_id, r.session_id)
-    kwargs = {"tools": toolset}
+
     # System prompt
     match bot.chat_model.engine:
         case EngineEnum.openai:
+            kwargs = {"tools": toolset}
             system_prompt_msg = {"role": "system", "content": bot.system_prompt}
             if system_prompt_msg not in r.history:
                 r.history.insert(0, system_prompt_msg)
         case EngineEnum.anthropic:
-            kwargs["system"] = bot.system_prompt
+            kwargs = {"tools": toolset, "system": bot.system_prompt}
+        case EngineEnum.google:
+            kwargs = {"tools": toolset, "system_instruction": bot.system_prompt}
     # Setup tracing
     last_user_msg = next(
         (m for m in r.history[::-1] if m["role"] == "user"),
@@ -165,15 +166,15 @@ def setup_common(r: ChatRequest, bot: BotRequest) -> dict:
 
 
 def execute_tool_call(
-    tool_call: ChatCompletionMessageToolCall | ToolUseBlock,
+    tool_call: ChatCompletionMessageToolCall | ToolUseBlock | genai_types.FunctionCall,
     bot: BotRequest,
 ) -> tuple[str, str, list[dict]]:
     """Call a tool for a bot.
 
     Parameters
     ----------
-    tool_call : ChatCompletionMessageToolCall | ToolUseBlock
-        the tool call object, type depends on engine (OpenAI or Anthropic)
+    tool_call : ChatCompletionMessageToolCall | ToolUseBlock | genai_types.FunctionCall
+        the tool call object, type depends on engine (OpenAI, Anthropic, or Google)
     bot : BotRequest
         the bot calling the tool
 
@@ -184,11 +185,21 @@ def execute_tool_call(
 
     """
     if isinstance(tool_call, ChatCompletionMessageToolCall):
+        # OpenAI tool call
         function_name = tool_call.function.name
         function_args = json.loads(tool_call.function.arguments)
-    else: # ToolUseBlock (anthropic)
+    elif isinstance(tool_call, ToolUseBlock):
+        # Anthropic ToolUseBlock
         function_name = tool_call.name
         function_args = tool_call.input
+    elif isinstance(tool_call, genai_types.FunctionCall):
+        # Google function call
+        function_name = tool_call.name
+        function_args = tool_call.args
+    else:
+        # Unknown tool call type
+        logger.error("Unknown tool call type: %s", type(tool_call))
+        return "unknown", "error: unknown tool call type", []
     logger.info("Tool %s Called With Args %s", function_name, function_args)
     vdb_tool = find_vdb_tool(bot, function_name)
     search_tool = find_search_tool(bot, function_name)
@@ -210,7 +221,7 @@ def execute_tool_call(
 
 
 def execute_tool_calls(
-    tool_calls: list[ChatCompletionMessageToolCall],
+    tool_calls: list[ChatCompletionMessageToolCall] | list[genai_types.FunctionCall],
     bot: BotRequest,
     messages: list,
     *, stream: bool,
@@ -219,8 +230,8 @@ def execute_tool_calls(
 
     Parameters
     ----------
-    tool_calls : list[ChatCompletionMessageToolCall]
-        The tools to run
+    tool_calls : list[ChatCompletionMessageToolCall] | list[genai_types.FunctionCall]
+        The tools to run. Depends on bot engine.
     bot : BotRequest
         The bot running the tools
     messages : list
@@ -244,18 +255,29 @@ def execute_tool_calls(
         futures = []
         for tool_call in tool_calls:
             ctx = copy_context()
-            function_name = tool_call.function.name
+            if isinstance(tool_call, ChatCompletionMessageToolCall):
+                # OpenAI tool call
+                function_name = tool_call.function.name
+                function_args = tool_call.function.arguments
+            elif isinstance(tool_call, genai_types.FunctionCall):
+                # Google function call
+                function_name = tool_call.name
+                function_args = tool_call.args
+            else:
+                # Unknown tool call type
+                logger.error("Unknown tool call type: %s", type(tool_call))
+                return "unknown", "error: unknown tool call type", []
             tool_id_name[tool_call.id] = function_name
             if stream:
                 yield {
                     "type": "tool_call",
                     "id": tool_call.id,
                     "name": function_name,
-                    "args": tool_call.function.arguments,
+                    "args": function_args,
                 }
 
             def task(
-                tc: ChatCompletionMessageToolCall = tool_call,
+                tc: ChatCompletionMessageToolCall | genai_types.FunctionCall = tool_call,
                 context: Context = ctx,
             ) -> tuple[str, str, list[dict]]:
                 return context.run(execute_tool_call, tc, bot)
@@ -368,6 +390,9 @@ def title_chat(bot: BotRequest, message: str) -> str:
             messages = [sys_msg, conv_msg]
         case EngineEnum.anthropic:
             kwargs["system"] = TITLE_CHAT_PROMPT
+            messages = [conv_msg]
+        case EngineEnum.google:
+            kwargs["system_instruction"] = TITLE_CHAT_PROMPT
             messages = [conv_msg]
     return chat_str(messages, bot.chat_model, **kwargs)
 
@@ -514,6 +539,92 @@ def format_session_history(cr: ChatRequest, bot: BotRequest) -> list:
                             "name": function_name,
                             "results": formatted_results,
                         })
+        case EngineEnum.google:
+            for msg in cr.history:
+                if msg["role"] == "system": # ignore system prompts for front end display
+                    continue
+                if msg["role"] == "assistant":
+                    if isinstance(msg["content"], str): # Simple text response
+                        history.append({"type": "response", "content": msg["content"]})
+                    elif "parts" in msg: # Message with parts
+                        for part in msg["parts"]:
+                            if isinstance(part, str): # Text content
+                                history.append({"type": "response", "content": part})
+                            elif "function_call" in part: # Function call
+                                function_call = part["function_call"]
+                                history.append({
+                                    "type": "tool_call",
+                                    "id": function_call.get("id", function_call["name"]),
+                                    "name": function_call["name"],
+                                    "args": json.dumps(function_call["args"]),
+                                })
+                elif msg["role"] == "user":
+                    if isinstance(msg["content"], str): # Text message or source list
+                        if msg["content"].startswith("file:"):
+                            # user file upload
+                            file_id = msg["content"][5:]
+                            history += [
+                                {"type": "file", "id": file_id},
+                                {
+                                    "type": "file_upload_result",
+                                    "status": "Success",
+                                    "id": file_id,
+                                },
+                            ]
+                        elif not msg["content"].startswith("**Sources**:\n"):
+                            # ignore sources message
+                            # append actual user message
+                            history.append({"type": "user", "content": msg["content"]})
+                    elif "parts" in msg: # Message with parts
+                        for part in msg["parts"]:
+                            if "function_response" in part: # Function response
+                                function_response = part["function_response"]
+                                function_name = function_response["name"]
+                                tool_result = function_response["response"]["result"]
+
+                                # Find the tool call ID by looking for the most recent tool call with matching name
+                                tool_call_msg = next(
+                                    (
+                                        m for m in reversed(history)
+                                        if m["type"] == "tool_call" and m["name"] == function_name
+                                    ),
+                                    None,
+                                )
+
+                                if tool_call_msg is None:
+                                    logger.error("Format session history found a tool result without a tool call message for %s in session %s", function_name, cr.session_id)
+                                    continue
+
+                                tool_call_id = tool_call_msg["id"]
+
+                                # Format tool results
+                                if isinstance(tool_result, str):
+                                    try:
+                                        tool_result = ast.literal_eval(tool_result)
+                                    except (ValueError, SyntaxError):
+                                        # Not a valid Python literal
+                                        logger.warning("Unable to parse tool result as literal: %s", tool_result)
+
+                                vdb_tool = find_vdb_tool(bot, function_name)
+                                search_tool = find_search_tool(bot, function_name)
+
+                                if vdb_tool:
+                                    formatted_results = format_vdb_tool_results(tool_result, vdb_tool)
+                                elif search_tool:
+                                    formatted_results = format_search_tool_results(
+                                        tool_result,
+                                        search_tool,
+                                    )
+                                else:
+                                    formatted_results = []
+
+                                history.append({
+                                    "type": "tool_result",
+                                    "id": tool_call_id,
+                                    "name": function_name,
+                                    "results": formatted_results,
+                                })
+
     # add a done event signaling end of a response stream
     history.append({"type": "done"})
     return history

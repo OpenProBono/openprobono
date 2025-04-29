@@ -1,5 +1,6 @@
 """Functions to search the British and Irish Legal Information Institute (BAILII)."""
 
+import datetime
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -16,7 +17,7 @@ from app.models import SearchTool
 
 BAILII_COLLECTION = "bailii"
 BAILII_URL = "https://www.bailii.org/cgi-bin"
-BAILII_SEARCH_PATH = "/lucy_search_1.cgi?datehigh=&method=boolean&query={query}&mask_path=/eu/cases+/ew/cases+/ie/cases+/nie/cases+/scot/cases+/uk/cases+/ae/cases+/qa/cases+/sh/cases+/je/cases+/ky/cases+/sg/cases&datelow=&sort=rank&highlight=1"
+BAILII_SEARCH_PATH = "/lucy_search_1.cgi?datehigh={before_date}&method=boolean&query={query}&mask_path=/eu/cases+/ew/cases+/ie/cases+/nie/cases+/scot/cases+/uk/cases+/ae/cases+/qa/cases+/sh/cases+/je/cases+/ky/cases+/sg/cases&datelow={after_date}&sort=rank&highlight=1"
 BAILII_RESULT_PATH = "/format.cgi?doc={doc}"
 ADVANCED_SEARCH_DESC = """Advanced searches use CONNECTORS.
 
@@ -30,15 +31,27 @@ ADVANCED_SEARCH_DESC = """Advanced searches use CONNECTORS.
 logger = setup_logger()
 
 @observe()
-def bailii_search(qr: str, tool: SearchTool) -> list[str]:
+def bailii_search(
+    semantic_query: str,
+    advanced_query: str,
+    tool: SearchTool,
+    after_date: str | None = None,
+    before_date: str | None = None,
+) -> list[str]:
     """Query the BAILII search engine.
 
     Parameters
     ----------
-    qr : str
-        the query
+    semantic_query : str
+        The semantic query for searching general concepts
+    advanced_query : str
+        The advanced query with boolean operators
     tool : SearchTool
         the tool using this search method
+    after_date : str | None, optional
+        The after date for the query date range in YYYY-MM-DD format, by default None
+    before_date : str | None, optional
+        The before date for the query date range in YYYY-MM-DD format, by default None
 
     Returns
     -------
@@ -52,10 +65,18 @@ def bailii_search(qr: str, tool: SearchTool) -> list[str]:
             "Gecko/20100101 Firefox/131.0"
         ),
     }
-    adv_query = format_advanced_query(qr)
-    url = BAILII_URL + BAILII_SEARCH_PATH.format(query=adv_query)
+    # Prioritize advanced query if provided, otherwise use semantic query
+    adv_query = format_advanced_query(advanced_query)
+    after_date_fmtd = "" if after_date is None else after_date.replace("-", "")
+    before_date_fmtd = "" if before_date is None else before_date.replace("-", "")
+    url = BAILII_URL + BAILII_SEARCH_PATH.format(
+        query=adv_query,
+        after_date=after_date_fmtd,
+        before_date=before_date_fmtd,
+    )
+    r = None
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=headers, timeout=20)
         r.raise_for_status()
     except (
         requests.exceptions.Timeout,
@@ -87,22 +108,31 @@ def bailii_search(qr: str, tool: SearchTool) -> list[str]:
             level="ERROR",
             status_message=str(error),
         )
+
+    if not r:
+        return []
+
     soup = BeautifulSoup(r.content)
-    urls = get_result_links(soup)[:4]
+    results = get_result_links(soup)[:4]
 
     with ThreadPoolExecutor() as executor:
         futures = []
-        for url in urls:
+        for result in results:
             ctx = copy_context()
-            def task(u=url, t=tool, context=ctx):  # noqa: ANN001, ANN202
-                return context.run(process_site, u, t)
+            def task(r=result, t=tool, context=ctx):  # noqa: ANN001, ANN202
+                return context.run(process_site, r, t)
             futures.append(executor.submit(task))
 
         for future in as_completed(futures):
             _ = future.result()
 
     expr = f"json_contains(metadata['bot_and_tool_id'], '{tool.bot_id + tool.name}')"
-    res = query(BAILII_COLLECTION, qr, expr=expr)
+    if after_date is not None:
+        expr += f" and metadata['decision_date']>='{after_date}'"
+    if before_date is not None:
+        expr += f" and metadata['decision_date']<='{before_date}'"
+    # Use semantic_query for vector search to find similar content
+    res = query(BAILII_COLLECTION, semantic_query, expr=expr)
     if "result" in res:
         pks = [str(hit["pk"]) for hit in res["result"]]
         langfuse_context.update_current_observation(output=pks)
@@ -117,25 +147,25 @@ url_lock = Lock()
 failed_urls = set()
 failed_urls_lock = Lock()
 
-def process_site(url: str, tool: SearchTool) -> None:
+def process_site(result: dict, tool: SearchTool) -> None:
+    url = result["link"]
     num_attempts = 10
     with url_lock:
         if url not in url_locks:
             url_locks[url] = Lock()
     with url_locks[url]:
-        logger.info("Site %s acquired lock", url)
         # Check if URL has already failed before processing
         with failed_urls_lock:
             if url in failed_urls:
                 logger.info("Skipping previously failed URL: %s", url)
                 return
         try:
-            if not source_exists(BAILII_COLLECTION, url, tool.bot_id, tool.name):
+            if not source_exists(BAILII_COLLECTION, result, tool.bot_id, tool.name):
                 logger.info("Uploading site: %s", url)
-                upload_site(BAILII_COLLECTION, url, tool)
+                upload_site(BAILII_COLLECTION, result, tool)
                 # check to ensure site appears in collection before releasing URL lock
                 attempt = 0
-                while not source_exists(BAILII_COLLECTION, url, tool.bot_id, tool.name) and attempt < num_attempts:
+                while not source_exists(BAILII_COLLECTION, result, tool.bot_id, tool.name) and attempt < num_attempts:
                     attempt += 1
                 if attempt == num_attempts:
                     logger.error("Site not found in collection, add to failed URLs: %s", url)
@@ -147,7 +177,6 @@ def process_site(url: str, tool: SearchTool) -> None:
             logger.exception("Warning: Failed to upload site for dynamic serpapi: %s", url)
             with failed_urls_lock:
                 failed_urls.add(url)
-        logger.info("Site %s releasing lock", url)
 
 
 def format_advanced_query(query: str) -> str:
@@ -189,7 +218,7 @@ def format_advanced_query(query: str) -> str:
     return re.sub(r"\++", "+", temp_query)
 
 
-def get_result_links(soup: BeautifulSoup) -> list[str]:
+def get_result_links(soup: BeautifulSoup) -> list[dict]:
     """Extract the links from the search results page.
 
     Parameters
@@ -199,16 +228,37 @@ def get_result_links(soup: BeautifulSoup) -> list[str]:
 
     Returns
     -------
-    list[str]
-        A list of URLs found in the search results.
+    list[dict]
+        A list of dictionaries containing link, title, and source keys found in the search results.
 
     """
     list_items = soup.find_all("li")
-    docs = []
+    results = []
     for item in list_items:
-        item_links = item.find_all("a")
-        docs += [
-            link["href"] for link in item_links
-            if link and "href" in link.attrs and not link["href"].startswith("/cgi-bin")
-        ]
-    return [BAILII_URL + BAILII_RESULT_PATH.format(doc=doc) for doc in docs]
+        item_title = item.find("a")
+        title = item_title.text.strip()
+        # get %d %B %Y format date from the LAST set of parentheses in title
+        formatted_date = None
+        matches = re.findall(r"\((.*?)\)", title)
+        if matches:
+            date_str = matches[-1].strip()
+            # Remove ordinal suffixes from day
+            date_str = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", date_str)
+            # Replace commas and extra spaces
+            date_str = re.sub(r",\s*", " ", date_str)
+            date_str = re.sub(r"\s+", " ", date_str).strip()
+            date_obj = datetime.datetime.strptime(date_str, "%d %B %Y").replace(
+                tzinfo=datetime.timezone.utc,
+            )
+            formatted_date = date_obj.strftime("%Y-%m-%d")
+        source = item.find("small").text.strip()
+        item_link = item.find("i").find("a").get("href")
+        if not item_link:
+            continue
+
+        link = BAILII_URL + BAILII_RESULT_PATH.format(doc=item_link)
+        result = {"source": source, "title": title, "link": link}
+        if formatted_date:
+            result["decision_date"] = formatted_date
+        results.append(result)
+    return results

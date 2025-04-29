@@ -3,6 +3,7 @@ import warnings
 from pathlib import Path
 
 import pymilvus
+import pytest
 from fastapi import UploadFile
 
 from app import milvusdb
@@ -27,9 +28,8 @@ def test_firebase_config() -> None:
             warnings.warn(f"collection {coll} not found in firebase", stacklevel=1)
             continue
         # test encoder
-        encoder = milvusdb.load_vdb_param(coll, "encoder")
-        assert isinstance(encoder, EncoderParams)
-        if encoder.name != OpenAIModelEnum.embed_ada_2:
+        assert isinstance(firebase_coll.encoder, EncoderParams)
+        if firebase_coll.encoder.name != OpenAIModelEnum.embed_ada_2:
             # check the dimensions of the vector field
             milvus_coll = pymilvus.Collection(coll)
             vector_field = None
@@ -38,35 +38,23 @@ def test_firebase_config() -> None:
                     vector_field = field
                     break
             assert vector_field is not None
-            assert encoder.dim == vector_field.params["dim"]
+            assert firebase_coll.encoder.dim == vector_field.params["dim"]
         # get metadata fields from Milvus
         milvus_field_names = []
         for milvus_field in milvus_coll.schema.fields:
-            if milvus_field.name in {"pk", "vector", "text"}:
+            if milvus_field.name in {"pk", "vector", "text", "sparse"}:
                 continue
             milvus_field_names.append(milvus_field.name)
         # test metadata
-        metadata_format = milvusdb.load_vdb_param(coll, "metadata_format")
-        assert isinstance(metadata_format, MilvusMetadataEnum)
-        match metadata_format:
+        match firebase_coll.metadata_format:
             case MilvusMetadataEnum.field:
-                fields = milvusdb.load_vdb_param(coll, "fields")
-                assert isinstance(fields, list)
-                assert sorted(milvus_field_names) == sorted(fields)
+                field_names = [f.name for f in firebase_coll.extra_fields]
+                assert sorted(milvus_field_names) == sorted(field_names)
             case MilvusMetadataEnum.json:
                 assert milvus_field_names == ["metadata"]
             case MilvusMetadataEnum.no_field:
                 assert milvus_field_names == []
 
-def test_empty_session_data() -> None:
-    session_id = "emptysession"
-    result = milvusdb.check_session_data(session_id)
-    assert result is False
-
-def test_session_data_uploaded() -> None:
-    session_id = "d42992b5-dfe6-4966-8e97-a16d6c8f7c7d"
-    result = milvusdb.check_session_data(session_id)
-    assert result is True
 
 def test_get_expr() -> None:
     result = milvusdb.get_expr(collection_name, test_expr)
@@ -74,10 +62,40 @@ def test_get_expr() -> None:
     assert "result" in result
     assert len(result["result"]) > 0
 
-def test_file_upload() -> None:
-    with Path("test_text.txt").open("w") as f:
+
+def test_upload_resource_file() -> None:
+    fname = "test_text.txt"
+    with Path(fname).open("w") as f:
         f.write("test text\n")
-    f = UploadFile(file=Path("test_text.txt").open("rb"))
-    result = milvusdb.file_upload(f, "test_session_id", collection_name=collection_name)
+    with Path(fname).open("rb") as fp:
+        f = UploadFile(file=fp, filename=fname)
+        result = milvusdb.upload_resource(
+            collection_name=collection_name,
+            resource_type="file",
+            resource=f,
+            session_id="test_session_id",
+        )
+        assert result["message"] == "Success"
+        assert result["insert_count"] > 0
+
+
+def test_upload_resource_url() -> None:
+    # Mock data for URL resource
+    from app.models import SearchTool
+    # Create a search result mock
+    search_result = {
+        "link": "https://example.com",
+        "title": "Example Domain",
+        "source": "Test Source",
+    }
+    # Create a test search tool
+    search_tool = SearchTool(name="test_tool", prompt="")
+    result = milvusdb.upload_resource(
+        collection_name=collection_name,
+        resource_type="url",
+        resource=search_result,
+        search_tool=search_tool,
+        session_id="test_session_id",
+    )
     assert result["message"] == "Success"
     assert result["insert_count"] > 0

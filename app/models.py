@@ -4,8 +4,9 @@ from __future__ import annotations
 import datetime
 import uuid
 from enum import Enum, unique
+from typing import Optional, List
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 from app.prompts import BOT_PROMPT
 
@@ -78,6 +79,9 @@ class GoogleModelEnum(str, Enum):
 
     gemini_1_5_flash = "gemini-1.5-flash"
     gemini_1_5_pro = "gemini-1.5-pro"
+    gemini_2_5_pro = "gemini-2.5-pro-exp-03-25"
+    gemini_2_flash = "gemini-2.0-flash"
+    gemini_2_flash_lite = "gemini-2.0-flash-lite"
 
 
 @unique
@@ -101,8 +105,15 @@ class OpenAIModelEnum(str, Enum):
     gpt_4o_mini = "gpt-4o-mini"
     gpt_4_turbo = "gpt-4-turbo-preview"
     gpt_4_1106 = "gpt-4-turbo-1106-preview"
+    gpt_4_1 = "gpt-4.1-2025-04-14"
+    gpt_4_1_mini = "gpt-4.1-mini-2025-04-14"
+    gpt_4_1_nano = "gpt-4.1-nano-2025-04-14"
     o1_preview = "o1-preview"
-    o1_mini = "o1-mini"
+    o1 = "o1-2024-12-17"
+    o1_mini = "o1-mini-2024-09-12"
+    o3 = "o3-2025-04-16"
+    o4_mini = "o4-mini-2025-04-16"
+    o3_mini = "o3-mini-2025-01-31"
     mod_stable = "text-moderation-stable"
     mod_latest = "text-moderation-latest"
     embed_large = "text-embedding-3-large" # 3072 dimensions, can project down
@@ -130,6 +141,22 @@ class MilvusMetadataEnum(str, Enum):
     json = "json"
     field = "field"
     no_field = "none"
+
+
+@unique
+class MilvusDataTypeEnum(str, Enum):
+    """Enumeration class representing different data types in Milvus.
+
+    This only supports basic Milvus data types (not arrays or vectors).
+
+    """
+
+    boolean = "boolean"
+    int = "int"
+    float = "float"
+    double = "double"
+    string = "string"
+    json = "json"
 
 
 @unique
@@ -161,22 +188,24 @@ class BotRequest(BaseModel):
 
     Attributes
     ----------
+        name (str): The display name of the bot.
         system_prompt (str): The system prompt.
         message_prompt (str): The message prompt.
-        model (str): The model to be used.
         search_tools (list[SearchTool]): The list of search tools.
         vdb_tools (list[VDBTool]): The list of VDB tools.
-        engine (EngineEnum): The engine to be used.
+        chat_model (ChatModelParams): The chat model parameters.
         user (User): The user obj.
+        public (bool): Whether the bot is publicly available.
 
     """
-
+    name: str
     system_prompt: str = BOT_PROMPT
     message_prompt: str = ""
     search_tools: list[SearchTool] = []
     vdb_tools: list[VDBTool] = []
     chat_model: ChatModelParams = ChatModelParams()
-    user: User = None
+    user: User
+    public: bool = False
 
 
 class OpinionSearchRequest(BaseModel):
@@ -209,13 +238,13 @@ class OpinionSearchRequest(BaseModel):
     after_date: str | None = None
     before_date: str | None = None
 
-class CollectionSearchRequest(BaseModel):
-    """Model class representing a collection search request.
+class VDBSearchRequest(BaseModel):
+    """Model class representing a VDB collection search request.
 
     Attributes
     ----------
-    collection : str
-        The collection name
+    vdb_id : str
+        The collection ID
     query : str
         The query
     k : int, optional
@@ -234,7 +263,7 @@ class CollectionSearchRequest(BaseModel):
 
     """
 
-    collection: str
+    vdb_id: str
     query: str
     k: int = 5
     keyword_query: str | None = None
@@ -242,13 +271,13 @@ class CollectionSearchRequest(BaseModel):
     after_date: str | None = None
     before_date: str | None = None
 
-class CollectionManageRequest(BaseModel):
-    """Model class representing a collection management request.
+class VDBManageRequest(BaseModel):
+    """Model class representing a VDB collection management request.
 
     Attributes
     ----------
-    collection : str
-        The collection name
+    vdb_id : str
+        The collection ID
     source : str | None, optional
         The source ID to lookup in the collection, by default None
     keyword_query: str | None, optional
@@ -265,12 +294,63 @@ class CollectionManageRequest(BaseModel):
 
     """
 
-    collection: str
+    vdb_id: str
     source: str | None = None
     keyword_query: str | None = None
     jurisdictions: list[str] | None = None
     after_date: str | None = None
     before_date: str | None = None
+
+class VDBRequest(BaseModel):
+    """Model class representing a VDB collection create/read request.
+
+    Attributes
+    ----------
+    user : User
+        The user who created the collection.
+    name : str
+        The display name of the collection.
+    description : str, optional
+        A description for the collection. By default None.
+    encoder : EncoderParams, optional
+        The parameters for the encoder used in this collection.
+        By default OpenAI text-embedding-3-small, 768 dim.
+    metadata_format : MilvusMetadataEnum, optional
+        The configuration of metadata in this collection.
+        By default MilvusMetadataEnum.json.
+    extra_fields : list[MilvusField], optional
+        The list of extra fields in this collection.
+        Only set if metadata_format is MilvusMetadataEnum.field. By default None.
+    public : bool, optional
+        Whether or not the collection should be public. By default False.
+
+    """
+
+    user: User
+    name: str
+    description: str | None = None
+    encoder: EncoderParams = EncoderParams()
+    metadata_format: MilvusMetadataEnum = MilvusMetadataEnum.json
+    extra_fields: list[MilvusField] | None = None
+    public: bool = False
+
+class MilvusField(BaseModel):
+    """Model class representing the schema of a field in a Milvus collection.
+
+    Attributes
+    ----------
+    name : str
+        The name of the field.
+    dtype : MilvusDataTypeEnum
+        The type of data stored in this field.
+    description : str
+        A description of the field.
+
+    """
+
+    name: str
+    dtype: MilvusDataTypeEnum
+    description: str
 
 class OpinionFeedback(BaseModel):
     """Model class representing an opinion feedback request.
@@ -351,7 +431,7 @@ class VDBTool(BaseModel):
     Attributes
     ----------
         name (str): The name of the VDB tool.
-        collection_name (str): The collection name for the VDB tool.
+        vdb_id (str): The ID of the VDB being used by the tool.
         k (int): K is the number of chunks to return for the VDB tool.
         prompt (str): The prompt for the VDB tool.
         session_id (str | None): The session id if querying session data, else None.
@@ -361,7 +441,7 @@ class VDBTool(BaseModel):
     """
 
     name: str
-    collection_name: str
+    vdb_id: str
     k: int = 4
     prompt: str = ""
     session_id: str | None = None
@@ -417,7 +497,6 @@ class ChatBySession(BaseModel):
 
     message: str
     session_id: str
-    user: User = None
 
 class InitializeSession(BaseModel):
     """Model class representing an initialize session request.
@@ -430,7 +509,6 @@ class InitializeSession(BaseModel):
     """
 
     bot_id: str
-    user: User = None
 
 class InitializeSessionChat(BaseModel):
     """Model class representing an initialize session request with a message.
@@ -480,4 +558,109 @@ class SessionFeedback(BaseModel):
     feedback_type: FeedbackType = FeedbackType.generic
     message_index: int = -1
     categories: list[str] = []
-    user: User = None
+    user: User
+
+class FetchSessions(BaseModel):
+    """
+    Model for fetching sessions by either bot or user.
+    
+    At least one of bot_id or firebase_uid must be provided.
+    
+    Parameters
+    ----------
+    bot_id : Optional[str]
+        If provided, sessions associated with this bot will be returned.
+        If the user is the bot owner, all sessions for this bot will be returned.
+        Otherwise, only the user's sessions with this bot will be returned.
+    firebase_uid : Optional[str]
+        If provided, only sessions associated with this Firebase UID will be returned.
+    """
+    bot_id: Optional[str] = None
+    firebase_uid: Optional[str] = None
+    
+    def model_post_init(self, __context):
+        """Validate that at least one of bot_id or firebase_uid is provided."""
+        if self.bot_id is None and self.firebase_uid is None:
+            raise ValueError("At least one of bot_id or firebase_uid must be provided")
+
+class EvalSession(BaseModel):
+    """Model for a session in an evaluation dataset."""
+    input_idx: int
+    bot_idx: int
+    input_text: str
+    output_text: str
+    bot_id: str
+    session_id: str
+
+class EvalDataset(BaseModel):
+    """Model for an evaluation dataset."""
+    name: str
+    description: str = ""
+    inputs: List[str]
+    bot_ids: List[str]
+    sessions: List[EvalSession] = []  # Flattened list of sessions
+    user: User
+
+@unique
+class LabelingType(str, Enum):
+    """Enumeration class representing different types of labeling for evaluation datasets."""
+    
+    rank = "rank"  # Rank responses in order of preference
+    thumbs = "thumbs"    # Thumbs up/down (binary)
+    score = "score"      # Numerical score (e.g., out of 10)
+
+class LabelingAspect(BaseModel):
+    """Model for a single labeling aspect"""
+    aspect_id: str
+    name: str
+    description: Optional[str] = None
+    type: LabelingType
+    
+    # Fields to store the rating values
+    rank_value: Optional[int] = None
+    thumbs_value: Optional[bool] = None
+    score_value: Optional[float] = None
+
+class LabeledEvalSession(BaseModel):
+    """Model for a labeled session in an evaluation dataset."""
+    session_id: str      # Reference to the original EvalSession
+    input_idx: int       # Index of the input in the dataset
+    bot_idx: int         # Index of the bot in the dataset
+    input_text: str      # The input text
+    output_text: str     # The output text
+    bot_id: str          # The bot ID
+    
+    # Labeling fields
+    aspects: List[LabelingAspect]
+    labeled: bool = False               # Whether this session has been labeled
+    notes: Optional[str] = None         # Optional notes about the evaluation
+
+class LabeledEvalDataset(BaseModel):
+    """Model for a labeled evaluation dataset."""
+    name: str
+    description: str = ""
+    labeling_aspects: List[LabelingAspect]
+    original_dataset_id: str            # Reference to the original EvalDataset
+    inputs: List[str]                   # Copy of inputs from original dataset
+    bot_ids: List[str]                  # Copy of bot_ids from original dataset
+    sessions: List[LabeledEvalSession] = []  # Labeled sessions
+    progress: float = 0.0               # Progress as percentage (0-100)
+    completed: bool = False             # Whether labeling is complete
+    created_at: Optional[datetime.datetime] = datetime.datetime.now()
+    updated_at: Optional[datetime.datetime] = None
+    user: User
+
+
+class InputGeneratorRequest(BaseModel):
+    """Model class representing an input generator request.
+
+    Attributes
+    ----------
+    prompt : str
+        The prompt to generate inputs from
+    user : User, optional
+        The user making the request, by default None
+    """
+    
+    prompt: str
+    user: Optional[User] = None
