@@ -172,7 +172,7 @@ def scrape(site: str) -> list[Element]:
 
 def scrape_with_links(
     site: str,
-    old_urls: list[str],
+    old_urls: list[str] = [],
 ) -> tuple[list[str], list[Element]]:
     """Scrape a site and get any links referenced on the site.
 
@@ -189,12 +189,27 @@ def scrape_with_links(
         URLs, elements
 
     """
-    logger.info("site: %s", site)
-    r = requests.get(site, timeout=10)
-    site_base = "/".join(site.split("/")[:-1])
-    # converting the text
-    s = BeautifulSoup(r.content, "html.parser")
-    urls = []
+    logger.info("scraping with links: %s", site)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "max-age=0"
+    }
+    try:
+        r = requests.get(site, timeout=30, headers=headers)
+        r.raise_for_status()  # Raise an exception for bad status codes
+        site_base = "/".join(site.split("/")[:-1])
+        # converting the text
+        logger.info("r.content: %s", r.content)
+        s = BeautifulSoup(r.content, "html.parser")
+        urls = []
+    except requests.exceptions.RequestException as e:
+        logger.error("Failed to fetch site %s: %s", site, str(e))
+        return [], []
 
     # get links
     for i in s.find_all("a"):

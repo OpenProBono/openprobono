@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from json import loads
-from typing import List, Optional
+from typing import List, Optional, Dict
 import datetime
 
 import firebase_admin
@@ -15,16 +15,19 @@ from app.models import (
     BotRequest,
     ChatRequest,
     EncoderParams,
-    EvalDataset,
     LabeledEvalDataset,
-    LabeledEvalSession,
     FetchSession,
     MilvusMetadataEnum,
     OpinionFeedback,
+    RunSessionJob,
     SessionFeedback,
     User,
     get_uuid_id,
     LabelingType,
+    JobStatus,
+    InputDataset,
+    Run,
+    LabeledEvalDataset,
 )
 from app.logger import setup_logger
 
@@ -37,7 +40,12 @@ MILVUS_COLLECTION = "milvus"
 MILVUS_SOURCES = "sources"
 MILVUS_CHUNKS = "chunks"
 CONVERSATION_COLLECTION = "conversations"
-EVAL_DATASET_COLLECTION = "eval_datasets"
+RUN_COLLECTION = "runs"
+RUN_SESSION_JOB_COLLECTION = "run_session_jobs"
+INPUT_DATASET_COLLECTION = "input_datasets"
+
+# Constants for jobs and datasets
+JOB_COLLECTION = "jobs_"
 
 firebase_config = loads(os.environ["Firebase"])
 cred = credentials.Certificate(firebase_config)
@@ -559,74 +567,140 @@ def delete_bot(bot_id: str, user: User) -> bool:
     except Exception as e:
         logger.error("Error deleting bot %s: %s", bot_id, str(e))
         return False
+    
+def store_run_session_job(run_session_job: RunSessionJob) -> bool:
+    """Store an invidual session job from a run in the database when first created.
+    
+    Args:
+        run_session_job: RunSessionJob object
 
-def store_eval_dataset(dataset: EvalDataset, dataset_id: str) -> bool:
-    """Store an evaluation dataset in the database.
+    Returns:
+        True if successful, False otherwise
+    """
+    data = run_session_job.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
 
+    try:
+        doc_ref = db.collection(RUN_SESSION_JOB_COLLECTION + DB_VERSION).document(data["id"])
+        doc_ref.set(data)
+        return True
+    except Exception as e:
+        logger.exception(f"Error storing run session job: {e}")
+        return False
+
+def store_run(run: Run) -> bool:
+    """Store a run in the database.
+    
+    Args:
+        run: Run object
+
+    Returns:
+        True if successful, False otherwise
+    """
+    data = run.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+
+    try:
+        doc_ref = db.collection(RUN_COLLECTION + DB_VERSION).document(data["id"])
+        doc_ref.set(data)
+        return True
+    except Exception as e:
+        logger.exception(f"Error storing run: {e}")
+        return False
+    
+def get_jobs_by_run_id(run_id: str) -> List[RunSessionJob]:
+    """Get all jobs for a run.
+    
     Parameters
     ----------
-    dataset : EvalDataset
-        The dataset object to store.
-    dataset_id : str
-        The dataset id to use.
+    run_id : str
+        ID of the run to get jobs for
+        
+    Returns
+    -------
+    List[RunSessionJob]
+        List of job models associated with the run
+    """
+    try:
+        jobs = db.collection(RUN_SESSION_JOB_COLLECTION + DB_VERSION).where(
+            filter=FieldFilter("run_id", "==", run_id)
+        ).get()
+        return [RunSessionJob(**job.to_dict()) for job in jobs]
+    except Exception as e:
+        logger.error(f"Error fetching jobs for run {run_id}: {e}")
+        return []
 
+def get_run(run_id: str) -> Optional[Run]:
+    """Get a specific evaluation dataset.
+    
+    Args:
+        run_id: ID of the run to retrieve
+
+    Returns:
+        Run object if found, None otherwise
+    """
+    try:
+        doc_ref = db.collection(RUN_COLLECTION + DB_VERSION).document(run_id)
+        dataset = doc_ref.get()
+        
+        if not dataset.exists:
+            return None
+            
+        return Run(**dataset.to_dict())
+    except Exception as e:
+        logger.exception(f"Error retrieving evaluation dataset: {e}")
+        return None
+
+def get_user_runs(user: User) -> Dict[str, Run]:
+    """Get all runs for a user.
+    
+    Args:
+        user: User object
+
+    Returns:
+        Dictionary mapping dataset IDs to Run objects
+    """
+    try:
+        data_dict = {}
+        query = db.collection(RUN_COLLECTION + DB_VERSION).where("user.firebase_uid", "==", user.firebase_uid)
+        
+        for datum in query.stream():
+            data_dict[datum.id] = Run(**datum.to_dict())
+        
+        return data_dict
+    except Exception as e:
+        logger.exception(f"Error retrieving user evaluation datasets: {e}")
+        return {}
+
+def delete_run(dataset_id: str, user: User) -> bool:
+    """Delete a run
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to delete
+    user : User
+        The user requesting deletion
+        
     Returns
     -------
     bool
-        True if successful, False otherwise.
+        True if deletion was successful, False otherwise
     """
-    data = dataset.model_dump()
-    data["timestamp"] = firestore.SERVER_TIMESTAMP
-    db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    dataset_ref = db.collection(RUN_COLLECTION + DB_VERSION).document(dataset_id)
+    dataset = dataset_ref.get()
+    
+    if not dataset.exists:
+        logger.error(f"Dataset {dataset_id} not found")
+        return False
+    
+    dataset_data = dataset.to_dict()
+    if dataset_data.get("user", {}).get("firebase_uid") != user.firebase_uid:
+        logger.error(f"User {user.firebase_uid} does not own dataset {dataset_id}")
+        return False
+    
+    dataset_ref.delete()
     return True
-
-def get_user_datasets(user: User) -> dict:
-    """Get all evaluation datasets for a user.
-
-    Parameters
-    ----------
-    user : User
-        The user whose datasets to retrieve.
-
-    Returns
-    -------
-    dict
-        Dictionary of datasets indexed by dataset_id, sorted by timestamp (newest first).
-    """
-    dataset_ref = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION)
-    
-    # Filter datasets by the user's firebase_uid
-    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
-    
-    # Order by timestamp in descending order (newest first)
-    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
-    
-    data = query.get()
-    logger.debug("Found %d datasets for user %s", len(data), user.firebase_uid)
-    
-    data_dict = {}
-    for datum in data:
-        data_dict[datum.id] = datum.to_dict()
-    
-    return data_dict
-
-def get_dataset(dataset_id: str) -> Optional[EvalDataset]:
-    """Get a specific evaluation dataset.
-
-    Parameters
-    ----------
-    dataset_id : str
-        The ID of the dataset to retrieve.
-
-    Returns
-    -------
-    Optional[EvalDataset]
-        The dataset if found, None otherwise.
-    """
-    dataset = db.collection(EVAL_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
-    if dataset.exists:
-        return EvalDataset(**dataset.to_dict())
-    return None
 
 # Constants for labeled evaluation datasets
 LABELED_EVAL_DATASET_COLLECTION = "labeled_eval_datasets_"
@@ -777,3 +851,185 @@ def update_labeled_session(dataset_id: str, session_id: str,
             return store_labeled_eval_dataset(dataset, dataset_id)
     
     return False
+
+
+def update_run_session_job_status(
+    job_id: str, 
+    status: JobStatus, 
+    output_text: str = None,
+    session_id: str = None,
+    error_message: str = None, 
+) -> bool:
+    """Update a job's status in the database.
+
+    Parameters
+    ----------
+    job_id : str
+        The ID of the job to update.
+    status : JobStatus
+        The new status.
+    error_message : str, optional
+        Error message if job failed, by default None
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise.
+    """
+    job_ref = db.collection(RUN_SESSION_JOB_COLLECTION + DB_VERSION).document(job_id)
+    job = job_ref.get()
+    if not job.exists:
+        logger.error(f"Job {job_id} not found")
+        return False
+    
+    updates = {
+        "status": status.value,
+        "updated_at": firestore.SERVER_TIMESTAMP
+    }
+    
+    if status == JobStatus.COMPLETED:
+        updates["completed_at"] = firestore.SERVER_TIMESTAMP
+
+    if error_message is not None:
+        updates["error_message"] = error_message
+
+    if output_text is not None:
+        updates["output_text"] = output_text
+    
+    if session_id is not None:
+        updates["session_id"] = session_id
+
+    # If the job is completed and there is output text, update the 'parent' job's progress
+    if output_text is not None and status == JobStatus.COMPLETED:
+        # Get the job data to find the run_id
+        run_id = job.to_dict().get("run_id")
+        
+        if run_id:
+            # Query to find all jobs with the same run_id that are completed
+            completed_jobs_query = db.collection(RUN_SESSION_JOB_COLLECTION + DB_VERSION).where(
+                "run_id", "==", run_id
+            ).where("status", "==", JobStatus.COMPLETED.value).get()
+            
+            # Count the completed jobs
+            completed_jobs_count = len(completed_jobs_query)
+            
+            # Get the total number of jobs for this run
+            all_jobs_query = db.collection(RUN_SESSION_JOB_COLLECTION + DB_VERSION).where(
+                "run_id", "==", run_id
+            ).get()
+            total_jobs = len(all_jobs_query)
+            
+            # Calculate progress percentage
+            if total_jobs > 0:
+                run_progress = completed_jobs_count / total_jobs * 100
+                
+                
+                # Update the run's progress
+                run_ref = db.collection(RUN_COLLECTION + DB_VERSION).document(run_id)
+                run_ref.update({
+                    "progress": run_progress,
+                    # Update status to completed if progress is 100
+                    "status": JobStatus.COMPLETED.value if run_progress == 100 else JobStatus.RUNNING.value,
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                })
+    
+    job_ref.update(updates)
+    return True
+
+def store_input_dataset(dataset: InputDataset, dataset_id: str) -> bool:
+    """Store an input dataset in the database.
+    
+    Parameters
+    ----------
+    dataset : InputDataset
+        The dataset to store
+    dataset_id : str
+        The ID to store the dataset under
+        
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    data = dataset.model_dump()
+    data["timestamp"] = firestore.SERVER_TIMESTAMP
+    db.collection(INPUT_DATASET_COLLECTION + DB_VERSION).document(dataset_id).set(data)
+    return True
+
+def load_input_dataset(dataset_id: str) -> Optional[InputDataset]:
+    """Load an input dataset from the database.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to load
+        
+    Returns
+    -------
+    Optional[InputDataset]
+        The dataset if found, None otherwise
+    """
+    dataset = db.collection(INPUT_DATASET_COLLECTION + DB_VERSION).document(dataset_id).get()
+    if dataset.exists:
+        return InputDataset(**dataset.to_dict())
+    return None
+
+def get_user_input_datasets(user: User) -> Dict[str, InputDataset]:
+    """Get all input datasets for a user.
+    
+    Parameters
+    ----------
+    user : User
+        The user to get datasets for
+        
+    Returns
+    -------
+    Dict[str, InputDataset]
+        Dictionary mapping dataset IDs to datasets
+    """
+    dataset_ref = db.collection(INPUT_DATASET_COLLECTION + DB_VERSION)
+    
+    # Filter datasets by the user's firebase_uid
+    query = dataset_ref.where(filter=FieldFilter("user.firebase_uid", "==", user.firebase_uid))
+    
+    # Order by timestamp in descending order (newest first)
+    query = query.order_by("timestamp", direction=firestore.Query.DESCENDING)
+    
+    data = query.get()
+    logger.debug("Found %d input datasets for user %s", len(data), user.firebase_uid)
+    
+    data_dict = {}
+    for datum in data:
+        data_dict[datum.id] = InputDataset(**datum.to_dict())
+    
+    return data_dict
+
+def delete_input_dataset(dataset_id: str, user: User) -> bool:
+    """Delete an input dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to delete
+    user : User
+        The user requesting deletion
+        
+    Returns
+    -------
+    bool
+        True if deletion was successful, False otherwise
+    """
+    dataset_ref = db.collection(INPUT_DATASET_COLLECTION + DB_VERSION).document(dataset_id)
+    dataset = dataset_ref.get()
+    
+    if not dataset.exists:
+        logger.error(f"Dataset {dataset_id} not found")
+        return False
+    
+    dataset_data = dataset.to_dict()
+    if dataset_data.get("user", {}).get("firebase_uid") != user.firebase_uid:
+        logger.error(f"User {user.firebase_uid} does not own dataset {dataset_id}")
+        return False
+    
+    dataset_ref.delete()
+    return True

@@ -272,6 +272,7 @@ def execute_tool_calls(
                     "name": tool_id_name[tool_call_id],
                     "results": formatted_results,
                 }
+            logger.info("formatted_results: %s", formatted_results)
             sources += [str(res["id"]) for res in formatted_results]
             # extend conversation with function response
             messages.append({

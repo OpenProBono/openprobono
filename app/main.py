@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import datetime
 from typing import Annotated, Optional, List
 
 from fastapi import (
@@ -11,8 +12,7 @@ from fastapi import (
     Depends,
     FastAPI,
     UploadFile,
-    BackgroundTasks,
-    Form,
+    HTTPException,
 )
 from fastapi.responses import StreamingResponse
 from langfuse.decorators import langfuse_context, observe
@@ -29,22 +29,28 @@ from app.db import (
     browse_bots,
     browse_public_bots,
     delete_bot,
+    delete_input_dataset,
     fetch_session,
     fetch_sessions_by,
     get_cached_response,
-    get_dataset,
+    get_run,
     get_labeled_dataset,
-    get_user_datasets,
+    get_user_input_datasets,
     get_user_labeled_datasets,
+    get_user_runs,
     load_bot,
+    load_input_dataset,
     set_session_to_bot,
     store_bot,
     store_conversation_history,
-    store_eval_dataset,
+    store_input_dataset,
     store_labeled_eval_dataset,
     store_opinion_feedback,
+    store_run,
+    store_run_session_job,
     store_session_feedback,
     update_labeled_session,
+    get_jobs_by_run_id,
 )
 from app.logger import get_git_hash, setup_logger
 from app.milvusdb import (
@@ -64,28 +70,31 @@ from app.models import (
     CollectionManageRequest,
     CollectionSearchRequest,
     EngineEnum,
+    NewRunFromInputDataset,
+    Run,
     FetchSession,
     FetchSessions,
     InitializeSession,
     InitializeSessionChat,
+    JobStatus,
+    LabeledEvalDataset,
+    LabeledEvalSession,
+    LabelingAspect,
     OpinionFeedback,
     OpinionSearchRequest,
+    RunSessionJob,
     SessionFeedback,
     User,
     VDBTool,
     get_uuid_id,
-    EvalDataset,
-    EvalSession,
-    LabeledEvalDataset,
-    LabeledEvalSession,
-    LabelingAspect,
-    InputGeneratorRequest,
     OpenAIModelEnum,
     AnthropicModelEnum,
     GoogleModelEnum,
     HiveModelEnum,
+    InputDataset,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
+from app.queue.client import publish_run_session_job
 from app.user_auth import get_current_user
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
 
@@ -1156,18 +1165,85 @@ def delete_bot_endpoint(
         return {"message": "Success", "bot_id": bot_id}
     else:
         return {"message": "Failure: Bot not found or you don't have permission to delete it"}
+    
+@api.get("/get_user_runs", tags=["Evaluation"])
+def get_user_runs_endpoint(user: User = Depends(get_current_user)) -> dict:
+    """Get all runs for a user."""
+    try:    
+        return {"message": "Success", "runs": get_user_runs(user)}
+    except Exception as e:
+        logger.exception("Error getting user runs: %s", e)
+        return {"message": "Failure: " + str(e)}
 
+@api.get("/get_run/{run_id}", tags=["Evaluation"])
+def get_run_endpoint(run_id: str, user: User = Depends(get_current_user)) -> dict:
+    """Get a specific run by ID."""
+    try:
+        run = get_run(run_id)
+        if run.user.firebase_uid != user.firebase_uid:
+            raise HTTPException(status_code=403, detail="You do not have access to this run")
+        return {"message": "Success", "run": run}
+    except Exception as e:
+        logger.exception("Error getting run: %s", e)
+        return {"message": "Failure: " + str(e)}
 
-@api.post("/run_eval_dataset", tags=["Evaluation"])
-def run_eval_dataset(
-    background_tasks: BackgroundTasks,
-    dataset: Annotated[
-        EvalDataset,
+@api.get("/get_run_outputs/{run_id}", tags=["Evaluation"])
+def get_run_outputs(run_id: str, user: User = Depends(get_current_user)) -> dict:
+    """Get outputs for all jobs in a specific run.
+    
+    Parameters
+    ----------
+    run_id : str
+        The ID of the run to get outputs for
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Message and list of output data from run session jobs
+    """
+    try:
+        # First check if user can access this run
+        run = get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+            
+        if run.user.firebase_uid != user.firebase_uid:
+            raise HTTPException(status_code=403, detail="You do not have access to this run")
+        logger.info(f"Getting run outputs for run {run_id}")
+        # Get all jobs for this run
+        jobs = get_jobs_by_run_id(run_id)
+        
+        # Format outputs for the frontend
+        outputs = []
+        for job in jobs:
+            output_data = {
+                "input_idx": job.input_idx,
+                "bot_id": job.bot_id,
+                "output_text": job.output_text,
+                "status": job.status,
+            }
+            outputs.append(output_data)
+        
+        return {"message": "Success", "outputs": outputs}
+        
+    except HTTPException as he:
+        # Re-raise HTTP exceptions to preserve status codes
+        raise he
+    except Exception as e:
+        logger.exception("Error getting run outputs: %s", e)
+        return {"message": "Failure: " + str(e)}
+
+@api.post("/new_run", tags=["Evaluation"])
+def new_run(
+    run: Annotated[
+        Run,
         Body(
             openapi_examples={
-                "create dataset": {
-                    "summary": "Create an evaluation dataset",
-                    "description": "Creates a dataset with inputs and bots for evaluation",
+                "create new run": {
+                    "summary": "Create a new run",
+                    "description": "Creates a dataset with inputs and bots for evaluation and runs it to get outputs",
                     "value": {
                         "name": "Test Dataset",
                         "description": "A dataset for testing bot performance",
@@ -1188,10 +1264,8 @@ def run_eval_dataset(
     
     Parameters
     ----------
-    background_tasks : BackgroundTasks
-        FastAPI background tasks handler
-    dataset : EvalDataset
-        The dataset to create, containing inputs and bot IDs
+    run : Run
+        The 'Run' object to create the output dataset from, containing inputs and bot IDs
     user : User
         The authenticated user creating the dataset
         
@@ -1201,95 +1275,105 @@ def run_eval_dataset(
         Success message with the dataset ID
     """
     # Set the user
-    dataset.user = user
-    
-    # Generate dataset ID
-    dataset_id = get_uuid_id()
+    run.user = user
     
     # Initialize sessions list
-    dataset.sessions = []
-    
+    run.sessions = []
+
+    for input_idx, input_text in enumerate(run.inputs):
+        for bot_idx, bot_id in enumerate(run.bot_ids):
+            run_session_job = RunSessionJob(
+                input_idx=input_idx,
+                bot_idx=bot_idx,
+                input_text=input_text,
+                bot_id=bot_id,
+                run_id=run.id,
+                user=run.user,
+                status=JobStatus.PENDING,
+            )
+            store_run_session_job(run_session_job)
+            publish_run_session_job(run_session_job)
+
     # Store the initial dataset
-    store_eval_dataset(dataset, dataset_id)
-    
-    # Define the background task function
-    def process_eval_dataset(dataset, dataset_id, user):
-        sessions = []
-        
-        # Create sessions for each input-bot pair
-        for input_idx, input_text in enumerate(dataset.inputs):
-            for bot_idx, bot_id in enumerate(dataset.bot_ids):
-                # Check if bot exists and user has access
-                bot = load_bot(bot_id)
-                if not bot:
-                    logger.error(f"Bot {bot_id} not found for dataset {dataset_id}")
-                    continue
-                
-                # Create a new session for this input-bot pair
-                session_id = get_uuid_id()
-                set_session_to_bot(session_id, bot_id)
-                
-                # Initialize the session with the input
-                cr = ChatRequest(
-                    history=[{"role": "user", "content": input_text}],
-                    bot_id=bot_id,
-                    session_id=session_id,
-                    user=user,
-                )
-                
-                # Call the bot to get the output
-                response = process_chat(cr, input_text)
-                output_text = response.get("output", "Error: No output generated")
-                
-                # Create and store the session
-                eval_session = EvalSession(
-                    input_idx=input_idx,
-                    bot_idx=bot_idx,
-                    input_text=input_text,
-                    output_text=output_text,
-                    bot_id=bot_id,
-                    session_id=session_id
-                )
-                sessions.append(eval_session)
-                
-                # Store the conversation history with the bot's response
-                store_conversation_history(cr)
-                
-                # Update the dataset with the current sessions
-                dataset.sessions = sessions
-                store_eval_dataset(dataset, dataset_id)
-        
-        # Final update to the dataset
-        dataset.sessions = sessions
-        store_eval_dataset(dataset, dataset_id)
-        logger.info(f"Completed evaluation dataset {dataset_id} with {len(sessions)} sessions")
-    
-    # Add the task to background tasks
-    background_tasks.add_task(process_eval_dataset, dataset, dataset_id, user)
+    store_run(run)
     
     # Return immediately with the dataset ID
     return {
         "message": "Success",
-        "dataset_id": dataset_id,
-        "status": "Processing evaluation dataset in the background"
+        "run_id": run.id,
+        "status": "Processing run in the background, added jobs to the queue"
     }
 
-@api.get("/get_user_datasets", tags=["Evaluation"])
-def get_datasets(user: User = Depends(get_current_user)) -> dict:
-    """Get all evaluation datasets for the authenticated user.
+
+@api.post("/new_run_from_input_dataset", tags=["Evaluation"])
+def new_run_from_input_dataset(
+    run_request: Annotated[
+        NewRunFromInputDataset,
+        Body(
+            openapi_examples={
+                "create new run from input dataset": {
+                    "summary": "Create a new run from an existing input dataset",
+                    "description": "Creates a run using inputs from an existing input dataset and specified bots",
+                    "value": {
+                        "name": "Test Run from Dataset",
+                        "description": "A run created from an existing input dataset",
+                        "input_dataset_id": "dataset_id_1",
+                        "bot_ids": ["bot_id_1", "bot_id_2"]
+                    },
+                },
+            },
+        ),
+    ],
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Create a new evaluation run from an existing input dataset.
+    
+    This endpoint creates a run using inputs from an existing input dataset and specified bots.
+    It initializes sessions for each input-bot pair, runs the bots on the inputs, 
+    and stores the results asynchronously.
     
     Parameters
     ----------
+    run_request : NewRunFromInputDataset
+        The request containing input dataset ID and bot IDs
     user : User
-        The authenticated user
+        The authenticated user creating the run
         
     Returns
     -------
     dict
-        Success message with the datasets
+        Success message with the run ID
     """
-    datasets = get_user_datasets(user)
-    return {"message": "Success", "datasets": datasets}
+    # Set the user
+    run_request.user = user
+    
+    # Load the input dataset
+    input_dataset = load_input_dataset(run_request.input_dataset_id)
+    
+    if not input_dataset:
+        raise HTTPException(status_code=404, detail=f"Input dataset {run_request.input_dataset_id} not found")
+    
+    # Check if user has access to the input dataset
+    if (
+        input_dataset.owner.firebase_uid != user.firebase_uid
+        and user.firebase_uid not in input_dataset.shared_with
+        and not input_dataset.is_public
+    ):
+        raise HTTPException(status_code=403, detail="You do not have access to this input dataset")
+    
+    # Create a Run object from the NewRunFromInputDataset request
+    run = Run(
+        id=get_uuid_id(),
+        name=run_request.name,
+        description=run_request.description,
+        inputs=input_dataset.inputs,
+        input_dataset_id=run_request.input_dataset_id,
+        bot_ids=run_request.bot_ids,
+        user=user
+    )
+    
+    # Call the regular new_run function with the created Run object
+    return new_run(run=run, user=user)
 
 @api.get("/get_dataset_sessions/{dataset_id}", tags=["Evaluation"])
 def get_dataset_sessions(dataset_id: str, user: User = Depends(get_current_user)) -> dict:
@@ -1307,7 +1391,7 @@ def get_dataset_sessions(dataset_id: str, user: User = Depends(get_current_user)
     dict
         Success message with the sessions
     """
-    dataset = get_dataset(dataset_id)
+    dataset = get_run(dataset_id)
     if not dataset:
         return {"message": "Failure: Dataset not found"}
     
@@ -1360,7 +1444,7 @@ def create_labeled_dataset(
         Success message with the labeled dataset ID
     """
     # Get the original dataset
-    original_dataset = get_dataset(dataset_id)
+    original_dataset = get_run(dataset_id)
     if not original_dataset:
         return {"message": "Failure: Dataset not found"}
     
@@ -1585,3 +1669,363 @@ def get_available_models() -> dict:
         "message": "Success",
         "data": models
     }
+
+# Input dataset and job management endpoints
+@api.post("/input_datasets", tags=["InputDataset"])
+def create_input_dataset(
+    name: str,
+    description: str = "",
+    inputs: List[str] = Body(...),
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Create a new input dataset with the provided inputs.
+    
+    Parameters
+    ----------
+    name : str
+        The name of the dataset
+    description : str, optional
+        Description of the dataset, by default ""
+    inputs : List[str]
+        The list of inputs to include in the dataset
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Status message and dataset ID
+    """
+    # Generate dataset ID
+    dataset_id = get_uuid_id()
+    
+    # Create the dataset
+    dataset = InputDataset(
+        id=dataset_id,
+        name=name,
+        description=description,
+        inputs=inputs,
+        user=user
+    )
+    
+    # Store the dataset
+    store_input_dataset(dataset, dataset_id)
+    
+    return {
+        "message": "Success",
+        "dataset_id": dataset_id
+    }
+
+
+@api.get("/input_datasets", tags=["InputDataset"])
+def list_input_datasets(
+    user: User = Depends(get_current_user)
+) -> dict:
+    """List all input datasets for the user.
+    
+    Parameters
+    ----------
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Dictionary of dataset IDs to dataset information
+    """
+    datasets = get_user_input_datasets(user)
+    
+    # Convert to dictionary of summary information
+    result = {}
+    for dataset_id, dataset in datasets.items():
+        result[dataset_id] = {
+            "id": dataset_id,
+            "name": dataset.name,
+            "description": dataset.description,
+            "input_count": len(dataset.inputs),
+            "created_at": dataset.created_at,
+            "updated_at": dataset.updated_at,
+            "status": dataset.status,
+            "is_public": dataset.is_public,
+            "is_owner": dataset.owner.firebase_uid == user.firebase_uid,
+        }
+    
+    return {
+        "message": "Success",
+        "datasets": result
+    }
+
+
+@api.get("/input_datasets/{dataset_id}", tags=["InputDataset"])
+def get_input_dataset(
+    dataset_id: str,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Get details of a specific input dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to get
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        The dataset details
+    """
+    dataset = load_input_dataset(dataset_id)
+    
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+    
+    # Check if user has access
+    if (
+        dataset.owner.firebase_uid != user.firebase_uid
+        and user.firebase_uid not in dataset.shared_with
+        and not dataset.is_public
+    ):
+        raise HTTPException(status_code=403, detail="You do not have access to this dataset")
+    
+    return {
+        "message": "Success",
+        "dataset": dataset.model_dump()
+    }
+
+
+@api.delete("/input_datasets/{dataset_id}", tags=["InputDataset"])
+def delete_input_dataset_endpoint(
+    dataset_id: str,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Delete an input dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to delete
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Status message
+    """
+    success = delete_input_dataset(dataset_id, user)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Failed to delete dataset {dataset_id}")
+    
+    return {
+        "message": "Success",
+        "dataset_id": dataset_id
+    }
+
+
+@api.post("/input_datasets/{dataset_id}/clone", tags=["InputDataset"])
+def clone_input_dataset(
+    dataset_id: str,
+    name: str = None,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Clone an existing input dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to clone
+    name : str, optional
+        New name for the cloned dataset, by default None
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Status message and new dataset ID
+    """
+    # Load the source dataset
+    source_dataset = load_input_dataset(dataset_id)
+    
+    if not source_dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+    
+    # Check if user has access
+    if (
+        source_dataset.owner.firebase_uid != user.firebase_uid
+        and user.firebase_uid not in source_dataset.shared_with
+        and not source_dataset.is_public
+    ):
+        raise HTTPException(status_code=403, detail="You do not have access to this dataset")
+    
+    # Generate new dataset ID
+    new_dataset_id = get_uuid_id()
+    
+    # Create new dataset with copied data
+    new_dataset = InputDataset(
+        id=new_dataset_id,
+        name=name or f"Clone of {source_dataset.name}",
+        description=source_dataset.description,
+        inputs=source_dataset.inputs.copy(),
+        user=user
+    )
+    
+    # Store the new dataset
+    store_input_dataset(new_dataset, new_dataset_id)
+    
+    return {
+        "message": "Success",
+        "dataset_id": new_dataset_id
+    }
+
+
+@api.post("/input_datasets/{dataset_id}/update", tags=["InputDataset"])
+def update_input_dataset(
+    dataset_id: str,
+    name: str = None,
+    description: str = None,
+    inputs: List[str] = None,
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Update an existing input dataset.
+    
+    Parameters
+    ----------
+    dataset_id : str
+        The ID of the dataset to update
+    name : str, optional
+        New name for the dataset, by default None
+    description : str, optional
+        New description for the dataset, by default None
+    inputs : List[str], optional
+        New inputs for the dataset, by default None
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Status message
+    """
+    # Load the dataset
+    dataset = load_input_dataset(dataset_id)
+    
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found")
+    
+    # Check if user is the owner
+    if dataset.owner.firebase_uid != user.firebase_uid:
+        raise HTTPException(status_code=403, detail="Only the owner can update this dataset")
+    
+    # Update fields if provided
+    if name is not None:
+        dataset.name = name
+    
+    if description is not None:
+        dataset.description = description
+    
+    if inputs is not None:
+        dataset.inputs = inputs
+    
+    # Update timestamp
+    dataset.updated_at = datetime.datetime.now()
+    
+    # Store the updated dataset
+    store_input_dataset(dataset, dataset_id)
+    
+    return {
+        "message": "Success",
+        "dataset_id": dataset_id
+    }
+
+
+# @api.post("/generate_inputs", tags=["InputDataset"])
+# def generate_inputs(
+#     prompt: str,
+#     name: str,
+#     description: str = "",
+#     is_public: bool = False,
+#     shared_with: List[str] = Body(default=[]),
+#     file: UploadFile = None,
+#     user: User = Depends(get_current_user)
+# ) -> dict:
+#     """Generate inputs based on a prompt and optional file.
+    
+#     Parameters
+#     ----------
+#     prompt : str
+#         The prompt to generate inputs from
+#     name : str
+#         Name for the dataset
+#     description : str, optional
+#         Description for the dataset, by default ""
+#     is_public : bool, optional
+#         Whether the dataset is public, by default False
+#     shared_with : List[str], optional
+#         List of user IDs to share with, by default []
+#     file : UploadFile, optional
+#         Optional file containing context for generation, by default None
+#     user : User
+#         The authenticated user
+        
+#     Returns
+#     -------
+#     dict
+#         Status message and job ID
+#     """
+#     # Create job record
+#     job_id = get_uuid_id()
+#     dataset_id = get_uuid_id()
+    
+#     # Process file if uploaded
+#     file_content = None
+#     source_file_name = None
+#     if file:
+#         file_content = file.file.read().decode('utf-8')
+#         source_file_name = file.filename
+    
+#     # Create job parameters
+#     job_params = {
+#         "prompt": prompt,
+#         "name": name,
+#         "description": description,
+#         "is_public": is_public,
+#         "shared_with": shared_with,
+#         "dataset_id": dataset_id,
+#         "user": user.model_dump(),
+#     }
+    
+#     if file_content:
+#         job_params["file_content"] = file_content
+#         job_params["source_file_name"] = source_file_name
+    
+#     # Create and store job record
+#     job = JobModel(
+#         id=job_id,
+#         type=JobType.INPUT_GENERATION,
+#         status=JobStatus.PENDING,
+#         params=job_params,
+#         user=user
+#     )
+    
+#     store_job(job)
+    
+#     # Queue the job
+#     job_data = {
+#         "job_id": job_id
+#     }
+    
+#     success = publish_input_generation_job(job_data)
+    
+#     if not success:
+#         update_job_status(job_id, JobStatus.FAILED, error_message="Failed to queue job")
+#         raise HTTPException(status_code=500, detail="Failed to queue job")
+    
+#     return {
+#         "message": "Success",
+#         "job_id": job_id,
+#         "dataset_id": dataset_id,
+#         "status": "Input generation job queued"
+#     }

@@ -4,8 +4,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from threading import Lock
 
+import pandas as pd
 import requests
 from langfuse.decorators import langfuse_context, observe
+from app.loaders import scrape_with_links
 from serpapi.google_search import GoogleSearch
 
 from app.bailii import ADVANCED_SEARCH_DESC, bailii_search
@@ -18,6 +20,7 @@ from app.models import (
     OpinionSearchRequest,
     SearchMethodEnum,
     SearchTool,
+    get_int64,
 )
 from app.prompts import FILTERED_CASELAW_PROMPT
 
@@ -292,7 +295,86 @@ def dynamic_courtroom5_search_tool(qr: str, tool: SearchTool, prf: str="") -> di
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{bot_id + tool_name}')"
     return query(search_collection, qr, expr=filter_expr)
 
+def scrape_website_tool(qr: str, tool: SearchTool) -> dict:
+    """Scrape a website and return the text.
 
+    Parameters
+    ----------
+    qr : str
+        the query
+    """
+    urls, elements = scrape_with_links(qr, tool.prefix)
+    return {"result": [{"urls": urls, "elements": elements, "id": get_int64()}], "message": "Success"}
+
+def get_housing_violations_tool(qr: str, tool: SearchTool) -> dict:
+    """Get housing violations for a given building."""
+    SOCRATA_URL = "https://data.cityofnewyork.us/resource/wvxf-dwi5.json"
+    params = {
+        "bbl": qr,     # or use bbl='1-972-1' etc.
+        "$limit": 5000,       # raise if the building has >5 000 violations
+        # "$order": "novissueddate DESC"
+    }
+    df = pd.read_json(requests.get(SOCRATA_URL, params=params, timeout=60).text)
+    logger.info(f"Number of housing violations: {len(df)}")
+    logger.info(f"First row: {df.iloc[0]}")
+    logger.info(f"Last row: {df.iloc[-1]}")
+    records = df.to_dict('records')
+    for record in records:
+        record['id'] = int(record.pop('violationid'))
+    return {
+        "result": records[::-1],
+        "message": "Success"
+    }
+
+nyc_geocode_tool_args = {
+    "houseNumber": {
+        "type": "string",
+        "description": (
+            "The house number of the address to geocode."
+        ),
+    },
+    "street": {
+        "type": "string",
+        "description": (
+            "The street name of the address to geocode."
+        ),
+    },
+    "borough": {
+        "type": "string",
+        "description": (
+            "The borough of the address to geocode."
+        ),
+    },
+}
+
+def nyc_geocode_tool(houseNumber: str, street: str, borough: str, tool: SearchTool) -> dict:
+    """Geocode an address."""
+    url = "https://api.nyc.gov/geoclient/v2/address"
+    # split the address into house number, street, and borough
+    
+    params = {
+        "houseNumber": houseNumber,
+        "street": street,
+        "borough": borough
+    }
+    headers = {
+        "Cache-Control": "no-cache",
+        "Ocp-Apim-Subscription-Key": "c86298cf64514a13abc858c12901c357"
+    }
+    response = requests.get(url, params=params, headers=headers)
+    
+    if response.status_code != 200:
+        return {"result": [], "message": f"Error: {response.status_code}"}
+    
+    data = response.json()
+    if "address" in data:
+        return_obj = data["address"]
+        return_obj['id'] = data["address"]["bbl"]
+        return {"result": [return_obj], "message": "Success"}
+    else:
+        return {"result": [], "message": "Error: No address found"}
+   
+    
 @observe()
 def serpapi_tool(qr: str, prf: str, num_results: int = 5) -> dict:
     """Query the serpapi search api.
@@ -384,6 +466,9 @@ def openai_tool(t: SearchTool) -> dict:
         body["function"]["parameters"]["properties"]["before-date"] = courtlistener_tool_args["before-date"]
         # Make advanced_query required
         body["function"]["parameters"]["required"].append("advanced_query")
+    if t.method == SearchMethodEnum.nyc_geocode:
+        body["function"]["parameters"]["properties"] = nyc_geocode_tool_args
+        body["function"]["parameters"]["required"] = ["houseNumber", "street", "borough"]
     return body
 
 def anthropic_tool(t: SearchTool) -> dict:
@@ -471,17 +556,20 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
     """
     function_response = None
     prf = tool.prefix
-    qr = function_args["qr"]
     match tool.method:
         case SearchMethodEnum.serpapi:
+            qr = function_args["qr"]
             function_response = serpapi_tool(qr, prf)
         case SearchMethodEnum.dynamic_serpapi:
+            qr = function_args["qr"]
             if "jurisdictions" in function_args:
                 tool.jurisdictions = [j.upper() for j in function_args["jurisdictions"]]
             function_response = dynamic_serpapi_tool(qr, prf, tool)
         case SearchMethodEnum.google:
+            qr = function_args["qr"]
             function_response = google_search_tool(qr, prf)
         case SearchMethodEnum.courtlistener:
+            qr = function_args["qr"]
             tool_jurisdictions = None
             tool_kw_query = None
             tool_after_date = None
@@ -506,10 +594,13 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
             )
             function_response = courtlistener_query(request)
         case SearchMethodEnum.courtroom5:
+            qr = function_args["qr"]
             function_response = courtroom5_search_tool(qr, prf)
         case SearchMethodEnum.dynamic_courtroom5:
+            qr = function_args["qr"]
             function_response = dynamic_courtroom5_search_tool(qr, prf, tool)
         case SearchMethodEnum.bailii:
+            qr = function_args["qr"]
             advanced_query = function_args.get("advanced_query")
             tool_after_date, tool_before_date = None, None
             if "after-date" in function_args:
@@ -523,6 +614,17 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
                 after_date=tool_after_date,
                 before_date=tool_before_date,
             )
+        case SearchMethodEnum.scrape_website:
+            qr = function_args["qr"]
+            function_response = scrape_website_tool(qr, tool)
+        case SearchMethodEnum.housing_violations_nyc:
+            qr = function_args["qr"]
+            function_response = get_housing_violations_tool(qr, tool)
+        case SearchMethodEnum.nyc_geocode:
+            houseNumber = function_args["houseNumber"]
+            street = function_args["street"]
+            borough = function_args["borough"]
+            function_response = nyc_geocode_tool(houseNumber, street, borough, tool)
     return function_response
 
 def search_toolset_creator(bot: BotRequest, bot_id: str) -> list:
@@ -577,9 +679,14 @@ def find_search_tool(bot: BotRequest, tool_name: str) -> SearchTool | None:
 def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict]:
     formatted_results = []
 
-    if tool_output["message"] != "Success" or "result" not in tool_output:
+    if tool_output["message"].lower() != "success" or "result" not in tool_output:
         logger.error("Unable to format search tool results: %s", tool.name)
         return formatted_results
+    
+    if tool.method == SearchMethodEnum.scrape_website:
+        return tool_output["result"]
+    elif tool.method == SearchMethodEnum.housing_violations_nyc:
+        return tool_output["result"]
 
     for result in tool_output["result"]:
         if "entity" not in result:

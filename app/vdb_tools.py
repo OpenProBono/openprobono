@@ -247,13 +247,14 @@ def vdb_toolset_creator(bot: BotRequest, bot_id: str, session_id: str) -> list[V
             coll_name = courtlistener_collection
         else:
             coll_name = search_collection
-        vdb_tool = VDBTool(
-            name=t.name + "-get-source",
-            collection_name=coll_name,
-            method=VDBMethodEnum.get_source,
-            bot_id=bot_id,
-        )
-        search_src_tools.append(vdb_tool)
+        if not (t.method == SearchMethodEnum.housing_violations_nyc or t.method == SearchMethodEnum.scrape_website):
+            vdb_tool = VDBTool(
+                name=t.name + "-get-source",
+                collection_name=coll_name,
+                method=VDBMethodEnum.get_source,
+                bot_id=bot_id,
+            )
+            search_src_tools.append(vdb_tool)
     # create source lookup tools for each query tool
     query_src_tools = []
     for t in bot.vdb_tools:

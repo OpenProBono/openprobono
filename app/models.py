@@ -6,7 +6,7 @@ import uuid
 from enum import Enum, unique
 from typing import Optional, List
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.prompts import BOT_PROMPT
 
@@ -32,6 +32,9 @@ class SearchMethodEnum(str, Enum):
     courtroom5 = "courtroom5"
     dynamic_courtroom5 = "dynamic_courtroom5"
     bailii = "bailii"
+    scrape_website = "scrape_website"
+    housing_violations_nyc = "housing_violations_nyc"
+    nyc_geocode = "nyc_geocode"
 
 @unique
 class SummaryMethodEnum(str, Enum):
@@ -509,30 +512,123 @@ class FetchSessions(BaseModel):
         if self.bot_id is None and self.firebase_uid is None:
             raise ValueError("At least one of bot_id or firebase_uid must be provided")
 
-class InputDataset(BaseModel): #build this out
-    """Model for an input dataset."""
+@unique
+class JobStatus(str, Enum):
+    """Enumeration class representing different job statuses."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@unique
+class JobType(str, Enum):
+    """Enumeration class representing different job types."""
+    INPUT_GENERATION = "input_generation"
+    EVALUATION = "evaluation"
+
+class InputDataset(BaseModel):
+    """Model for an input dataset.
+    
+    Attributes
+    ----------
+    id : str
+        The ID of the dataset
+    name : str
+        The name of the dataset
+    description : str
+        Description of the dataset
+    inputs : List[str]
+        The list of inputs in the dataset
+    user : User
+        The user who owns the dataset
+    created_at : datetime.datetime
+        When the dataset was created
+    updated_at : Optional[datetime.datetime]
+        When the dataset was last updated
+    status : JobStatus
+        Status of the dataset
+    is_public : bool
+        Whether the dataset is public
+    shared_with : List[str]
+        List of user IDs to share with
+    generation_prompt : Optional[str] = None
+        Original prompt used to generate inputs if applicable
+    """
+    id: str = Field(default_factory=get_uuid_id)
     name: str
     description: str = ""
     inputs: List[str]
     user: User
+    created_at: datetime.datetime = datetime.datetime.now()
+    updated_at: Optional[datetime.datetime] = None
+    is_public: bool = False
+    shared_with: List[str] = []
+    generation_prompt: Optional[str] = None
+    status: JobStatus = JobStatus.COMPLETED
+    
+    @property
+    def owner(self):
+        """Backwards compatibility with owner field."""
+        return self.user
 
-class EvalSession(BaseModel):
-    """Model for a session in an evaluation dataset."""
+class RunSessionJob(BaseModel):
+    """Model for a session in a 'run'. Contains the input, output, and bot id for a single session."""
+    id: str = Field(default_factory=get_uuid_id)
     input_idx: int
     bot_idx: int
     input_text: str
-    output_text: str
+    output_text: str | None = None
     bot_id: str
-    session_id: str
+    session_id: str | None = None
+    run_id: str
+    user: User
+    status: JobStatus = JobStatus.PENDING
 
-class EvalDataset(BaseModel):
-    """Model for an evaluation dataset."""
+class NewRunFromInputDataset(BaseModel):
+    """Model for defining a new run from an input dataset."""
+    name: str
+    description: str = ""
+    input_dataset_id: str
+    bot_ids: List[str]
+    user: User
+
+class Run(BaseModel):
+    """Model for defining a 'run'. Contains list of inputs, list of bot ids, and list of sessions processed. A run is when you want to run a set of inputs through a set of bots and store the results."""
+    id: str = Field(default_factory=get_uuid_id)
     name: str
     description: str = ""
     inputs: List[str]
+    input_dataset_id: str | None = None
     bot_ids: List[str]
-    sessions: List[EvalSession] = []  # Flattened list of sessions
+    sessions: List[RunSessionJob] = []  # Flattened list of sessions
     user: User
+    created_at: datetime.datetime = datetime.datetime.now()
+    status: JobStatus = JobStatus.PENDING
+    progress: float = 0.0  
+
+class InputGeneratorRequest(BaseModel):
+    """Model class representing an input generator request.
+
+    Attributes
+    ----------
+    prompt : str
+        The prompt to generate inputs from
+    user : User, optional
+        The user making the request, by default None
+    """
+    
+    prompt: str
+    user: Optional[User] = None
+
+
+
+
+
+
+
+
+
+
 
 @unique
 class LabelingType(str, Enum):
@@ -573,7 +669,7 @@ class LabeledEvalDataset(BaseModel):
     name: str
     description: str = ""
     labeling_aspects: List[LabelingAspect]
-    original_dataset_id: str            # Reference to the original EvalDataset
+    original_dataset_id: str            # Reference to the original Run
     inputs: List[str]                   # Copy of inputs from original dataset
     bot_ids: List[str]                  # Copy of bot_ids from original dataset
     sessions: List[LabeledEvalSession] = []  # Labeled sessions
@@ -582,18 +678,3 @@ class LabeledEvalDataset(BaseModel):
     created_at: Optional[datetime.datetime] = datetime.datetime.now()
     updated_at: Optional[datetime.datetime] = None
     user: User
-
-
-class InputGeneratorRequest(BaseModel):
-    """Model class representing an input generator request.
-
-    Attributes
-    ----------
-    prompt : str
-        The prompt to generate inputs from
-    user : User, optional
-        The user making the request, by default None
-    """
-    
-    prompt: str
-    user: Optional[User] = None
