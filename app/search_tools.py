@@ -5,6 +5,7 @@ from contextvars import copy_context
 from threading import Lock
 
 import requests
+from app.directory_navigator import directory_prefix, directory_queryfilter
 from google.genai.types import Tool
 from langfuse.decorators import langfuse_context, observe
 from serpapi.google_search import GoogleSearch
@@ -163,7 +164,9 @@ def dynamic_serpapi_tool(
             _ = future.result()
 
     filter_expr = f"json_contains(metadata['bot_and_tool_id'], '{tool.bot_id + tool.name}')"
-    if tool.jurisdictions:
+    if tool.method == SearchMethodEnum.directory and tool.jurisdictions:
+        filter_expr += f"and ({directory_queryfilter(tool.jurisdictions)})"
+    elif tool.jurisdictions:
         filter_expr += f" and ARRAY_CONTAINS_ANY(metadata['jurisdictions'], {tool.jurisdictions})"
     res = query(search_collection, qr, k=k, expr=filter_expr)
     if "result" in res:
@@ -361,6 +364,17 @@ def build_tool_body(t: SearchTool, engine: EngineEnum) -> dict:
         properties["before-date"] = courtlistener_tool_args["before-date"]
         required.append("advanced_query")
 
+    elif t.method == SearchMethodEnum.directory:
+        properties["product_list"] = {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "description": "The Product Name of a legal tech provider from the database"
+            },
+            "description": "The list of legal tech providers to search across. Provide an empty string to search across all providers."
+        }
+        required.append("product_list")
+
     if engine == EngineEnum.openai:
         return {"type": "function", "function": base_structure}
     return base_structure
@@ -437,6 +451,14 @@ def run_search_tool(tool: SearchTool, function_args: dict) -> dict:
                 after_date=tool_after_date,
                 before_date=tool_before_date,
             )
+        case SearchMethodEnum.directory:
+            product_list = function_args.get("product_list")
+            if product_list:
+                prefix = directory_prefix(product_list)
+                tool.jurisdictions = product_list
+            else:
+                prefix = prf
+            function_response = dynamic_serpapi_tool(qr, prefix, tool)
     return function_response
 
 
@@ -493,7 +515,7 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
     formatted_results = []
 
     if tool_output["message"] != "Success" or "result" not in tool_output:
-        logger.error("Unable to format search tool results: %s", tool.name)
+        logger.error("Unable to format search tool results: %s %s", tool.name, tool_output)
         return formatted_results
 
     for result in tool_output["result"]:
@@ -515,6 +537,7 @@ def format_search_tool_results(tool_output: dict, tool: SearchTool) -> list[dict
             SearchMethodEnum.dynamic_serpapi,
             SearchMethodEnum.dynamic_courtroom5,
             SearchMethodEnum.bailii,
+            SearchMethodEnum.directory,
         ):
             entity_type = "url"
             entity_id = entity["metadata"]["url"]

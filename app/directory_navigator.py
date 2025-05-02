@@ -1,0 +1,62 @@
+product_prefix = {
+    "A2J Tech": "goa2jtech.com",
+    "Angeion": "angeiongroup.com",
+    "Citizen HQ": "mycitizenhq.com",
+    "Citizenshipworks": "citizenshipworks.org/en/home/index",
+    "Citizenshipworks Pro": "citizenshipworks.org/en/for-organizations",
+    "Closing the Gap": "closingthegap.com",
+    "Courtroom5": "courtroom5.com",
+    "Creative Contracts": "creative-contracts.com",
+    "Daisy Debt": "daisydebt.org",
+    "DoNotPay": "donotpay.com",
+    "Euphoria": "euphoria.lgbt",
+    "Filing Fairness": "law.stanford.edu/filing-fairness-project",
+    "Formally": "formally.com/home",
+    "FRSH": "myfrsh.com",
+    "Hello Divorce": "hellodivorce.com",
+    "Honest Jobs": "honestjobs.com",
+    "Justicia Lab": "justicialab.org",
+    "Law Media Labs": "richardgranat.com",
+    "Law Soup": "lawsoup.org",
+    "LawHelp": "lawhelp.org",
+    "Painworth": "painworth.com",
+    "Justice Bolt": "justicebolt.com/law-firms",
+    "PainWorth": "painworth.com",
+    "PairTree": "pairtreefamily.com",
+    "ProBonoNet": "probono.net",
+    "Reyets": "reyets.com",
+    "Shariawiz": "shariawiz.com",
+    "Simple Citizen": "simplecitizen.com",
+    "*Simple Wills Trusts": "simplewillstrusts.com",
+    "SplitSmart": "splitsmart.com",
+    "Stateside Legal": "statesidelegal.org",
+    "OpenProBono": "openprobono.com",
+    "Descrybe.ai": "descrybe.ai",
+    "Trust & Will": "trustandwill.com",
+    "TurnSignl": "turnsignl.com",
+    "Upsolve": "upsolve.org",
+    "QDRO Center": "qdrocenter.org",
+    "Courtroom 5-Personal Practice of Law (PPL)": "courtroom5.com",
+    "ZAF Legal": "zaflegal.com",
+    "Hello Landlord": "sixfifty.com/pro-bono/hello-landlord",
+    "ABA Free Legal Answers": "abafreelegalanswers.org",
+    "Air Help": "airhelp.com/en",
+    "ARAG Legal": "araglegal.com",
+    "Advocord": "advocord.com",
+    "Brightwayz": "brightwayz.org",
+    "kosigner": "kosigner.com",
+    "Redo.io": "redoio.info",
+    "Thurgood": "askthurgood.com",
+    "Consulta Immigration": "consultaimmigration.com",
+    "Clearbox Naturalization": "clearboxlegal.com",
+    "Fastcase": "fastcase.com/team",
+    "FastVisa US": "fastvisa.us"
+}
+
+def directory_prefix(product_list: list[str]) -> str:
+    domains = [product_prefix.get(name) for name in product_list if product_prefix.get(name)]
+    return " OR ".join(f"site:{domain}" for domain in domains)
+
+def directory_queryfilter(product_list: list[str]) -> str:
+    domains = [product_prefix.get(name) for name in product_list if product_prefix.get(name)]
+    return " or ".join(f"metadata['url'] like '%{domain}%'" for domain in domains)
