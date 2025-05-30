@@ -367,7 +367,7 @@ def nyc_geocode_tool(houseNumber: str, street: str, borough: str, tool: SearchTo
         return {"result": [], "message": f"Error: {response.status_code}"}
     
     data = response.json()
-    if "address" in data:
+    if "address" in data and "bbl" in data["address"]:
         return_obj = data["address"]
         return_obj['id'] = data["address"]["bbl"]
         return {"result": [return_obj], "message": "Success"}
