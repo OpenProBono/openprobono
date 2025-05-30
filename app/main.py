@@ -92,11 +92,14 @@ from app.models import (
     GoogleModelEnum,
     HiveModelEnum,
     InputDataset,
+    SearchTool,
+    SearchMethodEnum,
 )
 from app.opinion_search import add_opinion_summary, opinion_search
 from app.queue.client import publish_run_session_job
 from app.user_auth import get_current_user
 from app.vdb_tools import format_vdb_tool_results, run_vdb_tool
+from app.search_tools import format_search_tool_results, run_search_tool, get_housing_violations_tool
 
 langfuse_context.configure(release=get_git_hash())
 logger = setup_logger()
@@ -2029,3 +2032,59 @@ def update_input_dataset(
 #         "dataset_id": dataset_id,
 #         "status": "Input generation job queued"
 #     }
+
+@api.post("/housing_violations", tags=["Housing"])
+def get_housing_violations(
+    bbl: Annotated[
+        str,
+        Body(
+            openapi_examples={
+                "get housing violations": {
+                    "summary": "Get housing violations for a building",
+                    "description": "Returns housing violations for a given Building Block and Lot (BBL) number from NYC Open Data",
+                    "value": {
+                        "bbl": "1000207501"
+                    },
+                },
+            },
+        ),
+    ],
+    user: User = Depends(get_current_user)
+) -> dict:
+    """Get housing violations for a building using BBL (Building Block and Lot) number.
+    
+    Parameters
+    ----------
+    bbl : str
+        The Building Block and Lot (BBL) number for the building
+    user : User
+        The authenticated user
+        
+    Returns
+    -------
+    dict
+        Dictionary containing housing violations data
+    """
+    try:
+        # Create a minimal SearchTool object for the function call
+        tool = SearchTool(
+            name="housing_violations_lookup",
+            method=SearchMethodEnum.housing_violations_nyc,
+            prompt="Get housing violations for NYC buildings"
+        )
+        
+        # Call the housing violations function
+        result = get_housing_violations_tool(bbl, tool)
+        
+        if result["message"] == "Success":
+            return {
+                "message": "Success",
+                "violations": result["result"],
+                "count": len(result["result"])
+            }
+        else:
+            return {"message": "Failure: Unable to retrieve housing violations"}
+            
+    except Exception as e:
+        logger.exception("Error getting housing violations for BBL %s: %s", bbl, e)
+        return {"message": f"Failure: {str(e)}"}
